@@ -69,6 +69,21 @@ func TestAttachSourceGetsCurrentBinding(t *testing.T) {
 	}
 }
 
+// A rebind naming a peer that isn't in the room is a no-op: it must not advance the
+// epoch or bind the slot to a peer that can't receive media/on-air.
+func TestRebindToUnknownPeerIsNoOp(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+
+	if out := s.rebindSlot("cam-1", "ghost"); out != nil {
+		t.Fatalf("rebind to unknown peer should emit nothing, got %+v", out)
+	}
+	if st := s.slots["cam-1"]; st.epoch != 0 || st.occupant != "" {
+		t.Fatalf("rebind to unknown peer must not mutate the slot, got %+v", st)
+	}
+}
+
 func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	s := newRoomState()
 	s.join("src", "obs")

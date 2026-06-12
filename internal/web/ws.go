@@ -48,6 +48,9 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 			defer close(writerDone)
 			for f := range out {
 				if err := wsjson.Write(ctx, c, f); err != nil {
+					// Unblock the reader so it breaks and the room Leave runs;
+					// otherwise the peer stays registered with no drainer.
+					c.CloseNow()
 					return
 				}
 			}

@@ -86,6 +86,9 @@ func (s *roomState) bindingFrame(sid SlotID, st *slotState) Frame {
 // to unknown until a fresh obsSourceActiveChanged arrives (EN-3, so a stale
 // active:true can't mislight the new occupant), and tell the source to renegotiate.
 func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
+	if _, ok := s.peers[occupant]; !ok {
+		return nil // ignore a rebind to an unknown/departed peer (don't advance epoch)
+	}
 	st := s.slot(sid)
 	st.epoch++
 	st.occupant = occupant

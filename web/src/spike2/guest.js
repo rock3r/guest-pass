@@ -33,6 +33,7 @@ room.on("signal", async (f) => {
   let pc = pcs[f.from];
   if (!pc) {
     pc = new RTCPeerConnection();
+    pc._pendingIce = []; // ICE that arrived before the remote description
     pcs[f.from] = pc;
     pc.onicecandidate = (e) => {
       if (e.candidate) room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON() });
@@ -48,11 +49,23 @@ room.on("signal", async (f) => {
       await pc.setLocalDescription(ans);
       room.send({ t: "signal", to: f.from, sdp: pc.localDescription });
     }
+    for (const cand of pc._pendingIce) {
+      try {
+        await pc.addIceCandidate(cand);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    pc._pendingIce = [];
   } else if (f.ice) {
-    try {
-      await pc.addIceCandidate(f.ice);
-    } catch (_) {
-      /* ignore */
+    if (pc.remoteDescription) {
+      try {
+        await pc.addIceCandidate(f.ice);
+      } catch (_) {
+        /* ignore */
+      }
+    } else {
+      pc._pendingIce.push(f.ice); // buffer until the offer is applied
     }
   }
 });
