@@ -65,8 +65,15 @@ func deliver(conns map[PeerID]*peerConn, outs []outbound) {
 
 // Join registers a connection and enters it into the room. An OBS source page
 // (role obs/obs_screen) also subscribes to its slot and is told the current binding.
+//
+// One connection per identity (EN-16): if a peer id is already connected, the prior
+// connection is evicted (its out channel closed) before the new one is installed, so
+// a duplicate id can't leave a stale conn that a later Leave would mis-target.
 func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		if old := conns[id]; old != nil {
+			close(old.out)
+		}
 		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
 		outs := st.join(id, role)
 		if role == "obs" || role == "obs_screen" {
@@ -76,19 +83,20 @@ func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
 	})
 }
 
-// Leave removes a peer and, crucially, CLOSES its out channel from the room
-// goroutine — the only place that sends to it. Closing here (rather than in the
-// transport) means a send can never race a close: all deliveries to this peer are
-// already sequenced before this command on the single room goroutine.
-func (r *Room) Leave(id PeerID) {
+// Leave removes a peer and CLOSES its out channel from the room goroutine — the only
+// place that sends to it, so a send can never race a close. It is identity-checked by
+// the out channel: a stale/evicted connection (a duplicate id that was already
+// replaced) is a no-op, so it never tears down the connection that supplanted it.
+func (r *Room) Leave(id PeerID, out chan<- Frame) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
-		outs := st.leave(id)
 		c := conns[id]
+		if c == nil || c.out != out {
+			return // not the current connection for this id; leave the live one alone
+		}
+		outs := st.leave(id)
 		delete(conns, id)
 		deliver(conns, outs)
-		if c != nil {
-			close(c.out)
-		}
+		close(c.out)
 	})
 }
 

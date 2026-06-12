@@ -15,7 +15,10 @@ export class Room {
       role: opts.role,
       slot: opts.slot || "",
     });
-    this.ws = new WebSocket(`ws://${location.host}/ws?${q}`);
+    // wss when the page is served over HTTPS, else ws (browsers block ws:// from
+    // an https:// page as mixed active content).
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    this.ws = new WebSocket(`${scheme}//${location.host}/ws?${q}`);
     this.ws.onmessage = (e) => {
       const f = JSON.parse(e.data);
       const h = this.handlers[f.t];

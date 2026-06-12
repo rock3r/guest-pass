@@ -78,8 +78,9 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 		}
 
 		// Leave closes out (on the room goroutine), which ends the writer. We must
-		// call it here, not via defer, so <-writerDone doesn't deadlock.
-		room.Leave(pid)
+		// call it here, not via defer, so <-writerDone doesn't deadlock. The out
+		// channel identifies THIS connection so a since-evicted duplicate is a no-op.
+		room.Leave(pid, out)
 		<-writerDone
 	}
 }
