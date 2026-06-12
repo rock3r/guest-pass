@@ -55,8 +55,13 @@ func options() api.BuildOptions {
 		alias[spec] = filepath.Join(root, rel)
 	}
 	return api.BuildOptions{
-		AbsWorkingDir:    root,
-		EntryPoints:      []string{"web/src/islands/app.js", "web/src/obs/obs.js"},
+		AbsWorkingDir: root,
+		EntryPoints: []string{
+			"web/src/islands/app.js",
+			"web/src/obs/obs.js",
+			"web/src/spike2/guest.js",
+			"web/src/spike2/control.js",
+		},
 		Outdir:           "web/dist",
 		Bundle:           true,
 		Format:           api.FormatESModule,
