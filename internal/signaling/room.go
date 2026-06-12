@@ -72,6 +72,12 @@ func deliver(conns map[PeerID]*peerConn, outs []outbound) {
 func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		if old := conns[id]; old != nil {
+			// Tell the evicted client to reconnect (EN-9 transient) before closing
+			// its channel, so a duplicate identity is a clean handover.
+			select {
+			case old.out <- Frame{T: "terminate", Reason: "reconnect"}:
+			default:
+			}
 			close(old.out)
 		}
 		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
