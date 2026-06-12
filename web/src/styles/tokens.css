@@ -1,0 +1,22 @@
+/* Design tokens (subset for SPIKE-1; full set copied verbatim from styles-v2.css
+   in M1b, D-9). The color-mix() below deliberately exercises esbuild's CSS
+   down-level path so the SPIKE-1 manual Safari check has something to validate
+   (esbuild's color-mix() lowering has known Safari bugs, EN-13). */
+:root {
+  --paper: #eef0e6;
+  --ink: #1d2218;
+  --accent: #b8e03a;
+  /* STATIC inputs so esbuild actually computes + down-levels this (it can't lower a
+     color-mix through var()); this is the output the manual Safari check inspects. */
+  --accent-ink: color-mix(in srgb, #b8e03a 70%, #1d2218);
+}
+
+.gp-probe {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}

@@ -3,3 +3,17 @@
 .cal-industries/
 .worktrees/
 .claude/worktrees/
+
+# Go
+/guestpass
+*.test
+*.out
+coverage.*
+
+# Frontend build output — esbuild → go:embed at release (AD-7), never committed
+/web/dist/
+
+# Local SQLite state
+*.db
+*.db-wal
+*.db-shm
