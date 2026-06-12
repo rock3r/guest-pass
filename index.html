@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GuestPass — coming soon</title>
+<meta name="description" content="Guest streaming, minus the drama. Peer-to-peer, open source, and actually free. Launching soon at guest-pass.link." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..800&family=Schibsted+Grotesk:wght@400..900&family=Spline+Sans+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#eef0e6; --surface:#fafbf4; --surface-2:#f0f2e5; --surface-3:#e6e9d7;
+  --ink:#1d2218; --ink-2:#59614c; --ink-3:#8b9279;
+  --line:#d4d9c2; --line-2:#bcc3a6;
+  --accent:#b8e03a; --accent-ink:#161a0e;
+  --accent-press:color-mix(in srgb, var(--accent), var(--ink) 42%);
+  --accent-soft:color-mix(in srgb, var(--accent) 26%, var(--surface));
+  --edge:color-mix(in srgb, var(--ink) 78%, transparent);
+  --pop-yellow:#FFCE3A; --pop-teal:#06D6A0; --pop-blue:#2D9CDB; --pop-pink:#EF476F; --pop-purple:#9B5DE5; --pop-orange:#FF7A45;
+  --good:#2e8b57;
+  --font-display:"Newsreader",Georgia,serif;
+  --font-body:"Schibsted Grotesk",system-ui,sans-serif;
+  --font-mono:"Spline Sans Mono",ui-monospace,monospace;
+  --r-sm:7px; --r-md:10px; --r-lg:14px; --r-xl:20px;
+  --shadow-lg:8px 8px 0 rgba(29,34,24,.14);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:var(--font-body);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden;}
+h1,h2,h3{font-family:var(--font-display);font-weight:600;margin:0;line-height:1.02;letter-spacing:-.02em;}
+a{color:inherit;text-decoration:none;}
+::selection{background:var(--accent);color:var(--accent-ink);}
+
+/* logo mark */
+.logo{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:600;font-size:21px;line-height:1;letter-spacing:-.01em;color:var(--ink);}
+.logo b{color:var(--accent-press);font-weight:600;}
+.logo-mark{position:relative;width:31px;height:24px;background:var(--accent);border:1px solid var(--edge);box-shadow:2px 2px 0 var(--edge);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;}
+.logo-mark::before,.logo-mark::after{content:"";position:absolute;width:8px;height:8px;background:var(--bg);border:1px solid var(--edge);border-radius:99px;top:50%;transform:translateY(-50%);}
+.logo-mark::before{left:-5px;} .logo-mark::after{right:-5px;}
+.logo-mark span{width:0;border-left:2px dashed color-mix(in srgb,var(--accent-ink) 55%,transparent);height:13px;}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font-body);font-weight:700;font-size:15px;padding:13px 20px;border-radius:var(--r-md);border:1.5px solid var(--edge);cursor:pointer;white-space:nowrap;transition:transform .08s ease,box-shadow .08s ease,background .15s;background:var(--surface);color:var(--ink);box-shadow:2px 2px 0 var(--edge);}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--edge);}
+.btn:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--edge);}
+.btn-primary{background:var(--accent);color:var(--accent-ink);}
+.btn-sm{font-size:13.5px;padding:8px 13px;border-radius:var(--r-sm);}
+
+/* nav */
+nav{position:sticky;top:0;z-index:30;backdrop-filter:blur(10px);background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1.5px solid var(--line);}
+.nav-in{max-width:1140px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
+
+/* hero */
+.hero{position:relative;overflow:hidden;padding:72px 0 104px;}
+.hero-in{position:relative;z-index:2;max-width:880px;margin:0 auto;padding:0 28px;text-align:center;}
+.badge{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:7px 14px;border-radius:99px;background:var(--accent-soft);color:var(--accent-press);border:1.5px solid color-mix(in srgb,var(--accent-press) 30%,transparent);}
+.hero h1{font-size:clamp(40px,7vw,76px);margin-top:22px;}
+.flip{display:inline-block;position:relative;}
+.flip-w{display:inline-block;}
+.hero p.sub{font-size:clamp(17px,2.4vw,21px);color:var(--ink-2);max-width:600px;margin:22px auto 0;line-height:1.5;}
+.hero p.sub strong{color:var(--ink);}
+
+/* email form */
+.signup{display:flex;gap:10px;justify-content:center;margin:34px auto 0;max-width:480px;flex-wrap:wrap;}
+.signup input{flex:1;min-width:220px;font-family:var(--font-body);font-size:15.5px;padding:13px 16px;border-radius:var(--r-md);border:1.5px solid var(--edge);background:var(--surface);color:var(--ink);outline:none;box-shadow:2px 2px 0 var(--edge);}
+.signup input::placeholder{color:var(--ink-3);}
+.signup input:focus{border-color:var(--accent-press);}
+.note{font-size:12.5px;color:var(--ink-3);margin-top:14px;line-height:1.6;}
+.note b{color:var(--ink-2);}
+.disclose{font-size:11.5px;}
+.disclose a{color:var(--ink-2);text-decoration:underline;font-weight:600;}
+.disclose a:hover{color:var(--ink);}
+
+/* confirmation dialog */
+.dialog-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,16,10,.5);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:24px;}
+.dialog-backdrop.on{display:flex;animation:fadein .2s ease;}
+.dialog{position:relative;background:var(--surface);border:1.5px solid var(--edge);box-shadow:var(--shadow-lg);border-radius:var(--r-xl);max-width:440px;width:100%;padding:34px 28px 28px;text-align:center;animation:popin .3s cubic-bezier(.2,.8,.3,1);}
+.dialog-x{position:absolute;top:14px;right:16px;background:none;border:none;font-size:17px;color:var(--ink-3);cursor:pointer;line-height:1;}
+.dialog-emoji{font-size:46px;line-height:1;margin-bottom:10px;}
+.dialog h2{font-size:27px;}
+.dialog p{color:var(--ink-2);font-size:15px;line-height:1.5;margin-top:12px;}
+.dialog p strong{color:var(--ink);}
+.dialog-fine{font-size:12px;color:var(--ink-3);}
+.dialog-fine a{color:var(--accent-press);font-weight:700;text-decoration:underline;}
+.dialog .btn{margin-top:22px;}
+@keyframes fadein{from{opacity:0;}to{opacity:1;}}
+
+/* aurora */
+.aurora{position:absolute;inset:-30% -10% auto -10%;height:150%;z-index:0;pointer-events:none;overflow:hidden;}
+.aurora b{position:absolute;display:block;border-radius:50%;filter:blur(60px);opacity:.5;}
+.aurora b:nth-child(1){width:380px;height:380px;left:4%;top:2%;background:var(--pop-teal);}
+.aurora b:nth-child(2){width:440px;height:440px;right:6%;top:-8%;background:var(--pop-yellow);}
+.aurora b:nth-child(3){width:340px;height:340px;left:36%;top:30%;background:var(--pop-pink);opacity:.4;}
+.aurora b:nth-child(4){width:320px;height:320px;right:24%;top:38%;background:var(--pop-purple);opacity:.38;}
+
+/* floating stickers */
+.sticker{position:absolute;z-index:5;font-family:var(--font-body);font-weight:800;font-size:14px;padding:9px 15px;border-radius:99px;border:2px solid var(--edge);box-shadow:3px 3px 0 var(--edge);white-space:nowrap;}
+.s1{top:5%;left:3%;transform:rotate(-9deg);background:var(--pop-yellow);color:var(--ink);}
+.s2{top:13%;right:3%;transform:rotate(8deg);background:var(--pop-pink);color:#fff;}
+.s3{bottom:24px;left:3%;transform:rotate(6deg);background:var(--pop-teal);color:#08372c;}
+.s4{bottom:34px;right:3%;transform:rotate(-7deg);background:var(--pop-purple);color:#fff;}
+@media (max-width:860px){.sticker{display:none;}}
+
+/* marquee */
+.mq{overflow:hidden;border-top:2.5px solid var(--edge);border-bottom:2.5px solid var(--edge);background:var(--ink);}
+.mq-track{display:inline-flex;align-items:center;white-space:nowrap;will-change:transform;}
+.mq-item{display:inline-block;white-space:nowrap;padding:16px 0;font-family:var(--font-display);font-weight:700;font-size:clamp(20px,3vw,30px);color:var(--bg);letter-spacing:-.01em;}
+.mq-item .em{margin:0 .12em;}
+.mq-item .em{color:var(--accent);font-style:italic;}
+.mq-item::after{content:"✦";margin:0 28px;color:var(--accent);font-size:18px;}
+.mq2{background:var(--accent);}
+.mq2 .mq-item{color:var(--accent-ink);}
+.mq2 .mq-item .em{color:var(--accent-press);font-style:normal;font-weight:800;}
+.mq2 .mq-item::after{color:var(--accent-ink);opacity:.5;}
+
+/* teaser pills */
+.teaser{max-width:1000px;margin:0 auto;padding:56px 28px;text-align:center;}
+.teaser h2{font-size:clamp(26px,4vw,38px);}
+.teaser .lead{color:var(--ink-2);font-size:16.5px;margin:12px auto 0;max-width:560px;}
+.pills{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:34px;}
+.pill{display:inline-flex;align-items:center;gap:9px;font-weight:700;font-size:15px;padding:11px 17px;border-radius:99px;background:var(--surface);border:1.5px solid var(--edge);box-shadow:2px 2px 0 var(--edge);transition:transform .18s ease,box-shadow .18s ease;}
+.pill:hover{transform:translateY(-3px);box-shadow:4px 4px 0 var(--edge);}
+.dot{width:11px;height:11px;border-radius:99px;flex:none;}
+
+/* footer */
+footer{border-top:1.5px solid var(--line);background:var(--surface);}
+.foot-in{max-width:1140px;margin:0 auto;padding:28px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;color:var(--ink-3);font-size:13.5px;}
+.foot-in a.fl{font-weight:700;color:var(--ink-2);}
+.foot-in a.fl:hover{color:var(--ink);}
+
+/* confetti */
+.confetti{position:fixed;top:0;width:11px;height:16px;z-index:99;pointer-events:none;border-radius:2px;}
+
+@keyframes popin{from{opacity:0;transform:scale(.96);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion: no-preference){
+  .aurora b{animation:drift 17s ease-in-out infinite;}
+  .aurora b:nth-child(2){animation-duration:21s;animation-direction:reverse;}
+  .aurora b:nth-child(3){animation-duration:24s;}
+  .aurora b:nth-child(4){animation-duration:27s;animation-direction:reverse;}
+  @keyframes drift{0%,100%{transform:translate(0,0) scale(1);}33%{transform:translate(38px,-28px) scale(1.12);}66%{transform:translate(-24px,20px) scale(.92);}}
+  .flip-w{animation:flipup .5s cubic-bezier(.2,.85,.25,1) both;}
+  @keyframes flipup{from{opacity:0;transform:translateY(.55em) rotate(5deg);}to{opacity:1;transform:none;}}
+  .sticker{animation:floaty 6s ease-in-out infinite;}
+  .s2,.s4{animation-duration:7s;animation-delay:-2s;}
+  @keyframes floaty{0%,100%{translate:0 0;}50%{translate:0 -10px;}}
+  .mq-track{animation:mq 30s linear infinite;}
+  .mq2 .mq-track{animation-duration:26s;animation-direction:reverse;}
+  @keyframes mq{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-in">
+    <span class="logo"><span class="logo-mark"><span></span></span>Guest<b>Pass</b></span>
+    <a class="btn btn-sm" href="https://github.com/rock3r/guest-pass" target="_blank" rel="noopener" aria-label="Star on GitHub">★ Star the repo</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="aurora" aria-hidden="true"><b></b><b></b><b></b><b></b></div>
+  <span class="sticker s1" aria-hidden="true">$0 forever 🤑</span>
+  <span class="sticker s2" aria-hidden="true">no Series A</span>
+  <span class="sticker s3" aria-hidden="true">open-source, baby</span>
+  <span class="sticker s4" aria-hidden="true">P2P or bust</span>
+  <div class="hero-in">
+    <span class="badge">🚧 Coming soon · AGPL · P2P WebRTC</span>
+    <h1>Guest streaming,<br>minus the <span class="flip"><span class="flip-w" id="flip">drama.</span></span></h1>
+    <p class="sub">GuestPass brings guests into your live stream as real OBS browser sources. Peer-to-peer, open source, and <strong>actually free</strong> — no app, no account, no nonsense. Landing soon at <strong>guest-pass.link</strong>.</p>
+
+    <!-- Collection via Buttondown (free, privacy-friendly, double opt-in). -->
+    <form class="signup" id="form" action="https://buttondown.com/api/emails/embed-subscribe/seeb" method="post">
+      <input type="email" id="email" name="email" placeholder="you@yourchannel.tv" autocomplete="email" required />
+      <button class="btn btn-primary" type="submit">Get the launch ping →</button>
+    </form>
+    <p class="note">No spam, obviously. One email when it's live, then we leave you alone. <b>We literally can't sell your data — it's the whole point.</b><br>
+      <span class="disclose">Signups are handled by <a href="https://buttondown.com" target="_blank" rel="noopener">Buttondown</a> (a third-party email service) · <a href="https://buttondown.com/legal/privacy" target="_blank" rel="noopener">their privacy policy</a></span>
+    </p>
+  </div>
+</header>
+
+<!-- MARQUEE 1: competitor "what ifs" -->
+<div class="mq" aria-label="What GuestPass is like">
+  <div class="mq-track" id="mq1"></div>
+</div>
+
+<!-- TEASER -->
+<section class="teaser">
+  <h2>What's in the box</h2>
+  <p class="lead">Everything the paid tools gate, none of the lock-in. Here's the short version while we finish the long one.</p>
+  <div class="pills">
+    <span class="pill"><span class="dot" style="background:var(--pop-pink)"></span> Zero-signup guests</span>
+    <span class="pill"><span class="dot" style="background:var(--pop-blue)"></span> Real OBS browser sources</span>
+    <span class="pill"><span class="dot" style="background:var(--pop-teal)"></span> P2P — we can't see your stream</span>
+    <span class="pill"><span class="dot" style="background:var(--pop-purple)"></span> Self-host in one command</span>
+    <span class="pill"><span class="dot" style="background:var(--pop-orange)"></span> AGPL — read every line</span>
+    <span class="pill"><span class="dot" style="background:var(--pop-yellow)"></span> $0, no "pro" wall</span>
+  </div>
+</section>
+
+<!-- MARQUEE 2: cheeky one-liners -->
+<div class="mq mq2" aria-label="GuestPass values">
+  <div class="mq-track" id="mq2"></div>
+</div>
+
+<footer>
+  <div class="foot-in">
+    <span class="logo" style="font-size:18px;"><span class="logo-mark" style="width:27px;height:21px;"><span></span></span>Guest<b>Pass</b></span>
+    <span>Built in the open · AGPL-3.0 · guest-pass.link</span>
+    <span><a class="fl" href="https://github.com/rock3r/guest-pass" target="_blank" rel="noopener">★ GitHub</a> · <a class="fl" href="https://github.com/rock3r/guest-pass" target="_blank" rel="noopener">Source (AGPL)</a> · <a class="fl" href="https://vdo.ninja" target="_blank" rel="noopener">The inspiration, without the frustration</a></span>
+  </div>
+</footer>
+
+<!-- confirmation dialog -->
+<div class="dialog-backdrop" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dtitle">
+  <div class="dialog">
+    <button class="dialog-x" id="dialogClose" aria-label="Close">✕</button>
+    <div class="dialog-emoji">🎉</div>
+    <h2 id="dtitle">You're almost on the list!</h2>
+    <p>Check your inbox and click the <strong>confirm</strong> link — we use double opt-in, so it's really you. Then it's silence until we launch.</p>
+    <p class="dialog-fine">Signups are managed by <a href="https://buttondown.com" target="_blank" rel="noopener">Buttondown</a>, a third-party email service. See <a href="https://buttondown.com/legal/privacy" target="_blank" rel="noopener">their privacy policy</a> for how your email is handled.</p>
+    <button class="btn btn-primary" id="dialogOk">Got it</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  // kinetic flip word
+  var words = ["drama.","invoices.","watermarks.","waitlists.","nonsense.","logins."];
+  var colors = ["var(--pop-pink)","var(--pop-blue)","var(--pop-purple)","var(--pop-orange)","var(--pop-teal)","var(--accent-press)"];
+  var i = 0, flip = document.getElementById("flip");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(!reduce){
+    setInterval(function(){
+      i = (i+1) % words.length;
+      var n = document.createElement("span");
+      n.className = "flip-w"; n.textContent = words[i]; n.style.color = colors[i];
+      flip.replaceWith(n); flip = n;
+    }, 2100);
+  }
+
+  // marquees
+  var compare = [
+    'what if <span class="em">ping.gg</span> but no drama and no absurd pricing',
+    'what if <span class="em">StreamYard</span> but your face never touches our servers',
+    'what if <span class="em">Restream</span> but the free tier isn’t a teaser',
+    'what if <span class="em">VDO.Ninja</span> but the UI likes you back',
+    'what if <span class="em">Twitch Guest Star</span> but it works anywhere you stream',
+    'what if a guest tool but you can actually read the source',
+    'what if “request early access” but just… here it is'
+  ];
+  var values = [
+    'ACTUALLY FREE', 'NO WATERMARK', 'YOUR MEDIA, NOT OURS', 'OPEN SOURCE · AGPL',
+    'ZERO SIGNUP FOR GUESTS', 'SELF-HOST IN ONE COMMAND', 'NO “PRO” WALL',
+    'DON’T WASTE MONEY ON OVERPRICED CRAP'
+  ];
+  function fill(el, items, cls){
+    var row = items.concat(items).map(function(t){ return '<span class="mq-item">'+t+'</span>'; }).join("");
+    el.innerHTML = row;
+  }
+  fill(document.getElementById("mq1"), compare);
+  fill(document.getElementById("mq2"), values);
+
+  // email submit -> POST to Buttondown (it handles storage + double opt-in) -> confirmation dialog.
+  // mode:no-cors means the response is opaque (we can't read it), so we optimistically confirm;
+  // Buttondown emails the user a confirm link, which is the real source of truth.
+  var form = document.getElementById("form"), dialog = document.getElementById("dialog");
+  function openDialog(){ dialog.classList.add("on"); confetti(); }
+  function closeDialog(){ dialog.classList.remove("on"); }
+  form.addEventListener("submit", function(e){
+    e.preventDefault();
+    var email = document.getElementById("email");
+    if(!email.value || !/.+@.+\..+/.test(email.value)){ email.focus(); return; }
+    try { fetch(form.action, { method:"POST", mode:"no-cors", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:"email="+encodeURIComponent(email.value) }); } catch(err){}
+    form.reset();
+    openDialog();
+  });
+  document.getElementById("dialogClose").addEventListener("click", closeDialog);
+  document.getElementById("dialogOk").addEventListener("click", closeDialog);
+  dialog.addEventListener("click", function(e){ if(e.target===dialog) closeDialog(); });
+  document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeDialog(); });
+
+  function confetti(){
+    if(reduce) return;
+    var pops = ["#FFCE3A","#06D6A0","#2D9CDB","#EF476F","#9B5DE5","#FF7A45","#b8e03a"];
+    for(var k=0;k<46;k++){
+      (function(){
+        var d = document.createElement("div");
+        d.className = "confetti";
+        d.style.background = pops[k % pops.length];
+        d.style.left = (10 + Math.random()*80) + "vw";
+        var dur = 1400 + Math.random()*1400;
+        var rot = (Math.random()*720-360);
+        var drift = (Math.random()*200-100);
+        document.body.appendChild(d);
+        d.animate([
+          { transform:"translate(0,-10vh) rotate(0deg)", opacity:1 },
+          { transform:"translate("+drift+"px, 110vh) rotate("+rot+"deg)", opacity:.9 }
+        ], { duration:dur, easing:"cubic-bezier(.3,.6,.4,1)" }).onfinish = function(){ d.remove(); };
+      })();
+    }
+  }
+})();
+</script>
+</body>
+</html>
