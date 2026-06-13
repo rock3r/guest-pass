@@ -19,6 +19,8 @@ type pageData struct {
 	StyleIntegrity string
 	DevLogin       bool
 	Nonce          string
+	StreamTitle    string // pass landing page only
+	GuestName      string // pass landing page only
 }
 
 // renderer holds the parsed page templates and the per-build constants injected into
@@ -32,7 +34,7 @@ type renderer struct {
 
 // pageFiles are the server-rendered pages; each defines a "content" template composed
 // into base.html.
-var pageFiles = []string{"landing.html", "signin.html"}
+var pageFiles = []string{"landing.html", "signin.html", "pass.html"}
 
 // newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
 // styleIntegrity is the SRI hash for the app CSS bundle (empty when no build manifest
@@ -50,20 +52,18 @@ func newRenderer(sourceURL, styleIntegrity string, devLogin bool) (*renderer, er
 }
 
 // render executes a page into a buffer first, so a template error never writes a partial
-// response, then flushes it as HTML.
-func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page, title string) {
+// response, then flushes it as HTML. The per-build fields (source link, SRI, dev flag,
+// nonce) are filled here; callers supply page-specific fields in data.
+func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page string, data pageData) {
 	t, ok := rd.pages[page]
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	data := pageData{
-		Title:          title,
-		SourceURL:      rd.sourceURL,
-		StyleIntegrity: rd.styleIntegrity,
-		DevLogin:       rd.devLogin,
-		Nonce:          NonceFromContext(r.Context()),
-	}
+	data.SourceURL = rd.sourceURL
+	data.StyleIntegrity = rd.styleIntegrity
+	data.DevLogin = rd.devLogin
+	data.Nonce = NonceFromContext(r.Context())
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)
@@ -74,11 +74,18 @@ func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page, title s
 }
 
 func (rd *renderer) landing(w http.ResponseWriter, r *http.Request) {
-	rd.render(w, r, "landing.html", "Guest management for live streams")
+	rd.render(w, r, "landing.html", pageData{Title: "Guest management for live streams"})
 }
 
 func (rd *renderer) signin(w http.ResponseWriter, r *http.Request) {
-	rd.render(w, r, "signin.html", "Host sign-in")
+	rd.render(w, r, "signin.html", pageData{Title: "Host sign-in"})
+}
+
+// passLandingPage renders the guest's magic-link landing (side-effect-free, EN-10): it
+// shows who invited them and to which stream, with an entry action that marks the pass
+// opened only on an explicit client action (the device-check, in M2).
+func (rd *renderer) passLandingPage(w http.ResponseWriter, r *http.Request, streamTitle, guestName string) {
+	rd.render(w, r, "pass.html", pageData{Title: "Your guest pass", StreamTitle: streamTitle, GuestName: guestName})
 }
 
 // healthz is the readiness endpoint (RF-21). It is registered only after migrations have

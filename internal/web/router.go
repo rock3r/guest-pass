@@ -7,7 +7,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/signaling"
+	"github.com/rock3r/guest-pass/internal/store"
+	"github.com/rock3r/guest-pass/internal/token"
 )
 
 // RouterConfig wires the HTTP surface. Auth-dependent routes are registered only when
@@ -24,6 +27,13 @@ type RouterConfig struct {
 	StaticDir   string              // built frontend assets (web/dist), served at /static
 	RateLimiter *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
 	WSInflight  *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
+
+	// Host API + guest magic-link page. All four must be set together to enable the
+	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
+	Store   *store.Store  // persistence for streams/passes
+	Hasher  *token.Hasher // magic-link token hashing (EN-5)
+	Mailer  mail.Mailer   // invite delivery (LogMailer in MAIL_MODE=log)
+	BaseURL string        // absolute origin used to build magic links
 }
 
 // NewRouter builds the GuestPass HTTP handler: strict security headers globally, the
@@ -69,6 +79,31 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			ar.Get("/auth/dev", cfg.DevLogin)
 		}
 	})
+
+	// Host JSON API + guest magic-link page. Registered only when persistence and the
+	// authenticator are wired; this keeps the minimal test/landing config intact.
+	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
+		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd}
+
+		r.Group(func(hr chi.Router) {
+			hr.Use(cfg.Auth.RequireHost)
+			hr.Get("/api/streams", api.listStreams)
+			hr.Post("/api/streams", api.createStream)
+			hr.Get("/api/streams/{id}", api.getStream)
+			hr.Delete("/api/streams/{id}", api.deleteStream)
+			hr.Get("/api/streams/{id}/passes", api.listPasses)
+			hr.Post("/api/streams/{id}/passes", api.createPass)
+		})
+
+		// Public guest landing. Rate-limited (when configured) to blunt token scanning;
+		// the handler is side-effect-free (EN-10).
+		r.Group(func(pr chi.Router) {
+			if cfg.RateLimiter != nil {
+				pr.Use(cfg.RateLimiter.Middleware(ClientIP))
+			}
+			pr.Get("/p/{token}", api.passLanding)
+		})
+	}
 
 	return r, nil
 }

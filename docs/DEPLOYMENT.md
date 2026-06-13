@@ -93,7 +93,9 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | Paired with the client id; supply out-of-band (see checklist §12). |
 | `JWT_SECRET` | ✅ | **✅ (EN-14)** | HS256 host-session cookies; the current signing key. Part of a **`kid` + two-key ring** so rotation isn't a global logout (EN-6). Refuses placeholder/empty/short. |
 | `JWT_SECRET_PREVIOUS` | optional | **✅ when set** | The retired, **verify-only** second key during a `JWT_SECRET` rotation: set it to the old secret so sessions signed with it keep verifying until they expire, then remove it. Empty in steady state. When set it must be a real (non-placeholder, ≥32-char) secret. |
+| `TOKEN_SECRET` | ✅ | **✅ (EN-14)** | **Stable** HMAC key for hashing magic-link / slot / host source tokens (EN-5): only `HMAC(TOKEN_SECRET, token)` is stored, never the raw token. Kept **separate from `JWT_SECRET`** — `JWT_SECRET` rotates via the `kid` ring, but rotating the token key would orphan every stored token hash (turn off all outstanding magic links), so this one does not rotate. Refuses placeholder/empty/short. |
 | `RESEND_API_KEY` | ✅ unless `MAIL_MODE=log` | — | Invite delivery over the Resend HTTP API (D-2). |
+| `MAIL_FROM` | ✅ unless `MAIL_MODE=log` | — | `From` address for invite emails, e.g. `GuestPass <invites@guest-pass.link>`. Must be a Resend-verified sender. Unused (and not required) when `MAIL_MODE=log`. |
 | `MAIL_MODE` | — | — | `log` prints magic links to stdout (dev / airgapped self-host); production uses Resend. Default is the Resend path. |
 | `ADMIN_EMAIL` | ✅ | — | The first sign-in matching this email is auto-approved as owner/admin (`is_admin`, D-14). |
 | `SIGNUP_MODE` | ✅ | — | `open` \| `approval` \| `allowlist` (see §4). Public instance = `open`. |
@@ -444,13 +446,17 @@ be committed to this repo.
 ### 12.3 Generate strong secrets
 
 1. Generate a strong random **`JWT_SECRET`** (e.g. `openssl rand -base64 48`).
-2. If enabling TURN, generate a strong random **`TURN_SECRET`** (coturn reads it
+2. Generate a strong random **`TOKEN_SECRET`** (the stable magic-link/slot/host
+   token-hashing key, EN-5). Unlike `JWT_SECRET`, **do not rotate it** — rotating
+   would orphan every stored token hash and turn off all outstanding magic links.
+3. If enabling TURN, generate a strong random **`TURN_SECRET`** (coturn reads it
    for ephemeral-HMAC credential validation).
-3. **Fail-closed reminder (EN-14):** the binary **refuses to start** if either
-   is empty, equals a shipped placeholder, or is **shorter than 32 characters**.
+4. **Fail-closed reminder (EN-14):** the binary **refuses to start** if any of
+   `JWT_SECRET` / `TOKEN_SECRET` / (when TURN is on) `TURN_SECRET` is empty,
+   equals a shipped placeholder, or is **shorter than 32 characters**.
    `openssl rand -base64 48` (64 chars) clears this comfortably; set real values
-   before first boot. Both support rotation — `JWT_SECRET` via the `kid` two-key
-   ring (EN-6, not a global logout).
+   before first boot. `JWT_SECRET` supports rotation via the `kid` two-key
+   ring (EN-6, not a global logout); `TOKEN_SECRET` is intentionally fixed.
 
 ### 12.4 GitHub repo + CI secrets
 

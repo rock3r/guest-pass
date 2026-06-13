@@ -16,9 +16,11 @@ func validEnv() map[string]string {
 		"GOOGLE_CLIENT_ID":     "client-id.apps.googleusercontent.com",
 		"GOOGLE_CLIENT_SECRET": "google-client-secret-placeholder-value-XYZ",
 		"JWT_SECRET":           "Zr8kQv2xN7pL4wT9aB6cD3eF1gH5jK0mPqRsTuVwXyZ", // not a placeholder
+		"TOKEN_SECRET":         "Tk9sErV2nQ7wL4yA8dF3gH6jK0mPqRsZxBmNcVbQp1",  // not a placeholder
 		"ADMIN_EMAIL":          "admin@example.com",
 		"SIGNUP_MODE":          "open",
 		"RESEND_API_KEY":       "re_resend_api_key_placeholder_value",
+		"MAIL_FROM":            "GuestPass <invites@guest-pass.link>",
 	}
 }
 
@@ -195,6 +197,51 @@ func TestLoad_InvalidEnumsRejected(t *testing.T) {
 				t.Fatalf("SIGNUP_MODE=%s should load, got %v", mode, err)
 			}
 		})
+	}
+}
+
+func TestLoad_TokenSecretFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		secret string
+		wantOK bool
+	}{
+		{"missing", "", false},
+		{"placeholder", "changeme", false},
+		{"short", "tooshort", false},
+		{"real", "Tk9sErV2nQ7wL4yA8dF3gH6jK0mPqRsZxBmNcVbQp1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := validEnv()
+			if tc.secret == "" {
+				delete(env, "TOKEN_SECRET")
+			} else {
+				env["TOKEN_SECRET"] = tc.secret
+			}
+			_, err := envLoad(env)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("expected clean load, got %v", err)
+				}
+			} else if !errors.Is(err, ErrSecretFailClosed) {
+				t.Fatalf("expected ErrSecretFailClosed, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_MailFromRequiredUnlessLogMode(t *testing.T) {
+	// Production (no MAIL_MODE) requires MAIL_FROM.
+	env := validEnv()
+	delete(env, "MAIL_FROM")
+	if _, err := envLoad(env); !errors.Is(err, ErrMissingRequired) {
+		t.Fatalf("missing MAIL_FROM in production = %v, want ErrMissingRequired", err)
+	}
+	// MAIL_MODE=log needs neither MAIL_FROM nor RESEND_API_KEY.
+	env["MAIL_MODE"] = "log"
+	delete(env, "RESEND_API_KEY")
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("MAIL_MODE=log should not require MAIL_FROM/RESEND_API_KEY, got %v", err)
 	}
 }
 

@@ -80,6 +80,27 @@ func (s *Store) GetPassByTokenHash(ctx context.Context, tokenHash string) (*Pass
 	return scanPass(s.reader.QueryRowContext(ctx, passSelect+" WHERE token_hash = ?", tokenHash))
 }
 
+// ListPassesByStream returns a stream's passes, newest first (by id as a stable tiebreak).
+func (s *Store) ListPassesByStream(ctx context.Context, streamID string) ([]*Pass, error) {
+	rows, err := s.reader.QueryContext(ctx, passSelect+" WHERE stream_id = ? ORDER BY id", streamID)
+	if err != nil {
+		return nil, fmt.Errorf("listing passes: %w", err)
+	}
+	defer rows.Close()
+	var out []*Pass
+	for rows.Next() {
+		p, err := scanPassRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating passes: %w", err)
+	}
+	return out, nil
+}
+
 // AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host
 // invariant: the slot must belong to the pass's stream's host. The DB additionally
 // enforces at-most-one active occupant per (stream, slot) via a partial unique index.
@@ -151,17 +172,32 @@ func (s *Store) DeletePass(ctx context.Context, id string) error {
 const passSelect = `SELECT id, stream_id, slot_id, name, email, role, token_hash, can_screen,
 	status, sent_at, expires_at, opened_at, accepted_at, revoked_at FROM passes`
 
-func scanPass(row *sql.Row) (*Pass, error) {
+func scanPassFrom(sc streamScanner) (*Pass, error) {
 	var p Pass
 	var canScreen int64
-	err := row.Scan(&p.ID, &p.StreamID, &p.SlotID, &p.Name, &p.Email, &p.Role, &p.TokenHash, &canScreen,
-		&p.Status, &p.SentAt, &p.ExpiresAt, &p.OpenedAt, &p.AcceptedAt, &p.RevokedAt)
+	if err := sc.Scan(&p.ID, &p.StreamID, &p.SlotID, &p.Name, &p.Email, &p.Role, &p.TokenHash, &canScreen,
+		&p.Status, &p.SentAt, &p.ExpiresAt, &p.OpenedAt, &p.AcceptedAt, &p.RevokedAt); err != nil {
+		return nil, err
+	}
+	p.CanScreen = canScreen != 0
+	return &p, nil
+}
+
+func scanPassRows(rows *sql.Rows) (*Pass, error) {
+	p, err := scanPassFrom(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scanning pass: %w", err)
+	}
+	return p, nil
+}
+
+func scanPass(row *sql.Row) (*Pass, error) {
+	p, err := scanPassFrom(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scanning pass: %w", err)
 	}
-	p.CanScreen = canScreen != 0
-	return &p, nil
+	return p, nil
 }
