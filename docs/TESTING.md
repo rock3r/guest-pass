@@ -294,6 +294,12 @@ no `node`, no `package.json`, no registry access at build time (LOCKED).
 | Vulnerability scan (§7.5 security gate) | `govulncheck ./...` | known CVEs in deps |
 | Formatting | `gofmt -l .` | **any** diff (non-empty output ⇒ fail) |
 | Frontend build | `go run ./cmd/build` | esbuild build failure |
+| Dev-build tag | `go vet -tags dev ./...` + `go test -tags dev ./...` | the dev-auth seam (`AUTH_MODE=dev`, AD-8 / RF-4) failing to build, or its dev-only invariant tests (e.g. loopback-`BASE_URL`) failing |
+
+The `dev` build-tag lane compiles and tests the `AUTH_MODE=dev` seam, whose code —
+and whose dev-only tests (loopback-`BASE_URL` enforcement) — exist **only** under
+`-tags dev`. Release binaries never include the tag, so the seam is absent from
+production builds (CONVENTIONS §1.5); the lane keeps that path from rotting.
 
 The esbuild build runs esbuild **as a Go library** (`github.com/evanw/esbuild/pkg/api`)
 with the vendored-Preact alias map and the two pinned entries (app + OBS), so the
