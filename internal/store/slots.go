@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // CreateSlotParams are the fields a caller supplies to create a slot; the repo
@@ -50,6 +51,21 @@ func (s *Store) GetSlot(ctx context.Context, id string) (*Slot, error) {
 // OBS source-page WS handshake (/ws?src=) performs (EN-5/EN-15).
 func (s *Store) GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) (*Slot, error) {
 	return scanSlot(s.reader.QueryRowContext(ctx, slotSelect+" WHERE source_token_hash = ?", tokenHash))
+}
+
+// RecordSlotTokenUse stamps a slot's source-token leak-detection metadata
+// (source_token_last_used_at = now, source_token_last_source_ip = sourceIP). The
+// /ws?src= source-page handshake calls this after resolving a slot via
+// GetSlotBySourceTokenHash, so a host can spot an unexpected live subscription
+// (AD-23 / EN-5). The lookup stays a read (reader pool); this is the paired write.
+func (s *Store) RecordSlotTokenUse(ctx context.Context, slotID, sourceIP string) error {
+	res, err := s.writer.ExecContext(ctx,
+		"UPDATE slots SET source_token_last_used_at = ?, source_token_last_source_ip = ? WHERE id = ?",
+		time.Now().Unix(), sourceIP, slotID)
+	if err != nil {
+		return fmt.Errorf("recording slot token use: %w", err)
+	}
+	return errIfNoRows(res)
 }
 
 // ListSlotsByHost returns a host's slot pool ordered by kind then idx.

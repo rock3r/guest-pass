@@ -183,6 +183,55 @@ func TestPassRepo_AssignSlotSameHostInvariant(t *testing.T) {
 	}
 }
 
+func TestPassRepo_AssignSlotRejectsNonCam(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-noncam")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	pass, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "p-noncam"})
+
+	screen, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotScreenshare, SourceTokenHash: "src-screen"})
+	hostSlot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotHost, SourceTokenHash: "src-host"})
+
+	// Passes (guest occupants) bind only to cam slots (D-20); host/screenshare are refused.
+	if err := st.AssignPassSlot(ctx, pass.ID, screen.ID); !errors.Is(err, ErrSlotNotCam) {
+		t.Fatalf("assign screenshare slot = %v, want ErrSlotNotCam", err)
+	}
+	if err := st.AssignPassSlot(ctx, pass.ID, hostSlot.ID); !errors.Is(err, ErrSlotNotCam) {
+		t.Fatalf("assign host slot = %v, want ErrSlotNotCam", err)
+	}
+	// The pass remains unbound.
+	reload, _ := st.GetPass(ctx, pass.ID)
+	if reload.SlotID != nil {
+		t.Errorf("pass should be unbound after refused assigns, got %v", reload.SlotID)
+	}
+}
+
+func TestSlotRepo_RecordTokenUse(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-tokuse")
+	sl, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "src-use"})
+	if sl.SourceTokenLastUsedAt != nil || sl.SourceTokenLastSourceIP != nil {
+		t.Fatalf("new slot should have nil last-used metadata: %+v", sl)
+	}
+
+	if err := st.RecordSlotTokenUse(ctx, sl.ID, "203.0.113.7"); err != nil {
+		t.Fatalf("RecordSlotTokenUse: %v", err)
+	}
+	got, _ := st.GetSlot(ctx, sl.ID)
+	if got.SourceTokenLastUsedAt == nil || *got.SourceTokenLastUsedAt == 0 {
+		t.Errorf("last_used_at not recorded: %v", got.SourceTokenLastUsedAt)
+	}
+	if got.SourceTokenLastSourceIP == nil || *got.SourceTokenLastSourceIP != "203.0.113.7" {
+		t.Errorf("last_source_ip = %v, want 203.0.113.7", got.SourceTokenLastSourceIP)
+	}
+
+	if err := st.RecordSlotTokenUse(ctx, "missing", "1.2.3.4"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RecordSlotTokenUse(missing) = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPassRepo_OneActiveOccupantPerSlot(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

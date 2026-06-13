@@ -13,6 +13,12 @@ import (
 // enforces it in the app layer (RF-2 / CONVENTIONS §2.5).
 var ErrSlotHostMismatch = errors.New("store: slot does not belong to the stream's host")
 
+// ErrSlotNotCam means a pass was assigned a non-cam slot. Pass occupants bind only to
+// cam slots (D-20); host slots (D-18) and the shared screenshare slot (D-21) are not
+// pass-bound, so binding one would falsely show a guest occupying that source and
+// wrongly consume the active-occupant unique index.
+var ErrSlotNotCam = errors.New("store: passes can only be assigned to cam slots")
+
 // CreatePassParams are the fields a caller supplies to create a pass; the repo
 // generates the id. The token hash is HMAC(secret, token) computed by the caller (EN-5).
 // Slot binding is assigned separately via AssignPassSlot (D-20).
@@ -92,6 +98,9 @@ func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error
 	}
 	if slot.HostID != stream.HostID {
 		return ErrSlotHostMismatch
+	}
+	if slot.Kind != SlotCam {
+		return ErrSlotNotCam
 	}
 	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET slot_id = ? WHERE id = ?", slotID, passID)
 	if err != nil {
