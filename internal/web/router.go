@@ -17,16 +17,17 @@ import (
 // their dependency is present, so a minimal config (e.g. in tests) still serves the
 // landing, sign-in, health, static, and WS routes.
 type RouterConfig struct {
-	SourceURL   string              // AGPL §13 link to the running build's source (EN-17)
-	Hub         *signaling.Hub      // signaling hub for /ws
-	OAuth       *auth.GoogleOAuth   // Google sign-in; nil disables /auth/google*
-	Auth        *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout
-	DevLogin    http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
-	TURNHost    string              // CSP connect-src TURN host; empty = STUN-only
-	Secure      bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
-	StaticDir   string              // built frontend assets (web/dist), served at /static
-	RateLimiter *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
-	WSInflight  *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
+	SourceURL   string                // AGPL §13 link to the running build's source (EN-17)
+	Hub         *signaling.Hub        // signaling hub for /ws
+	OAuth       *auth.GoogleOAuth     // Google sign-in; nil disables /auth/google*
+	Auth        *auth.Authenticator   // session lifecycle (logout); nil disables /auth/logout
+	DevLogin    http.HandlerFunc      // dev sign-in handler; nil (release) disables /auth/dev
+	TURNHost    string                // CSP connect-src TURN host; empty = STUN-only
+	Secure      bool                  // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
+	StaticDir   string                // built frontend assets (web/dist), served at /static
+	RateLimiter *RateLimiter          // per-IP limiter applied to /auth routes; nil disables
+	WSInflight  *sync.WaitGroup       // tracks live /ws handlers so a drain can wait for terminate flush
+	ICEServers  []signaling.ICEServer // ICE config sent in the {t:"ice"} join-ack (AD-14); empty = no STUN
 
 	// Host API + guest magic-link page. All four must be set together to enable the
 	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
@@ -54,7 +55,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/healthz", healthz)
 
 	if cfg.Hub != nil {
-		r.Get("/ws", ServeWS(cfg.Hub, cfg.WSInflight))
+		r.Get("/ws", ServeWS(cfg.Hub, cfg.WSInflight, cfg.ICEServers))
 	}
 	if cfg.StaticDir != "" {
 		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(cfg.StaticDir))))

@@ -23,6 +23,18 @@ type Frame struct {
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
 	Peers          []RosterEntry   `json:"peers,omitempty"`
+	ICEServers     []ICEServer     `json:"iceServers,omitempty"`
+}
+
+// ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the
+// {t:"ice"} join-ack (AD-14). URLs holds stun:/turn(s): URLs; Username/Credential are set
+// only for a TURN entry. STUN is always offered (D-38); the TURN entry and its ephemeral
+// HMAC credential (EN-4) are added when a relay is configured (M2). The shape matches the
+// browser RTCIceServer dictionary so the client can pass it straight to RTCPeerConnection.
+type ICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
 }
 
 // RosterEntry is a peer's projection in a roster frame (minimal for SPIKE-2; the

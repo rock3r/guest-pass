@@ -174,6 +174,45 @@ func TestLoad_ResendKeyNotRequiredInLogMode(t *testing.T) {
 	}
 }
 
+func TestLoad_STUNURLOptionalAndLoaded(t *testing.T) {
+	// Unset: STUN-only is the default posture (D-38) but a STUN server is optional —
+	// dev/loopback runs without one. Load must succeed with an empty STUNURL.
+	if cfg, err := envLoad(validEnv()); err != nil {
+		t.Fatalf("no STUN_URL should load fine, got %v", err)
+	} else if cfg.STUNURL != "" {
+		t.Errorf("STUNURL = %q, want empty", cfg.STUNURL)
+	}
+
+	env := validEnv()
+	env["STUN_URL"] = "stun:stun.guest-pass.link:3478"
+	cfg, err := envLoad(env)
+	if err != nil {
+		t.Fatalf("valid STUN_URL should load, got %v", err)
+	}
+	if cfg.STUNURL != "stun:stun.guest-pass.link:3478" {
+		t.Errorf("STUNURL = %q, want stun:stun.guest-pass.link:3478", cfg.STUNURL)
+	}
+}
+
+func TestLoad_STUNURLBadSchemeRejected(t *testing.T) {
+	// A STUN_URL must use the stun:/stuns: scheme; a wrong scheme would silently produce
+	// a broken ICE config, so it fails closed at startup instead.
+	for _, bad := range []string{"http://stun.example.org", "stun.example.org:3478", "turn:relay.example.org"} {
+		env := validEnv()
+		env["STUN_URL"] = bad
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("STUN_URL=%q: expected ErrInvalidValue, got %v", bad, err)
+		}
+	}
+	for _, ok := range []string{"stun:stun.example.org:3478", "stuns:stun.example.org:5349"} {
+		env := validEnv()
+		env["STUN_URL"] = ok
+		if _, err := envLoad(env); err != nil {
+			t.Errorf("STUN_URL=%q should be accepted, got %v", ok, err)
+		}
+	}
+}
+
 func TestLoad_InvalidEnumsRejected(t *testing.T) {
 	t.Run("bad SIGNUP_MODE", func(t *testing.T) {
 		env := validEnv()

@@ -860,6 +860,11 @@ release/override anything.
 ### Server → clients
 
 ```jsonc
+// ICE config join-ack (AD-14) — first frame after join; re-sent on {t:ice-refresh}.
+// STUN always (D-38); a TURN entry with an ephemeral HMAC cred + ttlSec is added when a
+// relay is configured (M2, EN-4). Shape mirrors the browser RTCIceServer dictionary.
+{"t":"ice","iceServers":[{"urls":["stun:stun.example.org:3478"]}]}
+
 // Role-filtered roster projection (EN-8) — per-recipient; guests get the reduced shape
 {"t":"roster","peers":[{
   "id":"<peerId>","name":"…","role":"host"|"cohost"|"guest"|"obs"|"obs_screen",

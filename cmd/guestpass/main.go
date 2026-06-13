@@ -25,6 +25,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
+	"github.com/rock3r/guest-pass/internal/turn"
 	"github.com/rock3r/guest-pass/internal/web"
 )
 
@@ -170,6 +171,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		StaticDir:   "web/dist",
 		RateLimiter: limiter,
 		WSInflight:  wsInflight,
+		ICEServers:  turn.ICEServers(cfg.STUNURL), // STUN-only (D-38); TURN entry + creds land in M2
 		Store:       st,
 		Hasher:      hasher,
 		Mailer:      mailer,
