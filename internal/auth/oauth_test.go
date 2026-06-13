@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,6 +36,27 @@ func (f *fakeUpserter) CreateHost(_ context.Context, p store.CreateHostParams) (
 	}
 	f.bySub[p.GoogleSub] = h
 	return h, nil
+}
+
+// raceUpserter simulates a concurrent first login: the first GetHostByGoogleSub misses,
+// CreateHost fails (unique violation, because another request created the row first),
+// and a subsequent GetHostByGoogleSub finds that row.
+type raceUpserter struct {
+	getCalls  int
+	host      *store.Host
+	createErr error
+}
+
+func (f *raceUpserter) GetHostByGoogleSub(_ context.Context, _ string) (*store.Host, error) {
+	f.getCalls++
+	if f.getCalls == 1 {
+		return nil, store.ErrNotFound
+	}
+	return f.host, nil
+}
+
+func (f *raceUpserter) CreateHost(_ context.Context, _ store.CreateHostParams) (*store.Host, error) {
+	return nil, f.createErr
 }
 
 type fakeFetcher struct {
@@ -143,6 +165,22 @@ func TestGoogleOAuth_CompleteLogin_AllowlistMissRejected(t *testing.T) {
 	// Crucially: no persistent host row, so adding the email later just works on re-login.
 	if len(up.created) != 0 || sessionCookieFromRec(rec) != nil {
 		t.Fatal("allowlist miss must not create a host or set a session")
+	}
+}
+
+func TestResolveHost_ConcurrentFirstLogin(t *testing.T) {
+	existing := &store.Host{ID: "h1", GoogleSub: "sub-1", Status: store.HostActive}
+	fake := &raceUpserter{host: existing, createErr: errors.New("UNIQUE constraint failed: hosts.google_sub")}
+	ring := newRing(t, testCurrent)
+	authn := NewAuthenticator(ring, &fakeHosts{byID: map[string]*store.Host{}}, true)
+	g := NewGoogleOAuth(GoogleConfig{ClientID: "c", ClientSecret: "s", BaseURL: "https://x", Policy: LoginPolicy{SignupMode: config.SignupModeOpen}}, authn, fake)
+
+	host, err := g.resolveHost(context.Background(), &userInfo{Sub: "sub-1", Email: "a@example.com", EmailVerified: true})
+	if err != nil {
+		t.Fatalf("concurrent first login should resolve to the existing host, got %v", err)
+	}
+	if host == nil || host.ID != "h1" {
+		t.Fatalf("resolved host = %+v, want existing h1", host)
 	}
 }
 

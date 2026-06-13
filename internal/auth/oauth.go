@@ -181,7 +181,7 @@ func (g *GoogleOAuth) resolveHost(ctx context.Context, info *userInfo) (*store.H
 	if info.Picture != "" {
 		picture = &info.Picture
 	}
-	return g.hosts.CreateHost(ctx, store.CreateHostParams{
+	host, err := g.hosts.CreateHost(ctx, store.CreateHostParams{
 		GoogleSub: info.Sub,
 		Email:     info.Email,
 		Name:      info.Name,
@@ -189,6 +189,16 @@ func (g *GoogleOAuth) resolveHost(ctx context.Context, info *userInfo) (*store.H
 		IsAdmin:   d.isAdmin,
 		Status:    d.status,
 	})
+	if err != nil {
+		// A concurrent first login for the same Google account may have created the row
+		// between our lookup and insert (unique google_sub). Re-fetch and use it; if it
+		// still isn't there, the failure was real.
+		if existing, gerr := g.hosts.GetHostByGoogleSub(ctx, info.Sub); gerr == nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("creating host: %w", err)
+	}
+	return host, nil
 }
 
 func (g *GoogleOAuth) stateCookieValue(value string, maxAge int) *http.Cookie {
