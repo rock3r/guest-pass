@@ -75,9 +75,14 @@ func serve(addr string) error {
 		log.Println("draining: terminating WS peers and finishing in-flight writes…")
 		sctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(sctx) // stop accepting; wait for in-flight HTTP handlers
+		// Notify WS peers FIRST: Hub.Shutdown closes the hub and sends terminate, which
+		// unblocks each /ws reader so its handler returns. Doing this before srv.Shutdown
+		// means srv.Shutdown isn't left waiting on read-blocked WS handlers until the
+		// timeout. A /ws request arriving in the window before srv stops accepting hits a
+		// closed hub (Room → nil) and is told to reconnect, so no new room is created.
 		hub.Shutdown("reconnect")
-		waitTimeout(&wsInflight, 10*time.Second) // let WS terminate frames flush + handlers exit
+		_ = srv.Shutdown(sctx)                   // stop accepting; drain in-flight HTTP handlers
+		waitTimeout(&wsInflight, 10*time.Second) // ensure WS handlers flushed terminate and exited
 		_ = st.Close()                           // flush in-flight DB writes (writer pool drains on Close)
 		close(stop)
 	}()
