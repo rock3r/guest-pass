@@ -20,8 +20,9 @@ import (
 // Sentinel errors returned (wrapped, with the offending variable's name) by Load so
 // callers can branch with errors.Is without string matching (CONVENTIONS §1.2).
 var (
-	// ErrSecretFailClosed means a required secret was empty or a known placeholder.
-	ErrSecretFailClosed = errors.New("required secret is empty or a placeholder")
+	// ErrSecretFailClosed means a required secret was empty, too short, or a known
+	// placeholder (EN-14).
+	ErrSecretFailClosed = errors.New("required secret is empty, too short, or a placeholder")
 	// ErrDevAuthInRelease means AUTH_MODE=dev was set in a release build, where the
 	// dev-auth seam is not compiled in (AD-8 / RF-4).
 	ErrDevAuthInRelease = errors.New("AUTH_MODE=dev is not permitted in a release build")
@@ -91,12 +92,12 @@ func load(getenv func(string) string) (*Config, error) {
 // land with the consumers that need them.
 func (c *Config) validate() error {
 	// JWT_SECRET is always required and fails closed (EN-14).
-	if isPlaceholderSecret(c.JWTSecret) {
+	if isWeakSecret(c.JWTSecret) {
 		return fmt.Errorf("config: JWT_SECRET: %w", ErrSecretFailClosed)
 	}
 	// TURN_SECRET fails closed only when a TURN relay is configured; STUN-only
 	// deployments (D-38) do not require it.
-	if c.TURNEnabled() && isPlaceholderSecret(c.TURNSecret) {
+	if c.TURNEnabled() && isWeakSecret(c.TURNSecret) {
 		return fmt.Errorf("config: TURN_SECRET: %w", ErrSecretFailClosed)
 	}
 	if err := c.validateAuthMode(); err != nil {

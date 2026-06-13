@@ -30,6 +30,9 @@ func TestLoad_JWTSecretFailsClosed(t *testing.T) {
 		{"placeholder changeme", "changeme", false},
 		{"placeholder mixed case + spaces", "  ChangeMe  ", false},
 		{"placeholder secret", "secret", false},
+		{"short non-placeholder rejected", "foo", false},
+		{"31 chars rejected", "abcdefghijklmnopqrstuvwxyzABCDE", false},
+		{"32 chars accepted", "abcdefghijklmnopqrstuvwxyzABCDEF", true},
 		{"real secret", "Zr8kQv2xN7pL4wT9aB6cD3eF1gH5jK0mPqRsTuVwXyZ", true},
 	}
 	for _, tc := range cases {
@@ -61,6 +64,7 @@ func TestLoad_TURNSecretFailsClosedOnlyWhenTURNEnabled(t *testing.T) {
 		{"stun-only ignores placeholder turn secret", "", "changeme", nil},
 		{"turn enabled, empty secret fails", "turns:turn.example.org:5349", "", ErrSecretFailClosed},
 		{"turn enabled, placeholder secret fails", "turns:turn.example.org:5349", "changeme", ErrSecretFailClosed},
+		{"turn enabled, short secret fails", "turns:turn.example.org:5349", "foo", ErrSecretFailClosed},
 		{"turn enabled, real secret ok", "turns:turn.example.org:5349", "h9P2qWcN6vR4tY8uA1sD5fG3jK7lZxBmQ", nil},
 	}
 	for _, tc := range cases {

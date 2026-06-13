@@ -117,7 +117,10 @@ JSON handler. Levels: `debug` / `info` / `warn` / `error`.
   immutable `Config` struct in `internal/config`. Read fields off the struct;
   never call `os.Getenv` deep in the code.
 - **Fail-closed secrets (EN-14, AD-8).** The binary **refuses to start** if
-  `JWT_SECRET` or `TURN_SECRET` is empty or equals a shipped placeholder.
+  `JWT_SECRET` or `TURN_SECRET` is empty, equals a shipped placeholder, or is
+  **shorter than 32 characters** (a trivial non-placeholder value would otherwise
+  leave the HS256 cookie / TURN HMAC material brute-forceable). `TURN_SECRET` is only
+  checked when TURN is enabled (`TURN_URL` set; STUN-only deployments don't need it).
 - **Dev-auth is build-tag-gated, not runtime-gated (RF-4, AD-8).** The dev-auth
   seam (`AUTH_MODE=dev`, which mints a fake host session) is compiled **only under
   a `//go:build dev` build tag** — it is **not present in a release binary at

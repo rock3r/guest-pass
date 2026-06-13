@@ -445,9 +445,10 @@ be committed to this repo.
 2. If enabling TURN, generate a strong random **`TURN_SECRET`** (coturn reads it
    for ephemeral-HMAC credential validation).
 3. **Fail-closed reminder (EN-14):** the binary **refuses to start** if either
-   is empty or equals a shipped placeholder. Set real values before first boot.
-   Both support rotation — `JWT_SECRET` via the `kid` two-key ring (EN-6, not a
-   global logout).
+   is empty, equals a shipped placeholder, or is **shorter than 32 characters**.
+   `openssl rand -base64 48` (64 chars) clears this comfortably; set real values
+   before first boot. Both support rotation — `JWT_SECRET` via the `kid` two-key
+   ring (EN-6, not a global logout).
 
 ### 12.4 GitHub repo + CI secrets
 
