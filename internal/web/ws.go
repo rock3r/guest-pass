@@ -45,6 +45,12 @@ func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 
 		ctx := r.Context()
 		room := hub.Room(session)
+		if room == nil {
+			// The hub is draining (Hub.Shutdown ran). Tell the client to reconnect
+			// (transient, EN-9) and close; never spawn a room on a shutting-down hub.
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+			return
+		}
 		pid := signaling.PeerID(peer)
 		out := make(chan signaling.Frame, 64)
 		room.Join(pid, role, signaling.SlotID(slot), out)

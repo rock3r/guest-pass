@@ -25,9 +25,19 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 		t.Fatal("expected a terminate:reconnect frame before the peer's channel closed")
 	}
 
-	// The registry is cleared: a new Room for the same session is a fresh instance.
-	if again := h.Room("s1"); again == room {
-		t.Fatal("Shutdown should clear the room registry")
+	// After Shutdown the hub is closed: Room returns nil rather than spawning a new,
+	// un-drained room.
+	if again := h.Room("s1"); again != nil {
+		t.Fatal("Room after Shutdown should return nil (hub closed)")
+	}
+	_ = room
+}
+
+func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
+	h := NewHub()
+	h.Shutdown("reconnect")
+	if r := h.Room("late-arrival"); r != nil {
+		t.Fatal("Room for a new session after Shutdown should be nil")
 	}
 }
 

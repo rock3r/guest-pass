@@ -8,16 +8,23 @@ import "sync"
 // mutex guards only the registry map (not room state), so the no-locks-on-room-state
 // invariant holds.
 type Hub struct {
-	mu    sync.Mutex
-	rooms map[string]*Room
+	mu     sync.Mutex
+	rooms  map[string]*Room
+	closed bool // set by Shutdown; once true, Room never creates a new room
 }
 
 func NewHub() *Hub { return &Hub{rooms: map[string]*Room{}} }
 
-// Room returns the room for a session, creating and starting it on first use.
+// Room returns the room for a session, creating and starting it on first use. It returns
+// nil once the hub has been shut down, so a /ws handler that hijacked its connection
+// before the drain can't race in and spawn a fresh, un-drained room that would leak and
+// never receive a terminate; callers must handle nil by closing the connection.
 func (h *Hub) Room(session string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		return nil
+	}
 	r := h.rooms[session]
 	if r == nil {
 		r = newRoom(session)
@@ -32,6 +39,7 @@ func (h *Hub) Room(session string) *Room {
 // is cleared so no new work is routed to a stopping room.
 func (h *Hub) Shutdown(reason string) {
 	h.mu.Lock()
+	h.closed = true
 	rooms := make([]*Room, 0, len(h.rooms))
 	for _, r := range h.rooms {
 		rooms = append(rooms, r)
