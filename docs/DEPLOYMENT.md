@@ -88,7 +88,7 @@ still equals a shipped placeholder — no silent boot on default secrets.
 
 | Var | Required | Fail-closed | Notes |
 |---|---|---|---|
-| `BASE_URL` | ✅ | — | e.g. `https://guest-pass.link`; origin for the OAuth redirect, magic links, and OBS source URLs. Must match the registered Google redirect host. |
+| `BASE_URL` | ✅ | **✅ outside dev** | e.g. `https://guest-pass.link`; origin for the OAuth redirect, magic links, and OBS source URLs. Must match the registered Google redirect host. **Must be `https://` outside dev** — the binary refuses a non-HTTPS `BASE_URL` in production (Secure cookies / WebRTC / OAuth all require HTTPS); `AUTH_MODE=dev` uses a loopback `http://` origin instead. |
 | `GOOGLE_CLIENT_ID` | ✅ | — | Google is the only host identity provider. |
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | Paired with the client id; supply out-of-band (see checklist §12). |
 | `JWT_SECRET` | ✅ | **✅ (EN-14)** | HS256 host-session cookies; the current signing key. Part of a **`kid` + two-key ring** so rotation isn't a global logout (EN-6). Refuses placeholder/empty/short. |
