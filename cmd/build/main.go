@@ -83,6 +83,22 @@ func options() api.BuildOptions {
 	}
 	return api.BuildOptions{
 		AbsWorkingDir: root,
+		Plugins: []api.Plugin{{
+			// Regenerate the SRI manifest after every successful build — including each
+			// --watch rebuild — so rendered pages never serve a stale/missing integrity.
+			Name: "sri-manifest",
+			Setup: func(b api.PluginBuild) {
+				b.OnEnd(func(r *api.BuildResult) (api.OnEndResult, error) {
+					if len(r.Errors) > 0 {
+						return api.OnEndResult{}, nil
+					}
+					if err := writeManifest("web/dist"); err != nil {
+						return api.OnEndResult{}, err
+					}
+					return api.OnEndResult{}, nil
+				})
+			},
+		}},
 		EntryPoints: []string{
 			"web/src/islands/app.js",
 			"web/src/obs/obs.js",
@@ -135,9 +151,7 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	if err := writeManifest("web/dist"); err != nil {
-		fmt.Fprintln(os.Stderr, "build: writing SRI manifest:", err)
-		os.Exit(1)
-	}
+	// The SRI manifest is written by the sri-manifest OnEnd plugin (runs for one-shot
+	// and watch builds alike).
 	fmt.Println("built web/dist (app + obs entries) + SRI manifest")
 }
