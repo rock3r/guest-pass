@@ -55,6 +55,7 @@ type Config struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	JWTSecret          string
+	JWTSecretPrevious  string // optional verify-only second key in the kid ring (EN-6); set during rotation
 	ResendAPIKey       string
 	MailMode           string // "" => Resend (default); "log" => print magic links to stdout (D-2)
 	AdminEmail         string
@@ -82,6 +83,7 @@ func load(getenv func(string) string) (*Config, error) {
 		GoogleClientID:     strings.TrimSpace(getenv("GOOGLE_CLIENT_ID")),
 		GoogleClientSecret: getenv("GOOGLE_CLIENT_SECRET"),
 		JWTSecret:          getenv("JWT_SECRET"),
+		JWTSecretPrevious:  getenv("JWT_SECRET_PREVIOUS"),
 		ResendAPIKey:       getenv("RESEND_API_KEY"),
 		MailMode:           strings.TrimSpace(getenv("MAIL_MODE")),
 		AdminEmail:         strings.TrimSpace(getenv("ADMIN_EMAIL")),
@@ -104,6 +106,11 @@ func (c *Config) validate() error {
 	// JWT_SECRET is always required and fails closed (EN-14).
 	if isWeakSecret(c.JWTSecret) {
 		return fmt.Errorf("config: JWT_SECRET: %w", ErrSecretFailClosed)
+	}
+	// JWT_SECRET_PREVIOUS is optional (the verify-only second key during rotation, EN-6),
+	// but when set it must be a real secret too.
+	if strings.TrimSpace(c.JWTSecretPrevious) != "" && isWeakSecret(c.JWTSecretPrevious) {
+		return fmt.Errorf("config: JWT_SECRET_PREVIOUS: %w", ErrSecretFailClosed)
 	}
 	// TURN_SECRET fails closed only when a TURN relay is configured; STUN-only
 	// deployments (D-38) do not require it.

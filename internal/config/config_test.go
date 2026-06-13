@@ -103,6 +103,43 @@ func TestLoad_UnknownAuthModeRejected(t *testing.T) {
 	}
 }
 
+// JWT_SECRET_PREVIOUS is the optional verify-only second key in the kid two-key ring
+// (EN-6): unset in steady state, set to the old secret during rotation. When set it
+// must be a real secret (fail-closed); when unset the load is clean.
+func TestLoad_JWTSecretPrevious(t *testing.T) {
+	cases := []struct {
+		name   string
+		prev   string
+		wantOK bool
+	}{
+		{"unset", "", true},
+		{"strong previous ok", "PrevKqW7nR2vT5yA8sD3fG6hJ0lZxBmNcVbQ", true},
+		{"short previous rejected", "short", false},
+		{"placeholder previous rejected", "changeme", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := validEnv()
+			if tc.prev != "" {
+				env["JWT_SECRET_PREVIOUS"] = tc.prev
+			}
+			c, err := envLoad(env)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("expected clean load, got %v", err)
+				}
+				if c.JWTSecretPrevious != tc.prev {
+					t.Errorf("JWTSecretPrevious = %q, want %q", c.JWTSecretPrevious, tc.prev)
+				}
+				return
+			}
+			if !errors.Is(err, ErrSecretFailClosed) {
+				t.Fatalf("expected ErrSecretFailClosed, got %v", err)
+			}
+		})
+	}
+}
+
 func TestLoad_RequiredVarsFailClosed(t *testing.T) {
 	// Each var, cleared, must make a production load fail closed (CONVENTIONS §1.5 /
 	// DEPLOYMENT §3). RESEND_API_KEY is required only when MAIL_MODE != log.
