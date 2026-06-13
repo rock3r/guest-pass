@@ -26,8 +26,9 @@ CI gates, see `TESTING.md`. For config, secrets, and self-hosting, see
 
 ### 1.1 Package boundaries
 
-The module path is `github.com/rock3r/guest-pass`; Go **1.24+** is a floor, not a
-pin (AD-15). Layout (AD-4):
+The module path is `github.com/rock3r/guest-pass`; Go **1.25+** is a floor, not a
+pin (AD-15) — raised from 1.24 so the project tracks the current `modernc.org/sqlite`,
+whose recent releases require Go 1.25. Layout (AD-4):
 
 | Package | Owns | Must not |
 |---|---|---|
@@ -200,9 +201,11 @@ The authoritative DDL lives in `ARCHITECTURE.md` §6 — reference it, do not
 reproduce it here. Conventions that bind the developer:
 
 - **`passes.slot_id` is an FK to `slots(id)`** (replaces the old bare `slot TEXT`).
-  SQLite cannot express a cross-table CHECK, so **same-host validation** (a pass's
-  slot must belong to the pass's stream's host) is **enforced in the app layer**,
-  not by a constraint. Treat that app-layer check as a hard invariant.
+  SQLite cannot express a cross-table CHECK, so two app-layer checks are **hard
+  invariants** enforced when a pass is bound to a slot: (a) **same-host** — the slot
+  must belong to the pass's stream's host (RF-2); and (b) **cam-only** — pass occupants
+  bind only to `cam` slots, never the `host` (D-18) or shared `screenshare` (D-21) slot
+  (D-20). Neither can be a DB constraint.
 - **One live session per host** is enforced by `sessions.host_id` plus a **partial
   unique index** on the live-session state (EN-2). Do not open a second live
   session for a host; rely on the index as the backstop.

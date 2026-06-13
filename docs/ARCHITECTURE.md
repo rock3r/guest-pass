@@ -416,7 +416,7 @@ JSON signaling frames and projecting room state — it does **no media processin
 
 | Concern | Choice | Why / contract |
 |---|---|---|
-| Language | **Go 1.24+** (AD-15) | Toolchain floor (a minimum, not a pinned version); single static binary. Module path `github.com/rock3r/guest-pass`. |
+| Language | **Go 1.25+** (AD-15) | Toolchain floor (a minimum, not a pinned version), raised from 1.24 to track current `modernc.org/sqlite`; single static binary. Module path `github.com/rock3r/guest-pass`. |
 | Router | `go-chi/chi` | Idiomatic, tiny, stdlib-shaped middleware. |
 | WebSockets | **`coder/websocket`** (AD-16), wrapped behind `internal/signaling/conn` as an in-process **test seam** | Actively maintained, context-first, ergonomic. Its self-serialization is *redundant* with our single-writer `writeLoop` (EN-12), not extra safety (RF-19). |
 | DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame stats** — `peers.used_turn` written once at disconnect. |
@@ -630,10 +630,19 @@ CREATE TABLE slots (                            -- host-global pool, wired into 
     source_token_hash TEXT    NOT NULL,         -- HMAC(secret,token); permanent, host-only (EN-5)
     source_token_last_used_at   INTEGER,        -- leak-detection metadata (EN-5/AD-23)
     source_token_last_source_ip TEXT,           -- leak-detection metadata (EN-5/AD-23)
-    epoch             INTEGER NOT NULL DEFAULT 0 -- in-memory authoritative; persisted at lifecycle edges only (RF-6)
+    epoch             INTEGER NOT NULL DEFAULT 0, -- in-memory authoritative; persisted at lifecycle edges only (RF-6)
+    -- Slot shape (D-20): cam slots are addressable 1..8; the host (D-18) and shared
+    -- screenshare (D-21) slots carry no idx. `idx IS NOT NULL` is load-bearing (a NULL
+    -- cam idx would make the clause evaluate to NULL, which SQLite treats as passing).
+    CHECK ((kind = 'cam' AND idx IS NOT NULL AND idx BETWEEN 1 AND 8)
+        OR (kind IN ('host','screenshare') AND idx IS NULL))
 );
 CREATE INDEX idx_slots_host ON slots(host_id);
 CREATE UNIQUE INDEX idx_slots_source_token ON slots(source_token_hash);  -- slot WS auth (/ws?src=) lookup
+-- Host-global pool uniqueness (D-20): at most one cam slot per (host, idx), and at most
+-- one host slot + one screenshare slot per host.
+CREATE UNIQUE INDEX idx_slots_cam ON slots(host_id, idx) WHERE kind = 'cam';
+CREATE UNIQUE INDEX idx_slots_singleton ON slots(host_id, kind) WHERE kind IN ('host','screenshare');
 
 CREATE TABLE passes (
     id           TEXT    PRIMARY KEY,
@@ -668,6 +677,8 @@ CREATE TABLE host_source_tokens (               -- D-18 host cam/screen routing,
 );
 CREATE INDEX idx_host_source_tokens_stream ON host_source_tokens(stream_id);
 CREATE UNIQUE INDEX idx_host_source_tokens_token ON host_source_tokens(token_hash);  -- source WS auth lookup
+-- one active value per role per stream (EN-5): rotation replaces, never appends
+CREATE UNIQUE INDEX idx_host_source_tokens_stream_role ON host_source_tokens(stream_id, role);
 
 CREATE TABLE sessions (
     id         TEXT    PRIMARY KEY,
