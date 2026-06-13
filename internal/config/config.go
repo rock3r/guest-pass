@@ -30,12 +30,22 @@ var (
 	ErrDevBaseURLNotLoopback = errors.New("AUTH_MODE=dev requires a loopback BASE_URL")
 	// ErrUnknownAuthMode means AUTH_MODE was neither empty (production) nor "dev".
 	ErrUnknownAuthMode = errors.New("unknown AUTH_MODE")
+	// ErrMissingRequired means a required configuration variable was empty
+	// (CONVENTIONS §1.5: a missing required var is a startup error).
+	ErrMissingRequired = errors.New("required configuration is missing")
+	// ErrInvalidValue means a variable held a value outside its accepted set
+	// (e.g. an unknown SIGNUP_MODE or MAIL_MODE).
+	ErrInvalidValue = errors.New("invalid configuration value")
 )
 
-// MailMode and AuthMode constants are the only accepted non-default values.
+// Accepted non-default values for the small enum-valued variables.
 const (
 	MailModeLog = "log"
 	AuthModeDev = "dev"
+
+	SignupModeOpen      = "open"
+	SignupModeApproval  = "approval"
+	SignupModeAllowlist = "allowlist"
 )
 
 // Config is the loaded, validated, immutable configuration. Construct it only via
@@ -103,7 +113,65 @@ func (c *Config) validate() error {
 	if err := c.validateAuthMode(); err != nil {
 		return err
 	}
+	if err := c.validateMailMode(); err != nil {
+		return err
+	}
+	if err := c.validateRequired(); err != nil {
+		return err
+	}
+	if err := c.validateSignupMode(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateRequired enforces that required variables are present (CONVENTIONS §1.5:
+// a missing required var is a startup error, not a runtime surprise; DEPLOYMENT §3).
+// Two conditional exemptions: Google OAuth credentials are not required in a dev build
+// (AUTH_MODE=dev mints a fake session without Google, AD-8), and RESEND_API_KEY is not
+// required when MAIL_MODE=log prints magic links to stdout (D-2).
+func (c *Config) validateRequired() error {
+	required := []struct{ name, val string }{
+		{"BASE_URL", c.BaseURL},
+		{"ADMIN_EMAIL", c.AdminEmail},
+		{"SIGNUP_MODE", c.SignupMode},
+	}
+	if c.AuthMode != AuthModeDev {
+		required = append(required,
+			struct{ name, val string }{"GOOGLE_CLIENT_ID", c.GoogleClientID},
+			struct{ name, val string }{"GOOGLE_CLIENT_SECRET", c.GoogleClientSecret},
+		)
+	}
+	if c.MailMode != MailModeLog {
+		required = append(required, struct{ name, val string }{"RESEND_API_KEY", c.ResendAPIKey})
+	}
+	for _, r := range required {
+		if strings.TrimSpace(r.val) == "" {
+			return fmt.Errorf("config: %s: %w", r.name, ErrMissingRequired)
+		}
+	}
+	return nil
+}
+
+// validateMailMode accepts only "" (Resend, default) or "log" (D-2).
+func (c *Config) validateMailMode() error {
+	switch c.MailMode {
+	case "", MailModeLog:
+		return nil
+	default:
+		return fmt.Errorf("config: MAIL_MODE=%s: %w", c.MailMode, ErrInvalidValue)
+	}
+}
+
+// validateSignupMode requires one of the three onboarding modes (§9.3). An empty value
+// is caught earlier by validateRequired as missing; a non-empty unknown value is invalid.
+func (c *Config) validateSignupMode() error {
+	switch c.SignupMode {
+	case SignupModeOpen, SignupModeApproval, SignupModeAllowlist:
+		return nil
+	default:
+		return fmt.Errorf("config: SIGNUP_MODE=%s: %w", c.SignupMode, ErrInvalidValue)
+	}
 }
 
 // validateAuthMode enforces the AUTH_MODE seam (AD-8 / RF-4): only "" (production) and

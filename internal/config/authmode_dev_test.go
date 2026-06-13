@@ -44,3 +44,16 @@ func TestLoad_DevAuthRequiresLoopbackBaseURL(t *testing.T) {
 		})
 	}
 }
+
+// In dev mode the fake host session is minted without Google (AD-8), so Google OAuth
+// credentials are NOT required even though they are required in production.
+func TestLoad_DevAuthDoesNotRequireGoogleCreds(t *testing.T) {
+	env := validEnv()
+	env["AUTH_MODE"] = "dev"
+	env["BASE_URL"] = "http://localhost:8137"
+	delete(env, "GOOGLE_CLIENT_ID")
+	delete(env, "GOOGLE_CLIENT_SECRET")
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("dev mode should not require Google creds, got %v", err)
+	}
+}

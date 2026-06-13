@@ -6,11 +6,19 @@ import (
 	"testing"
 )
 
-// validEnv returns a minimal environment that loads cleanly in any build: a real
-// JWT_SECRET, STUN-only (no TURN), production AUTH_MODE. Tests override single keys.
+// validEnv returns a complete production environment that loads cleanly: all required
+// vars present (BASE_URL, Google creds, ADMIN_EMAIL, SIGNUP_MODE, RESEND_API_KEY), a
+// real JWT_SECRET, STUN-only (no TURN), production AUTH_MODE. Tests override single keys
+// to exercise each fail-closed branch.
 func validEnv() map[string]string {
 	return map[string]string{
-		"JWT_SECRET": "Zr8kQv2xN7pL4wT9aB6cD3eF1gH5jK0mPqRsTuVwXyZ", // not a placeholder
+		"BASE_URL":             "https://guest-pass.link",
+		"GOOGLE_CLIENT_ID":     "client-id.apps.googleusercontent.com",
+		"GOOGLE_CLIENT_SECRET": "google-client-secret-placeholder-value-XYZ",
+		"JWT_SECRET":           "Zr8kQv2xN7pL4wT9aB6cD3eF1gH5jK0mPqRsTuVwXyZ", // not a placeholder
+		"ADMIN_EMAIL":          "admin@example.com",
+		"SIGNUP_MODE":          "open",
+		"RESEND_API_KEY":       "re_resend_api_key_placeholder_value",
 	}
 }
 
@@ -92,6 +100,64 @@ func TestLoad_UnknownAuthModeRejected(t *testing.T) {
 	_, err := envLoad(env)
 	if !errors.Is(err, ErrUnknownAuthMode) {
 		t.Fatalf("expected ErrUnknownAuthMode, got %v", err)
+	}
+}
+
+func TestLoad_RequiredVarsFailClosed(t *testing.T) {
+	// Each var, cleared, must make a production load fail closed (CONVENTIONS §1.5 /
+	// DEPLOYMENT §3). RESEND_API_KEY is required only when MAIL_MODE != log.
+	for _, key := range []string{"BASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ADMIN_EMAIL", "SIGNUP_MODE", "RESEND_API_KEY"} {
+		t.Run("missing "+key, func(t *testing.T) {
+			env := validEnv()
+			delete(env, key)
+			_, err := envLoad(env)
+			if key == "SIGNUP_MODE" {
+				// Empty SIGNUP_MODE is missing-required; a present-but-bad value is
+				// ErrInvalidValue (covered separately). Empty -> ErrMissingRequired.
+				if !errors.Is(err, ErrMissingRequired) {
+					t.Fatalf("expected ErrMissingRequired for empty %s, got %v", key, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrMissingRequired) {
+				t.Fatalf("expected ErrMissingRequired for missing %s, got %v", key, err)
+			}
+		})
+	}
+}
+
+func TestLoad_ResendKeyNotRequiredInLogMode(t *testing.T) {
+	env := validEnv()
+	delete(env, "RESEND_API_KEY")
+	env["MAIL_MODE"] = "log"
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("MAIL_MODE=log should not require RESEND_API_KEY, got %v", err)
+	}
+}
+
+func TestLoad_InvalidEnumsRejected(t *testing.T) {
+	t.Run("bad SIGNUP_MODE", func(t *testing.T) {
+		env := validEnv()
+		env["SIGNUP_MODE"] = "opn"
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Fatalf("expected ErrInvalidValue, got %v", err)
+		}
+	})
+	t.Run("bad MAIL_MODE", func(t *testing.T) {
+		env := validEnv()
+		env["MAIL_MODE"] = "smtp"
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Fatalf("expected ErrInvalidValue, got %v", err)
+		}
+	})
+	for _, mode := range []string{"open", "approval", "allowlist"} {
+		t.Run("good SIGNUP_MODE "+mode, func(t *testing.T) {
+			env := validEnv()
+			env["SIGNUP_MODE"] = mode
+			if _, err := envLoad(env); err != nil {
+				t.Fatalf("SIGNUP_MODE=%s should load, got %v", mode, err)
+			}
+		})
 	}
 }
 
