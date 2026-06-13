@@ -88,13 +88,12 @@ func Page(html string) http.HandlerFunc {
 	}
 }
 
-// Chrome runs fn in a chromedp context backed by a headless Chrome with fake media. The
-// `use-fake-device-for-media-stream` / `use-fake-ui-for-media-stream` flags supply a
-// synthetic cam/mic and auto-accept the permission prompt (no hardware). `--no-sandbox`
-// keeps it runnable as root in the CI container. CHROME_PATH overrides the binary when set
-// (the CI job points it at the installed Chrome).
-func Chrome(t *testing.T, timeout time.Duration, fn func(ctx context.Context)) {
-	t.Helper()
+// fakeMediaAllocOpts builds the chromedp ExecAllocator options for a headless Chrome with
+// fake media: the `use-fake-device-for-media-stream` / `use-fake-ui-for-media-stream` flags
+// supply a synthetic cam/mic and auto-accept the permission prompt (no hardware).
+// `--no-sandbox` keeps it runnable as root in the CI container; CHROME_PATH overrides the
+// binary when set (the CI job points it at the installed Chrome). Reused by multi-tab tests.
+func fakeMediaAllocOpts() []chromedp.ExecAllocatorOption {
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 	opts = append(opts,
 		chromedp.NoSandbox,
@@ -104,7 +103,14 @@ func Chrome(t *testing.T, timeout time.Duration, fn func(ctx context.Context)) {
 	if p := os.Getenv("CHROME_PATH"); p != "" {
 		opts = append(opts, chromedp.ExecPath(p))
 	}
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	return opts
+}
+
+// Chrome runs fn in a single-tab chromedp context backed by a headless Chrome with fake
+// media (see fakeMediaAllocOpts).
+func Chrome(t *testing.T, timeout time.Duration, fn func(ctx context.Context)) {
+	t.Helper()
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
 	defer cancelAlloc()
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
 	defer cancelCtx()

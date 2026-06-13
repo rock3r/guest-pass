@@ -1,0 +1,8 @@
+{{define "content"}}
+<section class="greenroom">
+<h1>Greenroom</h1>
+<p>Your guests' live cameras appear here. Wire each OBS source once and reuse it every stream.</p>
+<div id="host-monitor"></div>
+</section>
+<script type="module" src="/static/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}" crossorigin="anonymous"{{end}}></script>
+{{end}}

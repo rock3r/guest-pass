@@ -15,6 +15,7 @@ import (
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -83,6 +84,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 
 	h, err := NewRouter(RouterConfig{
 		SourceURL:   testSourceURL,
+		Hub:         signaling.NewHub(),
 		Auth:        authn,
 		Store:       st,
 		Hasher:      hasher,
@@ -528,6 +530,23 @@ func TestAPI_PassLandingRevokedIsGone(t *testing.T) {
 	rec := a.req(t, http.MethodGet, "/p/"+raw, "", nil)
 	if rec.Code != http.StatusGone {
 		t.Fatalf("revoked token = %d, want 410", rec.Code)
+	}
+}
+
+// The greenroom monitor page is host-authenticated (EN-6): an unauthenticated request is
+// rejected, and a signed-in host gets the page with the host-monitor island root.
+func TestGreenroom_RequiresHostAuth(t *testing.T) {
+	a := newAPIHarness(t)
+	if rec := a.req(t, http.MethodGet, "/greenroom", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /greenroom unauthenticated = %d, want 401", rec.Code)
+	}
+	_, cookie := a.host(t, "host1")
+	rec := a.req(t, http.MethodGet, "/greenroom", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /greenroom as host = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `id="host-monitor"`) {
+		t.Error("greenroom page is missing the host-monitor island root")
 	}
 }
 
