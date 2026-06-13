@@ -26,6 +26,7 @@ type Frame struct {
 	Peer           *RosterEntry    `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
 	PeerID         string          `json:"peerId,omitempty"` // the departed peer in a peer-left frame
 	ICEServers     []ICEServer     `json:"iceServers,omitempty"`
+	TTLSec         int             `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
 }
 
 // ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the

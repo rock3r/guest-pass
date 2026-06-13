@@ -167,18 +167,54 @@ func (c *Config) validate() error {
 	if err := c.validateSTUNURL(); err != nil {
 		return err
 	}
+	if err := c.validateTURNURL(); err != nil {
+		return err
+	}
 	return nil
 }
 
-// validateSTUNURL requires the optional STUN_URL, when set, to use a stun:/stuns: scheme.
-// A wrong scheme would silently produce a broken ICE config, so it fails closed at
-// startup. Empty is fine — the deployment then offers no STUN server (dev/loopback).
+// validateSTUNURL requires the optional STUN_URL, when set, to be a usable stun:/stuns:
+// URL. Empty is fine — the deployment then offers no STUN server (dev/loopback).
 func (c *Config) validateSTUNURL() error {
-	if c.STUNURL == "" {
+	return validateICEURL("STUN_URL", c.STUNURL, []string{"stun:", "stuns:"})
+}
+
+// validateTURNURL requires a configured TURN_URL to be a usable turn:/turns: URL. A
+// mistyped, non-TURN, or host-less URL would let the server start as if relay were enabled
+// while restrictive-NAT guests still have no TURN path, so it fails closed at startup.
+// Empty is fine — the deployment is then STUN-only (D-38).
+func (c *Config) validateTURNURL() error {
+	return validateICEURL("TURN_URL", c.TURNURL, []string{"turn:", "turns:"})
+}
+
+// validateICEURL fails closed on an ICE server URL that is non-empty but unusable: it must
+// start with one of the allowed schemes AND carry a non-empty host. A scheme-only value
+// like "turn:" or "turns://?transport=tcp" would otherwise look enabled while emitting a
+// broken ICE entry. An empty raw value is accepted (the server is unconfigured).
+func validateICEURL(name, raw string, schemes []string) error {
+	if raw == "" {
 		return nil
 	}
-	if !strings.HasPrefix(c.STUNURL, "stun:") && !strings.HasPrefix(c.STUNURL, "stuns:") {
-		return fmt.Errorf("config: STUN_URL=%q must use a stun:/stuns: scheme: %w", c.STUNURL, ErrInvalidValue)
+	rest, matched := "", false
+	for _, sc := range schemes {
+		if strings.HasPrefix(raw, sc) {
+			rest, matched = raw[len(sc):], true
+			break
+		}
+	}
+	if !matched {
+		return fmt.Errorf("config: %s=%q must use a %s scheme: %w", name, raw, strings.Join(schemes, "/"), ErrInvalidValue)
+	}
+	// Strip an optional "//", the query, and any :port // /path, leaving the host.
+	rest = strings.TrimPrefix(rest, "//")
+	if i := strings.IndexByte(rest, '?'); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.IndexAny(rest, ":/"); i >= 0 {
+		rest = rest[:i]
+	}
+	if strings.TrimSpace(rest) == "" {
+		return fmt.Errorf("config: %s=%q has no host: %w", name, raw, ErrInvalidValue)
 	}
 	return nil
 }

@@ -175,11 +175,13 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		RateLimiter:   limiter,
 		WSRateLimiter: wsLimiter,
 		WSInflight:    wsInflight,
-		ICEServers:    turn.ICEServers(cfg.STUNURL), // STUN-only (D-38); TURN entry + creds land in M2
-		Store:         st,
-		Hasher:        hasher,
-		Mailer:        mailer,
-		BaseURL:       cfg.BaseURL,
-		Logger:        slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		// STUN always (D-38); a TURN entry with a fresh ephemeral HMAC cred (EN-4) is added
+		// per peer when TURN_URL/TURN_SECRET are set.
+		ICE:     turn.NewProvider(cfg.STUNURL, cfg.TURNURL, cfg.TURNSecret),
+		Store:   st,
+		Hasher:  hasher,
+		Mailer:  mailer,
+		BaseURL: cfg.BaseURL,
+		Logger:  slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
 }

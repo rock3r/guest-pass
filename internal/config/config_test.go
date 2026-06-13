@@ -197,7 +197,7 @@ func TestLoad_STUNURLOptionalAndLoaded(t *testing.T) {
 func TestLoad_STUNURLBadSchemeRejected(t *testing.T) {
 	// A STUN_URL must use the stun:/stuns: scheme; a wrong scheme would silently produce
 	// a broken ICE config, so it fails closed at startup instead.
-	for _, bad := range []string{"http://stun.example.org", "stun.example.org:3478", "turn:relay.example.org"} {
+	for _, bad := range []string{"http://stun.example.org", "stun.example.org:3478", "turn:relay.example.org", "stun:", "stuns://?foo=bar"} {
 		env := validEnv()
 		env["STUN_URL"] = bad
 		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
@@ -209,6 +209,30 @@ func TestLoad_STUNURLBadSchemeRejected(t *testing.T) {
 		env["STUN_URL"] = ok
 		if _, err := envLoad(env); err != nil {
 			t.Errorf("STUN_URL=%q should be accepted, got %v", ok, err)
+		}
+	}
+}
+
+// A configured TURN_URL must use the turn:/turns: scheme; a mistyped or non-TURN URL would
+// start the server as if relay were enabled while restrictive-NAT guests have no TURN path,
+// so it fails closed at startup.
+func TestLoad_TURNURLBadSchemeRejected(t *testing.T) {
+	const turnSecret = "Tu9rNsEcReT2nQ7wL4yA8dF3gH6jK0mPqRsZxBmNc"
+	// Bad scheme, or a scheme with no host (looks enabled but emits a broken ICE entry).
+	for _, bad := range []string{"https://turn.example.org", "stun:relay.example.org:3478", "turn.example.org:5349", "turn:", "turns://?transport=tcp"} {
+		env := validEnv()
+		env["TURN_URL"] = bad
+		env["TURN_SECRET"] = turnSecret
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("TURN_URL=%q: expected ErrInvalidValue, got %v", bad, err)
+		}
+	}
+	for _, ok := range []string{"turn:relay.example.org:3478", "turns:relay.example.org:5349"} {
+		env := validEnv()
+		env["TURN_URL"] = ok
+		env["TURN_SECRET"] = turnSecret
+		if _, err := envLoad(env); err != nil {
+			t.Errorf("TURN_URL=%q should be accepted, got %v", ok, err)
 		}
 	}
 }
