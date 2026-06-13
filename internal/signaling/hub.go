@@ -47,8 +47,16 @@ func (h *Hub) Shutdown(reason string) {
 	h.rooms = map[string]*Room{}
 	h.mu.Unlock()
 
+	// Terminate rooms CONCURRENTLY so the total drain time is bounded by a single room's
+	// terminate budget, not the sum across rooms (which could blow the drain deadline).
+	var wg sync.WaitGroup
 	for _, r := range rooms {
-		r.Terminate(reason)
-		r.Close()
+		wg.Add(1)
+		go func(r *Room) {
+			defer wg.Done()
+			r.Terminate(reason)
+			r.Close()
+		}(r)
 	}
+	wg.Wait()
 }

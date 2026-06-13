@@ -1,7 +1,7 @@
 package signaling
 
 import (
-	"context"
+	"sync"
 	"time"
 )
 
@@ -135,8 +135,8 @@ func (r *Room) ObsActive(slot SlotID, active bool, epoch int) {
 	})
 }
 
-// terminateBudget bounds how long Terminate will wait, across all peers, to enqueue
-// terminate frames into backed-up out queues during a drain.
+// terminateBudget bounds how long Terminate waits PER PEER to enqueue a terminate frame
+// into a backed-up out queue during a drain.
 const terminateBudget = 2 * time.Second
 
 // Terminate sends a terminate frame to every connected peer, then closes their out
@@ -145,24 +145,31 @@ const terminateBudget = 2 * time.Second
 // deploy/restart isn't a hard mass-drop.
 //
 // terminate is a terminal control frame, so it must not be silently dropped on a full
-// queue (RF-16). The send therefore BLOCKS until the conn's writeLoop drains a slot,
-// bounded by a shared deadline so a single wedged socket can't stall the drain — a
-// genuinely stuck peer is given up on (its socket is dead anyway) and still closed. It
-// runs on the room goroutine, so a concurrent readLoop Leave for a now-removed conn is a
-// no-op (identity-checked).
+// queue (RF-16). Each peer's send therefore BLOCKS until its writeLoop drains a slot,
+// with its OWN budget so one wedged socket can't consume the time for the others; the
+// peers are handled CONCURRENTLY so total time is ~one budget, not the sum. A genuinely
+// stuck peer is given up on (its socket is dead anyway) and still closed. It runs on the
+// room goroutine, so a concurrent readLoop Leave for a now-removed conn is a no-op
+// (identity-checked).
 func (r *Room) Terminate(reason string) {
 	done := make(chan struct{})
 	r.post(func(_ *roomState, conns map[PeerID]*peerConn) {
-		ctx, cancel := context.WithTimeout(context.Background(), terminateBudget)
-		defer cancel()
+		var wg sync.WaitGroup
 		for id, c := range conns {
-			select {
-			case c.out <- Frame{T: "terminate", Reason: reason}:
-			case <-ctx.Done(): // budget exhausted by wedged peers; stop waiting
-			}
-			close(c.out)
+			wg.Add(1)
+			go func(c *peerConn) {
+				defer wg.Done()
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case c.out <- Frame{T: "terminate", Reason: reason}:
+				case <-t.C: // this peer is wedged; give up on it
+				}
+				close(c.out)
+			}(c)
 			delete(conns, id)
 		}
+		wg.Wait()
 		close(done)
 	})
 	select {
