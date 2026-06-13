@@ -65,6 +65,7 @@ type Config struct {
 	MailFrom           string // From address for Resend invites; required unless MAIL_MODE=log
 	AdminEmail         string
 	SignupMode         string // open | approval | allowlist (§9.3)
+	STUNURL            string // stun:/stuns: URL offered to every peer in the ICE config (D-38); optional
 	TURNURL            string
 	TURNSecret         string
 	AllowedHosts       []string
@@ -108,6 +109,7 @@ func load(getenv func(string) string) (*Config, error) {
 		MailFrom:           strings.TrimSpace(getenv("MAIL_FROM")),
 		AdminEmail:         strings.TrimSpace(getenv("ADMIN_EMAIL")),
 		SignupMode:         strings.TrimSpace(getenv("SIGNUP_MODE")),
+		STUNURL:            strings.TrimSpace(getenv("STUN_URL")),
 		TURNURL:            strings.TrimSpace(getenv("TURN_URL")),
 		TURNSecret:         getenv("TURN_SECRET"),
 		AllowedHosts:       splitList(getenv("ALLOWED_HOSTS")),
@@ -161,6 +163,22 @@ func (c *Config) validate() error {
 	}
 	if err := c.validateSignupMode(); err != nil {
 		return err
+	}
+	if err := c.validateSTUNURL(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateSTUNURL requires the optional STUN_URL, when set, to use a stun:/stuns: scheme.
+// A wrong scheme would silently produce a broken ICE config, so it fails closed at
+// startup. Empty is fine — the deployment then offers no STUN server (dev/loopback).
+func (c *Config) validateSTUNURL() error {
+	if c.STUNURL == "" {
+		return nil
+	}
+	if !strings.HasPrefix(c.STUNURL, "stun:") && !strings.HasPrefix(c.STUNURL, "stuns:") {
+		return fmt.Errorf("config: STUN_URL=%q must use a stun:/stuns: scheme: %w", c.STUNURL, ErrInvalidValue)
 	}
 	return nil
 }

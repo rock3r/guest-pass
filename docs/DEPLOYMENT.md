@@ -99,6 +99,7 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `MAIL_MODE` | — | — | `log` prints magic links to stdout (dev / airgapped self-host); production uses Resend. Default is the Resend path. |
 | `ADMIN_EMAIL` | ✅ | — | The first sign-in matching this email is auto-approved as owner/admin (`is_admin`, D-14). |
 | `SIGNUP_MODE` | ✅ | — | `open` \| `approval` \| `allowlist` (see §4). Public instance = `open`. |
+| `STUN_URL` | optional | — | The self-hosted STUN server offered to every peer in the ICE config (`stun:`/`stuns:` scheme; a wrong scheme refuses to boot). STUN-only is the default posture (D-38); leave empty only for dev/loopback, where peers connect on host-local candidates. |
 | `TURN_URL` | optional | — | BYO / 3rd-party TURN, or to enable the bundled coturn relay (D-38). Empty ⇒ STUN-only. |
 | `TURN_SECRET` | optional¹ | **✅ when set (EN-14)** | coturn reads this to validate ephemeral-HMAC TURN credentials. Refuses placeholder/empty **if TURN is enabled**. |
 | `ALLOWED_HOSTS` | optional | — | Email allowlist consulted when `SIGNUP_MODE=allowlist`. |

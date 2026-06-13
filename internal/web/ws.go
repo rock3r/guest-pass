@@ -22,7 +22,11 @@ import (
 //
 // inflight (nil-safe) tracks each upgraded connection so a graceful drain can wait for
 // terminate frames to flush before the process exits (RF-21).
-func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
+//
+// iceServers is the ICE configuration handed to every peer in the {t:"ice"} join-ack
+// (AD-14). It is empty in the STUN-less dev/loopback default and STUN-only otherwise
+// (D-38); the TURN entry + ephemeral HMAC credential (EN-4) land in M2.
+func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup, iceServers []signaling.ICEServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Count the handler at entry — before the upgrade — so a drain's Wait can't race
 		// a handler sitting between Accept and a later Add (which would be an Add-from-zero
@@ -58,6 +62,13 @@ func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 		}
 		pid := signaling.PeerID(peer)
 		out := make(chan signaling.Frame, 64)
+		// Enqueue the ICE config join-ack BEFORE Join (AD-14): the buffered channel makes
+		// it the first frame the writer flushes, ahead of anything the room emits on join
+		// (e.g. a source's slot-unbound), so the client has its ICE config before any
+		// signaling. Skipped when no servers are configured (dev/loopback).
+		if len(iceServers) > 0 {
+			out <- signaling.Frame{T: "ice", ICEServers: iceServers}
+		}
 		if !room.Join(pid, role, signaling.SlotID(slot), out) {
 			// The room started draining between hub.Room and Join. Tell the client to
 			// reconnect and close; we never registered, so there's no writer to drain.

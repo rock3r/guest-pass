@@ -46,12 +46,34 @@ func write(t *testing.T, c *websocket.Conn, f signaling.Frame) {
 	}
 }
 
+// A joining peer's first frame is the {t:"ice"} join-ack carrying the configured ICE
+// servers (AD-14), so the client can build its RTCPeerConnection before any signaling.
+func TestWSJoinAckCarriesICEConfig(t *testing.T) {
+	hub := signaling.NewHub()
+	ice := []signaling.ICEServer{{URLs: []string{"stun:stun.example.org:3478"}}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", ServeWS(hub, nil, ice))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	g := dial(t, srv.URL, "session=s1&peer=g1&role=guest")
+	defer g.CloseNow()
+
+	f := readFrame(t, g)
+	if f.T != "ice" {
+		t.Fatalf("first frame = %q, want ice", f.T)
+	}
+	if len(f.ICEServers) != 1 || len(f.ICEServers[0].URLs) != 1 || f.ICEServers[0].URLs[0] != "stun:stun.example.org:3478" {
+		t.Fatalf("ice frame servers = %+v, want one STUN entry", f.ICEServers)
+	}
+}
+
 // Full transport path: an OBS source page connects for a slot, a host rebinds it to
 // a guest, and the source page receives the slot-rebind over the wire (EN-3).
 func TestWSSlotRebindEndToEnd(t *testing.T) {
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ServeWS(hub, nil))
+	mux.HandleFunc("/ws", ServeWS(hub, nil, nil))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -79,7 +101,7 @@ func TestWSSlotRebindEndToEnd(t *testing.T) {
 func TestWSDrainSendsTerminate(t *testing.T) {
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ServeWS(hub, nil))
+	mux.HandleFunc("/ws", ServeWS(hub, nil, nil))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -113,7 +135,7 @@ func TestWSDrainSendsTerminate(t *testing.T) {
 func TestWSSignalRelay(t *testing.T) {
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ServeWS(hub, nil))
+	mux.HandleFunc("/ws", ServeWS(hub, nil, nil))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
