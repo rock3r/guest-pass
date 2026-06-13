@@ -241,11 +241,12 @@ go test -tags browser ./internal/browsertest/...  # islands + OBS source pages
 go test -tags browser -run M2 ./internal/browsertest/...  # M2 media tracer (multi-tab real-Chrome WebRTC)
 ```
 
-> OPEN: exact package path and build tag for the chromedp/media-tracer layer
-> (`internal/browsertest` vs. `internal/web`; `//go:build browser` vs. env like
-> `CHROMEDP=1`) are an implementation-time call — confirm at M1 SPIKE-1 / M2. The
-> commands above are the intended shape, not a frozen contract — but they target a
-> **Go** package, never `web/` (RF-26).
+> RESOLVED (M2 PR-5): the chromedp browser layer is the Go package
+> **`internal/browsertest`**, compiled only under the **`//go:build browser`** tag and run
+> with `go test -tags browser ./internal/browsertest/...` — locally and in the CI `browser`
+> job (which installs Chrome and sets `CHROME_PATH`). The harness builds the real bundles
+> via `internal/assets` and drives them in headless Chrome with the fake-media flags. It is
+> a **Go** package, never under `web/` (RF-26).
 
 ---
 

@@ -416,7 +416,7 @@ JSON signaling frames and projecting room state — it does **no media processin
 
 | Concern | Choice | Why / contract |
 |---|---|---|
-| Language | **Go 1.25+** (AD-15) | Toolchain floor (a minimum, not a pinned version), raised from 1.24 to track current `modernc.org/sqlite`; single static binary. Module path `github.com/rock3r/guest-pass`. |
+| Language | **Go 1.26+** (AD-15) | Toolchain floor (a minimum, not a pinned version), tracking current deps (raised to 1.25 for `modernc.org/sqlite`, then 1.26 for `chromedp`); single static binary. Module path `github.com/rock3r/guest-pass`. |
 | Router | `go-chi/chi` | Idiomatic, tiny, stdlib-shaped middleware. |
 | WebSockets | **`coder/websocket`** (AD-16), wrapped behind `internal/signaling/conn` as an in-process **test seam** | Actively maintained, context-first, ergonomic. Its self-serialization is *redundant* with our single-writer `writeLoop` (EN-12), not extra safety (RF-19). |
 | DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame stats** — `peers.used_turn` written once at disconnect. |
@@ -457,6 +457,8 @@ internal/
     conn.go           per-conn readLoop(→room cmds) + writeLoop(←sendCh) — one-writer-per-conn (EN-12)
     frames.go roster.go locks.go slots.go   + *_test.go pure-Go room TDD
   web/                http handlers, html/template render, route table, CSP/SRI/cookies, source pages
+  assets/             shared esbuild build config (BuildOptions/Build + SRI manifest), used by cmd/build + browsertest
+  browsertest/        //go:build browser — chromedp + fake-media harness (AD-9); islands/OBS/tracer tests
   livecheck/          D-29 scraping, SSRF-closed
   jobs/               24h PII purge + idle-session reaper tickers (D-37/D-40)
 web/
