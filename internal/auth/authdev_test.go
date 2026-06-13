@@ -10,6 +10,13 @@ import (
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
+// loopbackReq is a dev-login request from localhost (DevLogin is loopback-only).
+func loopbackReq() *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/auth/dev", nil)
+	r.RemoteAddr = "127.0.0.1:50000"
+	return r
+}
+
 // Run with: go test -tags dev ./internal/auth/...
 func TestDevLogin_MintsActiveAdminSessionAndReuses(t *testing.T) {
 	ring := newRing(t, testCurrent)
@@ -18,7 +25,7 @@ func TestDevLogin_MintsActiveAdminSessionAndReuses(t *testing.T) {
 	h := a.DevLogin(up, "", "")
 
 	rec := httptest.NewRecorder()
-	h(rec, httptest.NewRequest(http.MethodGet, "/auth/dev", nil))
+	h(rec, loopbackReq())
 	if rec.Code != http.StatusFound {
 		t.Fatalf("code = %d, want 302", rec.Code)
 	}
@@ -38,8 +45,28 @@ func TestDevLogin_MintsActiveAdminSessionAndReuses(t *testing.T) {
 
 	// Second login reuses the existing dev host (no duplicate create).
 	rec2 := httptest.NewRecorder()
-	h(rec2, httptest.NewRequest(http.MethodGet, "/auth/dev", nil))
+	h(rec2, loopbackReq())
 	if len(up.created) != 1 {
 		t.Fatalf("dev login should reuse the dev host, created = %d", len(up.created))
+	}
+}
+
+func TestDevLogin_RejectsNonLoopbackClient(t *testing.T) {
+	ring := newRing(t, testCurrent)
+	a := NewAuthenticator(ring, &fakeHosts{byID: map[string]*store.Host{}}, false)
+	up := &fakeUpserter{}
+	h := a.DevLogin(up, "", "")
+
+	// A LAN/remote client must not receive an admin session even on a dev binary.
+	req := httptest.NewRequest(http.MethodGet, "/auth/dev", nil)
+	req.RemoteAddr = "203.0.113.10:40000"
+	rec := httptest.NewRecorder()
+	h(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback dev login = %d, want 403", rec.Code)
+	}
+	if len(up.created) != 0 || sessionCookieFromRec(rec) != nil {
+		t.Fatal("non-loopback dev login must not create a host or set a session")
 	}
 }

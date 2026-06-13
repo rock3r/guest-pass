@@ -4,6 +4,7 @@ package web
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -18,8 +19,20 @@ import (
 // handling incl. the null OBS-CEF Origin, and token redaction (EN-16) land in M2
 // step 1. The role is still inferred from the connection, never trusted from a
 // frame body (EN-7).
-func ServeWS(hub *signaling.Hub) http.HandlerFunc {
+//
+// inflight (nil-safe) tracks each upgraded connection so a graceful drain can wait for
+// terminate frames to flush before the process exits (RF-21).
+func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Count the handler at entry — before the upgrade — so a drain's Wait can't race
+		// a handler sitting between Accept and a later Add (which would be an Add-from-zero
+		// concurrent with Wait). Done covers every exit path, including validation/Accept
+		// failure.
+		if inflight != nil {
+			inflight.Add(1)
+			defer inflight.Done()
+		}
+
 		q := r.URL.Query()
 		session, peer := q.Get("session"), q.Get("peer")
 		role, slot := q.Get("role"), q.Get("slot")
@@ -37,9 +50,20 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 
 		ctx := r.Context()
 		room := hub.Room(session)
+		if room == nil {
+			// The hub is draining (Hub.Shutdown ran). Tell the client to reconnect
+			// (transient, EN-9) and close; never spawn a room on a shutting-down hub.
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+			return
+		}
 		pid := signaling.PeerID(peer)
 		out := make(chan signaling.Frame, 64)
-		room.Join(pid, role, signaling.SlotID(slot), out)
+		if !room.Join(pid, role, signaling.SlotID(slot), out) {
+			// The room started draining between hub.Room and Join. Tell the client to
+			// reconnect and close; we never registered, so there's no writer to drain.
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+			return
+		}
 
 		// Single writer goroutine (EN-12): the ONLY place this socket is written. It
 		// ends when the room closes out (during Leave below).
@@ -54,6 +78,10 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 					return
 				}
 			}
+			// out was closed by the room (Leave / drain Terminate). All queued frames —
+			// including a terminate sent during a graceful drain — are now flushed, so
+			// close the socket to unblock the reader and let the handler return promptly.
+			c.CloseNow()
 		}()
 
 		// Reader loop: parse frames → room commands.

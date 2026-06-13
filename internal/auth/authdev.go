@@ -4,6 +4,7 @@ package auth
 
 import (
 	"errors"
+	"net"
 	"net/http"
 
 	"github.com/rock3r/guest-pass/internal/store"
@@ -17,6 +18,10 @@ const devHostGoogleSub = "dev-local-host"
 // does not exist in a release binary at all; config additionally refuses AUTH_MODE=dev
 // in a release build and requires a loopback BASE_URL in a dev build (RF-4). The dev
 // host is active + admin so a developer can exercise every route locally.
+//
+// As defense-in-depth, the handler ALSO rejects non-loopback clients: the dev server
+// still listens on all interfaces, so a LAN- or Docker-exposed dev binary must not hand
+// an admin session to a remote client — only requests from localhost are honored.
 func (a *Authenticator) DevLogin(hosts HostUpserter, email, name string) http.HandlerFunc {
 	if email == "" {
 		email = "dev@localhost"
@@ -25,6 +30,10 @@ func (a *Authenticator) DevLogin(hosts HostUpserter, email, name string) http.Ha
 		name = "Dev Host"
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !remoteIsLoopback(r) {
+			http.Error(w, "dev login is loopback-only", http.StatusForbidden)
+			return
+		}
 		host, err := hosts.GetHostByGoogleSub(r.Context(), devHostGoogleSub)
 		if errors.Is(err, store.ErrNotFound) {
 			host, err = hosts.CreateHost(r.Context(), store.CreateHostParams{
@@ -45,4 +54,14 @@ func (a *Authenticator) DevLogin(hosts HostUpserter, email, name string) http.Ha
 		}
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
+}
+
+// remoteIsLoopback reports whether the request's client address is a loopback IP.
+func remoteIsLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="signin">
+<h1>Host sign-in</h1>
+<p>GuestPass uses your Google account to identify you as a host. Guests never need an
+account.</p>
+<p><a class="cta" href="/auth/google">Sign in with Google</a></p>
+{{if .DevLogin}}<p class="dev-note"><a href="/auth/dev">Dev sign-in (local only)</a></p>{{end}}
+</section>
+{{end}}

@@ -1,5 +1,10 @@
 package signaling
 
+import (
+	"sync"
+	"time"
+)
+
 // peerConn is the room goroutine's handle to a connected peer. Frames are delivered
 // by a NON-blocking send to out, so a slow/stalled peer never blocks the room
 // (AD-12 — drop slow peers); the transport owns the goroutine draining out.
@@ -63,14 +68,26 @@ func deliver(conns map[PeerID]*peerConn, outs []outbound) {
 	}
 }
 
-// Join registers a connection and enters it into the room. An OBS source page
-// (role obs/obs_screen) also subscribes to its slot and is told the current binding.
+// Join registers a connection and enters it into the room, returning whether it was
+// admitted. An OBS source page (role obs/obs_screen) also subscribes to its slot and is
+// told the current binding.
 //
 // One connection per identity (EN-16): if a peer id is already connected, the prior
 // connection is evicted (its out channel closed) before the new one is installed, so
 // a duplicate id can't leave a stale conn that a later Leave would mis-target.
-func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
-	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+//
+// Join returns false (admitting nothing) if the room is draining (Terminate ran) or its
+// goroutine has stopped — so a connection that resolved this room just before a shutdown
+// can't slip in after the terminate broadcast and strand itself with no teardown. The
+// caller then closes the connection itself. Join is synchronous: it waits for the
+// command to run, so the result reflects the room's actual state.
+func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) bool {
+	admitted := make(chan bool, 1)
+	cmd := func(st *roomState, conns map[PeerID]*peerConn) {
+		if st.terminating {
+			admitted <- false
+			return
+		}
 		if old := conns[id]; old != nil {
 			// Tell the evicted client to reconnect (EN-9 transient) before closing
 			// its channel, so a duplicate identity is a clean handover.
@@ -86,7 +103,22 @@ func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
 			outs = append(outs, st.attachSource(slot, id)...)
 		}
 		deliver(conns, outs)
-	})
+		admitted <- true
+	}
+	select {
+	case r.cmds <- cmd:
+		// The command was enqueued, but the room goroutine may still exit on r.done
+		// (Close) before running it — so wait on both, never just <-admitted, or a
+		// Close racing the enqueue would block Join forever.
+		select {
+		case ok := <-admitted:
+			return ok
+		case <-r.done:
+			return false
+		}
+	case <-r.done:
+		return false
+	}
 }
 
 // Leave removes a peer and CLOSES its out channel from the room goroutine — the only
@@ -128,6 +160,50 @@ func (r *Room) ObsActive(slot SlotID, active bool, epoch int) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.obsSourceActive(slot, active, epoch))
 	})
+}
+
+// terminateBudget bounds how long Terminate waits PER PEER to enqueue a terminate frame
+// into a backed-up out queue during a drain.
+const terminateBudget = 2 * time.Second
+
+// Terminate sends a terminate frame to every connected peer, then closes their out
+// channels and clears the roster. Used for graceful shutdown (RF-21): the transient
+// reason "reconnect" tells clients to retry with backoff (keyed by pass_id), so a
+// deploy/restart isn't a hard mass-drop.
+//
+// terminate is a terminal control frame, so it must not be silently dropped on a full
+// queue (RF-16). Each peer's send therefore BLOCKS until its writeLoop drains a slot,
+// with its OWN budget so one wedged socket can't consume the time for the others; the
+// peers are handled CONCURRENTLY so total time is ~one budget, not the sum. A genuinely
+// stuck peer is given up on (its socket is dead anyway) and still closed. It runs on the
+// room goroutine, so a concurrent readLoop Leave for a now-removed conn is a no-op
+// (identity-checked).
+func (r *Room) Terminate(reason string) {
+	done := make(chan struct{})
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		st.terminating = true // refuse any late Join that arrives after this command
+		var wg sync.WaitGroup
+		for id, c := range conns {
+			wg.Add(1)
+			go func(c *peerConn) {
+				defer wg.Done()
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case c.out <- Frame{T: "terminate", Reason: reason}:
+				case <-t.C: // this peer is wedged; give up on it
+				}
+				close(c.out)
+			}(c)
+			delete(conns, id)
+		}
+		wg.Wait()
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-r.done:
+	}
 }
 
 // Close stops the room goroutine.

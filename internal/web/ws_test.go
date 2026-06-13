@@ -51,7 +51,7 @@ func write(t *testing.T, c *websocket.Conn, f signaling.Frame) {
 func TestWSSlotRebindEndToEnd(t *testing.T) {
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ServeWS(hub))
+	mux.HandleFunc("/ws", ServeWS(hub, nil))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -74,11 +74,46 @@ func TestWSSlotRebindEndToEnd(t *testing.T) {
 	}
 }
 
+// On a graceful drain (Hub.Shutdown), connected peers receive a terminate:reconnect
+// frame over the wire before the socket closes (RF-21).
+func TestWSDrainSendsTerminate(t *testing.T) {
+	hub := signaling.NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", ServeWS(hub, nil))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// A source conn gets slot-unbound immediately on join, confirming the room is
+	// registered before we trigger the drain (avoids a join/shutdown race).
+	c := dial(t, srv.URL, "session=d&peer=src&role=obs&slot=cam-1")
+	defer c.CloseNow()
+	if f := readFrame(t, c); f.T != "slot-unbound" {
+		t.Fatalf("first frame = %q, want slot-unbound", f.T)
+	}
+
+	hub.Shutdown("reconnect")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for {
+		var f signaling.Frame
+		if err := wsjson.Read(ctx, c, &f); err != nil {
+			t.Fatalf("socket closed before a terminate frame arrived: %v", err)
+		}
+		if f.T == "terminate" {
+			if f.Reason != "reconnect" {
+				t.Fatalf("terminate reason = %q, want reconnect", f.Reason)
+			}
+			return
+		}
+	}
+}
+
 // SDP/ICE is relayed verbatim between addressed peers, stamped with the sender.
 func TestWSSignalRelay(t *testing.T) {
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ServeWS(hub))
+	mux.HandleFunc("/ws", ServeWS(hub, nil))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 

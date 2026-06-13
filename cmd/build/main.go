@@ -12,12 +12,39 @@
 package main
 
 import (
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/evanw/esbuild/pkg/api"
 )
+
+// manifestBundles are the entry bundles whose Subresource Integrity hashes templates
+// inject (CONVENTIONS §3.5). Chunks/sourcemaps are not referenced directly by HTML.
+var manifestBundles = []string{"app.css", "app.js", "obs.js"}
+
+// writeManifest computes the SRI hash (sha384, the SRI-recommended digest) of each
+// emitted entry bundle in distDir and writes distDir/manifest.json mapping bundle name
+// to "sha384-<base64>". The web layer reads this to add integrity= attributes.
+func writeManifest(distDir string) error {
+	m := map[string]string{}
+	for _, name := range manifestBundles {
+		b, err := os.ReadFile(filepath.Join(distDir, name))
+		if err != nil {
+			continue // bundle not emitted (e.g. no CSS imported) — skip it
+		}
+		sum := sha512.Sum384(b)
+		m[name] = "sha384-" + base64.StdEncoding.EncodeToString(sum[:])
+	}
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(distDir, "manifest.json"), append(out, '\n'), 0o644)
+}
 
 // vendoredPreact maps the bare Preact specifiers to the exact committed files.
 var vendoredPreact = map[string]string{
@@ -56,6 +83,22 @@ func options() api.BuildOptions {
 	}
 	return api.BuildOptions{
 		AbsWorkingDir: root,
+		Plugins: []api.Plugin{{
+			// Regenerate the SRI manifest after every successful build — including each
+			// --watch rebuild — so rendered pages never serve a stale/missing integrity.
+			Name: "sri-manifest",
+			Setup: func(b api.PluginBuild) {
+				b.OnEnd(func(r *api.BuildResult) (api.OnEndResult, error) {
+					if len(r.Errors) > 0 {
+						return api.OnEndResult{}, nil
+					}
+					if err := writeManifest("web/dist"); err != nil {
+						return api.OnEndResult{}, err
+					}
+					return api.OnEndResult{}, nil
+				})
+			},
+		}},
 		EntryPoints: []string{
 			"web/src/islands/app.js",
 			"web/src/obs/obs.js",
@@ -108,5 +151,7 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	fmt.Println("built web/dist (app + obs entries)")
+	// The SRI manifest is written by the sri-manifest OnEnd plugin (runs for one-shot
+	// and watch builds alike).
+	fmt.Println("built web/dist (app + obs entries) + SRI manifest")
 }

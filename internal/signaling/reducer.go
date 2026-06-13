@@ -30,6 +30,10 @@ type outbound struct {
 type roomState struct {
 	peers map[PeerID]*peerInfo
 	slots map[SlotID]*slotState
+	// terminating is set when the room is draining (Terminate). Once set, late joins are
+	// refused so a connection can't slip into a room that has already sent its terminate
+	// frames and is about to stop.
+	terminating bool
 }
 
 func newRoomState() *roomState {

@@ -36,6 +36,9 @@ var (
 	// ErrInvalidValue means a variable held a value outside its accepted set
 	// (e.g. an unknown SIGNUP_MODE or MAIL_MODE).
 	ErrInvalidValue = errors.New("invalid configuration value")
+	// ErrInsecureBaseURL means BASE_URL is not https:// outside dev. Production requires
+	// HTTPS — Secure cookies, WebRTC, and Google OAuth all depend on it (DEPLOYMENT §2).
+	ErrInsecureBaseURL = errors.New("BASE_URL must be https:// outside dev")
 )
 
 // Accepted non-default values for the small enum-valued variables.
@@ -65,11 +68,24 @@ type Config struct {
 	AllowedHosts       []string
 	CodecOptin         []string
 	AuthMode           string // "" => production (Google OAuth); "dev" => fake host session (AD-8)
+	DBPath             string // SQLite file path (DB_PATH); defaults to guestpass.db
 }
+
+// defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
+// mounted volume (DEPLOYMENT §6).
+const defaultDBPath = "guestpass.db"
 
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
 // STUN-only (D-38) and TURN_SECRET is not required.
 func (c *Config) TURNEnabled() bool { return strings.TrimSpace(c.TURNURL) != "" }
+
+// Secure reports whether BASE_URL is an https origin, matching the scheme normalization
+// the validator uses (case- and space-insensitive). It is the single source of truth
+// for the session-cookie Secure flag and the CSP ws/wss scheme, so a "HTTPS://" or
+// space-padded value can't desync cookie security from validation.
+func (c *Config) Secure() bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.BaseURL)), "https://")
+}
 
 // Load reads configuration from the process environment and validates it, returning a
 // fail-closed error (EN-14 / AD-8) rather than a partially-valid Config.
@@ -93,6 +109,10 @@ func load(getenv func(string) string) (*Config, error) {
 		AllowedHosts:       splitList(getenv("ALLOWED_HOSTS")),
 		CodecOptin:         splitList(getenv("CODEC_OPTIN")),
 		AuthMode:           strings.TrimSpace(getenv("AUTH_MODE")),
+		DBPath:             strings.TrimSpace(getenv("DB_PATH")),
+	}
+	if c.DBPath == "" {
+		c.DBPath = defaultDBPath
 	}
 	if err := c.validate(); err != nil {
 		return nil, err
@@ -126,6 +146,9 @@ func (c *Config) validate() error {
 	if err := c.validateRequired(); err != nil {
 		return err
 	}
+	if err := c.validateBaseURLScheme(); err != nil {
+		return err
+	}
 	if err := c.validateSignupMode(); err != nil {
 		return err
 	}
@@ -156,6 +179,20 @@ func (c *Config) validateRequired() error {
 		if strings.TrimSpace(r.val) == "" {
 			return fmt.Errorf("config: %s: %w", r.name, ErrMissingRequired)
 		}
+	}
+	return nil
+}
+
+// validateBaseURLScheme requires an https:// BASE_URL outside dev. Production needs
+// HTTPS for Secure cookies, WebRTC, and Google OAuth (DEPLOYMENT §2); a dev build with
+// AUTH_MODE=dev uses a loopback http origin instead (enforced in validateAuthMode). It
+// runs after validateRequired, so an empty BASE_URL is reported as missing, not insecure.
+func (c *Config) validateBaseURLScheme() error {
+	if c.AuthMode == AuthModeDev {
+		return nil
+	}
+	if !c.Secure() {
+		return fmt.Errorf("config: BASE_URL %q: %w", c.BaseURL, ErrInsecureBaseURL)
 	}
 	return nil
 }

@@ -198,6 +198,48 @@ func TestLoad_InvalidEnumsRejected(t *testing.T) {
 	}
 }
 
+func TestConfig_Secure(t *testing.T) {
+	cases := map[string]bool{
+		"https://guest-pass.link":   true,
+		"HTTPS://guest-pass.link":   true, // scheme is case-insensitive
+		"  https://guest-pass.link": true, // leading space tolerated
+		"http://guest-pass.link":    false,
+		"":                          false,
+	}
+	for base, want := range cases {
+		if got := (&Config{BaseURL: base}).Secure(); got != want {
+			t.Errorf("Secure(%q) = %v, want %v", base, got, want)
+		}
+	}
+}
+
+func TestLoad_ProductionRequiresHTTPSBaseURL(t *testing.T) {
+	// Production (AUTH_MODE unset) requires an https:// BASE_URL.
+	env := validEnv()
+	env["BASE_URL"] = "http://guest-pass.link"
+	if _, err := envLoad(env); !errors.Is(err, ErrInsecureBaseURL) {
+		t.Fatalf("http BASE_URL in production = %v, want ErrInsecureBaseURL", err)
+	}
+	// https is fine.
+	env["BASE_URL"] = "https://guest-pass.link"
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("https BASE_URL should load, got %v", err)
+	}
+}
+
+func TestLoad_DBPathDefaultAndOverride(t *testing.T) {
+	c, err := envLoad(validEnv())
+	if err != nil || c.DBPath != "guestpass.db" {
+		t.Fatalf("default DBPath = %q (err %v), want guestpass.db", c.DBPath, err)
+	}
+	env := validEnv()
+	env["DB_PATH"] = "/data/guestpass.db"
+	c, err = envLoad(env)
+	if err != nil || c.DBPath != "/data/guestpass.db" {
+		t.Fatalf("DBPath override = %q (err %v)", c.DBPath, err)
+	}
+}
+
 func TestLoad_ParsesFields(t *testing.T) {
 	env := validEnv()
 	env["BASE_URL"] = "https://guest-pass.link"
