@@ -457,7 +457,7 @@ func TestWS_HostRebindReachesSource(t *testing.T) {
 	wsWriteFrame(t, hostConn, signaling.Frame{T: "rebind", Slot: "cam-1", OccupantPeerID: pass.ID})
 
 	f := wsReadFrame(t, src)
-	if f.T != "slot-rebind" || f.OccupantPeerID != pass.ID || f.Epoch != 1 {
+	if f.T != "slot-rebind" || f.OccupantPeerID != pass.ID || f.Epoch == nil || *f.Epoch != 1 {
 		t.Fatalf("source frame = %+v, want slot-rebind(%s, epoch 1)", f, pass.ID)
 	}
 }

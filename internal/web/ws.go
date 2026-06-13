@@ -140,9 +140,10 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 			room.Unbind(signaling.SlotID(f.Slot))
 		}
 	case "obs":
-		if id.isSource() && f.Event == "sourceActive" {
-			// Epoch echoed by the source; the room ignores stale epochs (EN-3).
-			room.ObsActive(id.slot, f.Active, f.Epoch)
+		if id.isSource() && f.Event == "sourceActive" && f.Epoch != nil {
+			// Epoch echoed by the source; the room ignores stale epochs (EN-3). A
+			// sourceActive without an epoch can't be resolved to a slot, so it is ignored.
+			room.ObsActive(id.slot, f.Active, *f.Epoch)
 		}
 	}
 }
