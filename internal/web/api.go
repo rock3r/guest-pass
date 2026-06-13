@@ -137,8 +137,15 @@ func (a *apiServer) ownedStream(w http.ResponseWriter, r *http.Request) (*store.
 		return nil, false
 	}
 	s, err := a.store.GetStream(r.Context(), chi.URLParam(r, "id"))
-	if err != nil || s.HostID != host.ID {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && s.HostID != host.ID) {
+		// Missing and foreign streams both answer 404 so a host can't probe others' ids.
 		writeError(w, http.StatusNotFound, "stream not found")
+		return nil, false
+	}
+	if err != nil {
+		// A transient DB/scan error is not a 404 — surface it so the host doesn't act on
+		// a healthy-looking "not found" while the backend is unhealthy.
+		writeError(w, http.StatusInternalServerError, "could not load stream")
 		return nil, false
 	}
 	return s, true
@@ -198,9 +205,14 @@ func (a *apiServer) createPass(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "pass created but invite delivery failed")
 		return
 	}
-	if err := a.store.SetPassStatus(r.Context(), pass.ID, store.PassSent); err == nil {
-		pass.Status = store.PassSent
+	if err := a.store.SetPassStatus(r.Context(), pass.ID, store.PassSent); err != nil {
+		// The invite was delivered but we couldn't record it. Surface the failure rather
+		// than returning a misleading "created" status with no sent_at, which would invite
+		// a duplicate resend (M4).
+		writeError(w, http.StatusInternalServerError, "invite sent but could not record pass status")
+		return
 	}
+	pass.Status = store.PassSent
 	writeJSON(w, http.StatusCreated, toPassView(pass))
 }
 

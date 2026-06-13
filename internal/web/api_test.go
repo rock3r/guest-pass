@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -275,6 +276,32 @@ func TestAPI_CreatePassSendsMagicLinkWithoutLeakingToken(t *testing.T) {
 	}
 	if stored.ID != pv.ID {
 		t.Fatalf("token resolves pass %s, want %s", stored.ID, pv.ID)
+	}
+}
+
+// When invite delivery fails, the host gets a 502 (not a misleading 201) and the pass
+// stays in "created" — the row exists for a later resend (M4) but was never sent.
+func TestAPI_CreatePassMailFailureReturns502(t *testing.T) {
+	a := newAPIHarness(t)
+	a.mailer.err = errors.New("resend down")
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Stream")
+
+	rec := a.req(t, http.MethodPost, "/api/streams/"+streamID+"/passes",
+		`{"email":"guest@example.com"}`, cookie)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("mail failure = %d, want 502", rec.Code)
+	}
+
+	passes, err := a.store.ListPassesByStream(context.Background(), streamID)
+	if err != nil {
+		t.Fatalf("ListPassesByStream: %v", err)
+	}
+	if len(passes) != 1 {
+		t.Fatalf("want 1 pass row persisted, got %d", len(passes))
+	}
+	if passes[0].Status != store.PassCreated {
+		t.Errorf("pass status after failed send = %q, want created", passes[0].Status)
 	}
 }
 

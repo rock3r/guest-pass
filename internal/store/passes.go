@@ -80,7 +80,10 @@ func (s *Store) GetPassByTokenHash(ctx context.Context, tokenHash string) (*Pass
 	return scanPass(s.reader.QueryRowContext(ctx, passSelect+" WHERE token_hash = ?", tokenHash))
 }
 
-// ListPassesByStream returns a stream's passes, newest first (by id as a stable tiebreak).
+// ListPassesByStream returns a stream's passes in a stable, deterministic order by id.
+// Pass ids are random (UUIDv4), so this is NOT chronological; the passes table has no
+// created_at column, and chronological ordering would need a schema change (a later
+// milestone if the host UI calls for it).
 func (s *Store) ListPassesByStream(ctx context.Context, streamID string) ([]*Pass, error) {
 	rows, err := s.reader.QueryContext(ctx, passSelect+" WHERE stream_id = ? ORDER BY id", streamID)
 	if err != nil {
