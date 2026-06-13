@@ -23,6 +23,10 @@ const (
 	userInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 )
 
+// ErrLoginNotAllowed means the onboarding policy refuses a first-time sign-in (e.g. a
+// non-allowlisted email under SIGNUP_MODE=allowlist); no host row is created.
+var ErrLoginNotAllowed = errors.New("auth: login not allowed by signup policy")
+
 // googleEndpoint is Google's OAuth2 endpoint, defined inline to avoid pulling in
 // golang.org/x/oauth2/google (which drags cloud.google.com/go/compute/metadata in just
 // for these two URLs). Values match golang.org/x/oauth2/google.Endpoint.
@@ -142,6 +146,10 @@ func (g *GoogleOAuth) completeLogin(w http.ResponseWriter, r *http.Request, tok 
 		return
 	}
 	host, err := g.resolveHost(r.Context(), info)
+	if errors.Is(err, ErrLoginNotAllowed) {
+		http.Error(w, "this account is not authorized for this instance", http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		http.Error(w, "login failed", http.StatusInternalServerError)
 		return
@@ -153,8 +161,10 @@ func (g *GoogleOAuth) completeLogin(w http.ResponseWriter, r *http.Request, tok 
 	http.Redirect(w, r, g.successURL, http.StatusFound)
 }
 
-// resolveHost returns the existing host for this Google identity, or creates one with a
-// status/admin per the onboarding policy.
+// resolveHost returns the existing host for this Google identity, or creates one per
+// the onboarding policy. It returns ErrLoginNotAllowed when the policy refuses a
+// first-time sign-in (e.g. a non-allowlisted email under SIGNUP_MODE=allowlist), in
+// which case no host row is persisted.
 func (g *GoogleOAuth) resolveHost(ctx context.Context, info *userInfo) (*store.Host, error) {
 	h, err := g.hosts.GetHostByGoogleSub(ctx, info.Sub)
 	if err == nil {
@@ -163,7 +173,10 @@ func (g *GoogleOAuth) resolveHost(ctx context.Context, info *userInfo) (*store.H
 	if !errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("looking up host: %w", err)
 	}
-	status, isAdmin := g.policy.statusForNewHost(info.Email)
+	d := g.policy.decideNewHost(info.Email)
+	if !d.allowed {
+		return nil, ErrLoginNotAllowed
+	}
 	var picture *string
 	if info.Picture != "" {
 		picture = &info.Picture
@@ -173,8 +186,8 @@ func (g *GoogleOAuth) resolveHost(ctx context.Context, info *userInfo) (*store.H
 		Email:     info.Email,
 		Name:      info.Name,
 		Picture:   picture,
-		IsAdmin:   isAdmin,
-		Status:    status,
+		IsAdmin:   d.isAdmin,
+		Status:    d.status,
 	})
 }
 

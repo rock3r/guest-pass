@@ -129,6 +129,23 @@ func TestGoogleOAuth_CompleteLogin_ExistingHost(t *testing.T) {
 	}
 }
 
+func TestGoogleOAuth_CompleteLogin_AllowlistMissRejected(t *testing.T) {
+	up := &fakeUpserter{}
+	g := newGoogle(t, up, LoginPolicy{SignupMode: config.SignupModeAllowlist, AllowedHosts: []string{"allowed@example.com"}})
+	g.fetch = &fakeFetcher{info: &userInfo{Sub: "sub-x", Email: "stranger@example.com", EmailVerified: true}}
+
+	rec := httptest.NewRecorder()
+	g.completeLogin(rec, httptest.NewRequest(http.MethodGet, "/", nil), &oauth2.Token{AccessToken: "x"})
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("allowlist miss: code = %d, want 403", rec.Code)
+	}
+	// Crucially: no persistent host row, so adding the email later just works on re-login.
+	if len(up.created) != 0 || sessionCookieFromRec(rec) != nil {
+		t.Fatal("allowlist miss must not create a host or set a session")
+	}
+}
+
 func TestGoogleOAuth_CompleteLogin_UnverifiedRejected(t *testing.T) {
 	up := &fakeUpserter{}
 	g := newGoogle(t, up, LoginPolicy{SignupMode: config.SignupModeOpen})
