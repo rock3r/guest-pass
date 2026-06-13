@@ -46,7 +46,7 @@ type RouterConfig struct {
 // assets, and the (rate-limited) auth routes.
 func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	manifest := loadManifest(cfg.StaticDir)
-	rd, err := newRenderer(cfg.SourceURL, manifest["app.css"], cfg.DevLogin != nil)
+	rd, err := newRenderer(cfg.SourceURL, manifest["app.css"], manifest["app.js"], cfg.DevLogin != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -110,13 +110,14 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Post("/api/streams/{id}/passes", api.createPass)
 		})
 
-		// Public guest landing. Rate-limited (when configured) to blunt token scanning;
-		// the handler is side-effect-free (EN-10).
+		// Public guest landing + device-check entry. Rate-limited (when configured) to blunt
+		// token scanning; GET is side-effect-free, the explicit POST /enter marks opened (EN-10).
 		r.Group(func(pr chi.Router) {
 			if cfg.RateLimiter != nil {
 				pr.Use(cfg.RateLimiter.Middleware(ClientIP))
 			}
 			pr.Get("/p/{token}", api.passLanding)
+			pr.Post("/p/{token}/enter", api.passEnter)
 		})
 	}
 

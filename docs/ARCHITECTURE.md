@@ -768,8 +768,11 @@ created ──email──▶ sent ──link opened──▶ opened ──device
 - **Expiry: 30 min after stream end (D-5).** Baseline `scheduled_at + duration_min
   + 30min`; if the session runs long, expiry extends to `session.ended_at + 30min`.
 - **`GET /p/{token}` is side-effect-free (EN-10).** The transition to `opened`
-  happens only on an **explicit client action** (entering the device-check), so
-  mail scanners and unfurlers can't false-positive. Prefetch-safe by construction.
+  happens only on an **explicit client action** — a pass-authenticated
+  `POST /p/{token}/enter` from the device-check island — so mail scanners and
+  unfurlers can't false-positive. Prefetch-safe by construction. The transition
+  fires only from a pre-opened state (`created`/`sent`), so a repeat entry is
+  idempotent and never regresses an already-`accepted` pass.
 - **Regenerate / revoke → "link turned off" screen.** Regenerate rotates the
   magic-link token, sets status back to `sent`, re-emails; the old link shows "link
   turned off". Expiry alone shows "pass expired".

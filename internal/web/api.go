@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -249,7 +251,7 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load pass")
 		return
 	}
-	if pass.Status == store.PassRevoked || pass.Status == store.PassExpired {
+	if passRetired(pass) {
 		http.Error(w, "this invite link has been turned off", http.StatusGone)
 		return
 	}
@@ -263,6 +265,78 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 		guest = *pass.Name
 	}
 	a.rd.passLandingPage(w, r, title, guest)
+}
+
+// passEnter handles POST /p/{token}/enter — the explicit device-check entry. It is the ONE
+// place a magic-link pass transitions to "opened" (EN-10): GET is side-effect-free, this
+// POST does the transition. The transition fires only from a pre-opened state (created /
+// sent), so a repeat entry is idempotent — it never re-stamps opened_at nor regresses an
+// already-opened/accepted pass. Authenticated by the pass token alone (no host session).
+func (a *apiServer) passEnter(w http.ResponseWriter, r *http.Request) {
+	raw := chi.URLParam(r, "token")
+	pass, err := a.store.GetPassByTokenHash(r.Context(), a.hasher.Hash(raw))
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "pass not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pass")
+		return
+	}
+	if passRetired(pass) {
+		http.Error(w, "this invite link has been turned off", http.StatusGone)
+		return
+	}
+	// EN-6 parity with the WS join: the pass's host must be active right now. A
+	// suspended/pending host's guests can't enter — kept opaque to the guest (same
+	// "turned off" screen, never leaking the host's status).
+	if !a.hostActive(r.Context(), pass.StreamID) {
+		http.Error(w, "this invite link has been turned off", http.StatusGone)
+		return
+	}
+	// Atomic exactly-once transition (EN-10): MarkPassOpened only fires from created/sent and
+	// only while unexpired, so concurrent or repeated entries can't re-stamp opened_at nor
+	// regress an already-opened/accepted pass — no read-then-write race.
+	opened, err := a.store.MarkPassOpened(r.Context(), pass.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update pass")
+		return
+	}
+	if !opened {
+		// No transition: either a valid repeat entry (already opened/accepted), or the pass
+		// became retired/deleted in the gap since the pre-check. Re-read and reject anything
+		// that is no longer a usable pass rather than acknowledging success for it.
+		cur, err := a.store.GetPass(r.Context(), pass.ID)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && passRetired(cur)) {
+			http.Error(w, "this invite link has been turned off", http.StatusGone)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// hostActive reports whether the stream's host is currently active (EN-6). A lookup
+// failure is treated as not-active so a transient error never lets a guest enter.
+func (a *apiServer) hostActive(ctx context.Context, streamID string) bool {
+	stream, err := a.store.GetStream(ctx, streamID)
+	if err != nil {
+		return false
+	}
+	host, err := a.store.GetHost(ctx, stream.HostID)
+	if err != nil {
+		return false
+	}
+	return host.Status == store.HostActive
+}
+
+// passRetired reports whether a magic-link pass can no longer be used by a guest: revoked,
+// expired by status, or past its expiry deadline. Such a pass shows the "link turned off"
+// screen and can never transition to opened (kept consistent with the WS join check).
+func passRetired(p *store.Pass) bool {
+	if p.Status == store.PassRevoked || p.Status == store.PassExpired {
+		return true
+	}
+	return p.ExpiresAt != nil && time.Now().Unix() >= *p.ExpiresAt
 }
 
 // --- JSON helpers ---

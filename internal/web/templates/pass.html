@@ -2,11 +2,10 @@
 <section class="pass">
 <h1>You're invited{{if .GuestName}}, {{.GuestName}}{{end}}</h1>
 <p>You've been invited to join the live stream <strong>{{.StreamTitle}}</strong> as a guest.
-No account or install needed — when the stream is about to start, continue to the camera
-check.</p>
+No account or install needed — run a quick camera check, then enter the greenroom.</p>
 <p class="privacy">Your name and email are used only for this stream and are deleted within
 24 hours of it ending.</p>
-<p><button type="button" disabled>Continue to camera check</button>
-<span class="soon">(available when the greenroom opens)</span></p>
+<div id="device-check"></div>
 </section>
+<script type="module" src="/static/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}" crossorigin="anonymous"{{end}}></script>
 {{end}}

@@ -163,6 +163,29 @@ func (s *Store) SetPassStatus(ctx context.Context, id, status string) error {
 	return errIfNoRows(res)
 }
 
+// MarkPassOpened atomically transitions a pass to "opened" ONLY from a pre-opened state
+// (created/sent) AND only while it is not past its expiry deadline, stamping opened_at. It
+// returns true if it performed the transition and false otherwise — so concurrent or
+// repeated device-check entries mark a pass opened exactly once with no read-then-write
+// race, and a pass that expires in the gap after the caller's pre-check still can't be
+// opened (EN-10). The caller still rejects revoked/expired/past-deadline passes up front so
+// it can return the right status to the guest.
+func (s *Store) MarkPassOpened(ctx context.Context, id string) (bool, error) {
+	now := time.Now().Unix()
+	res, err := s.writer.ExecContext(ctx,
+		`UPDATE passes SET status = ?, opened_at = ?
+		 WHERE id = ? AND status IN (?, ?) AND (expires_at IS NULL OR expires_at > ?)`,
+		PassOpened, now, id, PassCreated, PassSent, now)
+	if err != nil {
+		return false, fmt.Errorf("marking pass opened: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("marking pass opened: %w", err)
+	}
+	return n > 0, nil
+}
+
 // DeletePass removes a pass.
 func (s *Store) DeletePass(ctx context.Context, id string) error {
 	res, err := s.writer.ExecContext(ctx, "DELETE FROM passes WHERE id = ?", id)

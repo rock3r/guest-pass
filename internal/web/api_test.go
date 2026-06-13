@@ -366,6 +366,149 @@ func TestAPI_PassLandingIsSideEffectFree(t *testing.T) {
 	}
 }
 
+// EN-10: the explicit device-check entry (POST /p/{token}/enter) is the ONE place a pass
+// transitions to opened. It stamps opened_at.
+func TestAPI_PassEnterMarksOpened(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Enter Stream")
+	passID, raw := a.mintPass(t, streamID, "Dana")
+
+	rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("POST enter = %d, body %s", rec.Code, rec.Body.String())
+	}
+	p, err := a.store.GetPass(context.Background(), passID)
+	if err != nil {
+		t.Fatalf("GetPass: %v", err)
+	}
+	if p.Status != store.PassOpened {
+		t.Errorf("status after enter = %q, want opened", p.Status)
+	}
+	if p.OpenedAt == nil {
+		t.Error("enter must stamp opened_at")
+	}
+}
+
+// Re-entry is idempotent and must NOT regress a pass that has already progressed past
+// opened (e.g. accepted), nor re-stamp opened_at.
+func TestAPI_PassEnterIsIdempotentAndNoRegress(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Idempotent Stream")
+	passID, raw := a.mintPass(t, streamID, "Dana")
+
+	// First entry → opened.
+	if rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("first enter = %d", rec.Code)
+	}
+	first, _ := a.store.GetPass(context.Background(), passID)
+	// Second entry → still 200, opened_at unchanged (no-op from the opened state).
+	if rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("second enter = %d", rec.Code)
+	}
+	second, _ := a.store.GetPass(context.Background(), passID)
+	if second.Status != store.PassOpened || first.OpenedAt == nil || second.OpenedAt == nil || *second.OpenedAt != *first.OpenedAt {
+		t.Errorf("re-entry should be a no-op: first=%v second=%v", first.OpenedAt, second.OpenedAt)
+	}
+
+	// A pass already accepted must not regress to opened on re-entry.
+	if err := a.store.SetPassStatus(context.Background(), passID, store.PassAccepted); err != nil {
+		t.Fatalf("SetPassStatus accepted: %v", err)
+	}
+	if rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("enter on accepted = %d", rec.Code)
+	}
+	if p, _ := a.store.GetPass(context.Background(), passID); p.Status != store.PassAccepted {
+		t.Errorf("enter must not regress accepted → %q", p.Status)
+	}
+}
+
+func TestAPI_PassEnterUnknownToken(t *testing.T) {
+	a := newAPIHarness(t)
+	rec := a.req(t, http.MethodPost, "/p/this-token-does-not-exist/enter", "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown token enter = %d, want 404", rec.Code)
+	}
+}
+
+// EN-6 parity: a suspended host's guests can't enter — the pass is not marked opened,
+// and the guest sees the same opaque turned-off screen (host status never leaks).
+func TestAPI_PassEnterSuspendedHostIsGone(t *testing.T) {
+	a := newAPIHarness(t)
+	ctx := context.Background()
+	host, err := a.store.CreateHost(ctx, store.CreateHostParams{
+		GoogleSub: "susp", Email: "susp@example.com", Name: "Susp", Status: store.HostSuspended,
+	})
+	if err != nil {
+		t.Fatalf("CreateHost: %v", err)
+	}
+	stream, err := a.store.CreateStream(ctx, store.CreateStreamParams{HostID: host.ID, Title: "Suspended Host Stream"})
+	if err != nil {
+		t.Fatalf("CreateStream: %v", err)
+	}
+	raw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	pass, err := a.store.CreatePass(ctx, store.CreatePassParams{
+		StreamID: stream.ID, Role: store.RoleGuest, TokenHash: a.hasher.Hash(raw), Status: store.PassSent,
+	})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+
+	if rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil); rec.Code != http.StatusGone {
+		t.Fatalf("enter under suspended host = %d, want 410", rec.Code)
+	}
+	if p, _ := a.store.GetPass(ctx, pass.ID); p.Status == store.PassOpened {
+		t.Error("a suspended host's pass must not be marked opened")
+	}
+}
+
+// A pass past its expiry deadline (status still sent) is retired: GET shows the turned-off
+// screen and POST /enter must not mark it opened (parity with the WS join check).
+func TestAPI_PassPastDeadlineIsGone(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Expired Stream")
+	raw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	past := time.Now().Add(-time.Hour).Unix()
+	pass, err := a.store.CreatePass(context.Background(), store.CreatePassParams{
+		StreamID: streamID, Role: store.RoleGuest, TokenHash: a.hasher.Hash(raw), Status: store.PassSent, ExpiresAt: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+
+	if rec := a.req(t, http.MethodGet, "/p/"+raw, "", nil); rec.Code != http.StatusGone {
+		t.Fatalf("GET past-deadline = %d, want 410", rec.Code)
+	}
+	if rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil); rec.Code != http.StatusGone {
+		t.Fatalf("enter past-deadline = %d, want 410", rec.Code)
+	}
+	if p, _ := a.store.GetPass(context.Background(), pass.ID); p.Status == store.PassOpened {
+		t.Error("a past-deadline pass must not be marked opened")
+	}
+}
+
+func TestAPI_PassEnterRevokedIsGone(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Revoked Enter")
+	passID, raw := a.mintPass(t, streamID, "Dana")
+	if err := a.store.SetPassStatus(context.Background(), passID, store.PassRevoked); err != nil {
+		t.Fatalf("SetPassStatus: %v", err)
+	}
+	rec := a.req(t, http.MethodPost, "/p/"+raw+"/enter", "", nil)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("revoked enter = %d, want 410", rec.Code)
+	}
+}
+
 func TestAPI_PassLandingUnknownToken(t *testing.T) {
 	a := newAPIHarness(t)
 	rec := a.req(t, http.MethodGet, "/p/this-token-does-not-exist", "", nil)

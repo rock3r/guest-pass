@@ -108,8 +108,14 @@ func TestWSSignalRelay(t *testing.T) {
 	b := h.dialOK(t, "pass="+bRaw, nil)
 	defer b.CloseNow()
 
+	// Sync on b's roster before a signals: the WS handshake completing does NOT mean the
+	// server has finished b's room.Join, so without this a's signal could race ahead of b's
+	// join and be dropped as addressed-to-unknown. b's roster is delivered only after its
+	// join command runs, so receiving it guarantees b is in the room.
+	wsReadFrameOfType(t, b, "roster")
+
 	wsWriteFrame(t, a, signaling.Frame{T: "signal", To: bPass.ID, SDP: []byte(`"offer"`)})
-	f := wsReadFrameOfType(t, b, "signal") // past b's roster frame
+	f := wsReadFrameOfType(t, b, "signal")
 	if f.From != aPass.ID {
 		t.Fatalf("relayed = %+v, want signal stamped from=%s", f, aPass.ID)
 	}
