@@ -797,6 +797,10 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
   Forces are suppressive-only: nobody at any rank can force a modality **on**
   (consent — D-13).
 - **Role-filtered roster** (EN-8). The roster is a per-recipient server projection.
+- **Signal relay carries only the payload** (D-23). A `{t:"signal"}` is re-emitted as a
+  clean `{t, from, sdp|ice}` frame: the opaque sdp/ice is relayed byte-for-byte and
+  stamped with the sender; no other client-supplied fields are echoed, so a peer can't
+  inject roster/slot/control fields into a frame the addressee acts on.
 - **One writer goroutine per connection** (EN-12) — fan-out to a peer is serialized.
 - **Tokens redacted from logs**; `{t:"chat"}.text` is relayed, never persisted,
   never logged (EN-20).

@@ -114,3 +114,29 @@ func TestWSSignalRelay(t *testing.T) {
 		t.Fatalf("relayed = %+v, want signal stamped from=%s", f, aPass.ID)
 	}
 }
+
+// An ICE candidate relays over the wire byte-for-byte; any extraneous fields a sender
+// attaches to the signal are stripped (the server relays only sdp/ice + from, D-23).
+func TestWSSignalRelayICEStripsExtras(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "host1", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	aRaw, aPass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	bRaw, bPass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+
+	a := h.dialOK(t, "pass="+aRaw, nil)
+	defer a.CloseNow()
+	b := h.dialOK(t, "pass="+bRaw, nil)
+	defer b.CloseNow()
+
+	ice := []byte(`{"candidate":"candidate:1 1 udp 2122260223 192.0.2.1 9 typ host","sdpMid":"0"}`)
+	// Sender attaches a hostile slot/reason that must NOT reach the addressee.
+	wsWriteFrame(t, a, signaling.Frame{T: "signal", To: bPass.ID, ICE: ice, Slot: "cam-1", Reason: "kicked"})
+	f := wsReadFrameOfType(t, b, "signal")
+	if f.From != aPass.ID || string(f.ICE) != string(ice) {
+		t.Fatalf("relayed = %+v, want ice byte-identical stamped from=%s", f, aPass.ID)
+	}
+	if f.Slot != "" || f.Reason != "" {
+		t.Fatalf("relay leaked sender-supplied fields: slot=%q reason=%q", f.Slot, f.Reason)
+	}
+}

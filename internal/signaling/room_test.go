@@ -53,7 +53,7 @@ func TestRoomDeliversSlotRebindToSource(t *testing.T) {
 	r.Rebind("cam-1", "g1")
 
 	f := recvFrame(t, srcOut)
-	if f.T != "slot-rebind" || f.OccupantPeerID != "g1" || f.Epoch != 1 {
+	if f.T != "slot-rebind" || f.OccupantPeerID != "g1" || epochVal(f) != 1 {
 		t.Fatalf("rebind frame = %+v, want slot-rebind(g1, epoch 1)", f)
 	}
 }

@@ -115,11 +115,15 @@ func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	return []outbound{{to: source, frame: s.bindingFrame(sid, st)}}
 }
 
+// epochPtr returns a pointer to a copy of e, so a slot frame carries its epoch (incl. 0,
+// EN-3) while non-slot frames leave Epoch nil and omit it on the wire.
+func epochPtr(e int) *int { return &e }
+
 func (s *roomState) bindingFrame(sid SlotID, st *slotState) Frame {
 	if st.occupant != "" {
-		return Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(st.occupant), Epoch: st.epoch}
+		return Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(st.occupant), Epoch: epochPtr(st.epoch)}
 	}
-	return Frame{T: "slot-unbound", Slot: string(sid), Epoch: st.epoch}
+	return Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}
 }
 
 // rebindSlot binds (or re-binds) a slot to an occupant: bump the epoch, reset on-air
@@ -136,7 +140,7 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 	if st.source == "" {
 		return nil
 	}
-	return []outbound{{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: st.epoch}}}
+	return []outbound{{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}}}
 }
 
 // unbindSlot clears a slot (kick / leave): bump the epoch BEFORE any teardown
@@ -149,7 +153,7 @@ func (s *roomState) unbindSlot(sid SlotID) []outbound {
 	if st.source == "" {
 		return nil
 	}
-	return []outbound{{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: st.epoch}}}
+	return []outbound{{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}}}
 }
 
 // obsSourceActive applies an OBS on-program reflection ONLY when its epoch matches
@@ -171,14 +175,15 @@ func (s *roomState) obsSourceActive(sid SlotID, active bool, epoch int) []outbou
 	return []outbound{{to: st.occupant, frame: Frame{T: "onair", Slot: string(sid), OnAir: st.onAir}}}
 }
 
-// relaySignal forwards an SDP/ICE frame verbatim to its addressed peer; the server
-// never inspects the payload (D-23). Frames to unknown peers are dropped.
+// relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
+// The sdp/ice payloads are opaque (json.RawMessage) and relayed byte-for-byte; the server
+// never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice} —
+// never the sender's other fields — so a peer can't inject roster/slot/control fields into
+// a frame the addressee acts on. A signal to an unknown/departed peer is dropped.
 func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	to := PeerID(f.To)
 	if _, ok := s.peers[to]; !ok {
 		return nil
 	}
-	f.From = string(from)
-	f.To = ""
-	return []outbound{{to: to, frame: f}}
+	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
 }

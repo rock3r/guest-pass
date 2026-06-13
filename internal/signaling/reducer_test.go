@@ -1,6 +1,10 @@
 package signaling
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // EN-3: a rebind bumps the epoch, swaps the occupant, resets on-air to unknown, and
 // tells the source page to renegotiate to the new occupant at the new epoch.
@@ -17,7 +21,7 @@ func TestRebindBumpsEpochAndResetsOnAir(t *testing.T) {
 		t.Fatalf("slot state = %+v, want epoch 1 / g1 / %s", st, OnAirUnknown)
 	}
 	if len(out) != 1 || out[0].to != "src" || out[0].frame.T != "slot-rebind" ||
-		out[0].frame.OccupantPeerID != "g1" || out[0].frame.Epoch != 1 {
+		out[0].frame.OccupantPeerID != "g1" || epochVal(out[0].frame) != 1 {
 		t.Fatalf("outbound = %+v, want one slot-rebind(g1, epoch 1) to src", out)
 	}
 }
@@ -96,7 +100,7 @@ func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	if st.epoch != 2 || st.occupant != "" || st.onAir != OnAirUnknown {
 		t.Fatalf("unbind state = %+v", st)
 	}
-	if len(out) != 1 || out[0].frame.T != "slot-unbound" || out[0].frame.Epoch != 2 {
+	if len(out) != 1 || out[0].frame.T != "slot-unbound" || epochVal(out[0].frame) != 2 {
 		t.Fatalf("unbind outbound = %+v", out)
 	}
 }
@@ -117,6 +121,89 @@ func TestRelaySignalToKnownPeerOnly(t *testing.T) {
 	s.leave("b")
 	if got := s.relaySignal("a", Frame{T: "signal", To: "b"}); got != nil {
 		t.Fatalf("relay to a departed peer must drop, got %+v", got)
+	}
+}
+
+// The relayed frame carries ONLY the opaque payload (sdp/ice) stamped with the sender —
+// a peer must not be able to inject roster/slot/control fields into a frame the addressee
+// will act on (D-23: the server relays SDP/ICE, nothing else).
+func TestRelaySignalStripsExtraneousFields(t *testing.T) {
+	s := newRoomState()
+	s.join("a", "guest")
+	s.join("b", "guest")
+
+	sdp := []byte(`{"type":"offer","sdp":"v=0..."}`)
+	in := Frame{
+		T: "signal", To: "b", SDP: sdp,
+		// Hostile extras a client must not be able to smuggle through the relay:
+		Slot: "cam-1", Epoch: epochPtr(9), Reason: "kicked", OnAir: "on-air",
+		OccupantPeerID: "x", Event: "sourceActive", Active: true,
+		Peers:  []RosterEntry{{ID: "fake", Role: "host"}},
+		Peer:   &RosterEntry{ID: "fake", Role: "host"},
+		PeerID: "fake",
+	}
+	out := s.relaySignal("a", in)
+	if len(out) != 1 || out[0].to != "b" {
+		t.Fatalf("relay = %+v, want one frame to b", out)
+	}
+	got := out[0].frame
+	if got.T != "signal" || got.From != "a" || string(got.SDP) != string(sdp) {
+		t.Fatalf("relayed core = %+v, want signal/from=a/same sdp", got)
+	}
+	if got.To != "" || got.Slot != "" || got.Epoch != nil || got.Reason != "" || got.OnAir != "" ||
+		got.OccupantPeerID != "" || got.Event != "" || got.Active ||
+		got.Peers != nil || got.Peer != nil || got.PeerID != "" {
+		t.Fatalf("relayed frame leaked client-supplied fields: %+v", got)
+	}
+}
+
+// epochVal dereferences a frame's epoch for assertions, returning -1 when absent (so a
+// missing epoch never accidentally equals a real one).
+func epochVal(f Frame) int {
+	if f.Epoch == nil {
+		return -1
+	}
+	return *f.Epoch
+}
+
+// On the wire, epoch rides ONLY slot frames: a relayed signal omits it entirely, while a
+// slot-unbound carries it even at epoch 0 (EN-3).
+func TestEpochOnlySerializesForSlotFrames(t *testing.T) {
+	s := newRoomState()
+	s.join("a", "guest")
+	s.join("b", "guest")
+
+	relayed := s.relaySignal("a", Frame{T: "signal", To: "b", SDP: []byte(`"x"`)})
+	if b, _ := json.Marshal(relayed[0].frame); strings.Contains(string(b), "epoch") {
+		t.Fatalf("a relayed signal must not carry epoch on the wire, got %s", b)
+	}
+
+	s.join("src", "obs")
+	out := s.attachSource("cam-1", "src") // fresh slot → slot-unbound at epoch 0
+	b, _ := json.Marshal(out[0].frame)
+	if !strings.Contains(string(b), `"epoch":0`) {
+		t.Fatalf("a slot frame must carry epoch even at 0, got %s", b)
+	}
+}
+
+// SDP and ICE are opaque (json.RawMessage): the server relays them byte-for-byte and
+// never parses them (D-23). An ICE-only frame relays just as an SDP one does.
+func TestRelaySignalRelaysPayloadVerbatim(t *testing.T) {
+	s := newRoomState()
+	s.join("a", "guest")
+	s.join("b", "guest")
+
+	// An ICE candidate the server has no schema for — relayed unchanged.
+	ice := []byte(`{"candidate":"candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host","sdpMid":"0","sdpMLineIndex":0}`)
+	out := s.relaySignal("a", Frame{T: "signal", To: "b", ICE: ice})
+	if len(out) != 1 || string(out[0].frame.ICE) != string(ice) || out[0].frame.From != "a" {
+		t.Fatalf("ICE relay = %+v, want byte-identical ice stamped from=a", out)
+	}
+	// A payload that isn't even a JSON object (the server never inspects shape).
+	weird := []byte(`"just-a-string"`)
+	out = s.relaySignal("a", Frame{T: "signal", To: "b", SDP: weird})
+	if len(out) != 1 || string(out[0].frame.SDP) != string(weird) {
+		t.Fatalf("opaque sdp relay = %+v, want byte-identical %s", out, weird)
 	}
 }
 

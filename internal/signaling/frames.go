@@ -17,7 +17,7 @@ type Frame struct {
 	ICE            json.RawMessage `json:"ice,omitempty"`
 	Slot           string          `json:"slot,omitempty"`
 	OccupantPeerID string          `json:"occupantPeerId,omitempty"`
-	Epoch          int             `json:"epoch"` // NOT omitempty: epoch 0 is a real value (EN-3)
+	Epoch          *int            `json:"epoch,omitempty"` // pointer so epoch rides ONLY slot frames; &0 still serializes (EN-3)
 	Event          string          `json:"event,omitempty"`
 	Active         bool            `json:"active,omitempty"`
 	OnAir          string          `json:"onAir,omitempty"`
