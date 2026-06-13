@@ -45,9 +45,11 @@ func TestBuildHandler_Wiring(t *testing.T) {
 		GoogleClientID:     "client-id",
 		GoogleClientSecret: "client-secret",
 		JWTSecret:          "build-handler-test-secret-aaaaaaaaaaaaaa",
+		TokenSecret:        "build-handler-test-token-secret-bbbbbbbb",
 		SignupMode:         config.SignupModeOpen,
 		AdminEmail:         "admin@example.com",
 		TURNURL:            "turns:turn.example.org:5349",
+		MailMode:           config.MailModeLog,
 	}
 	h, err := buildHandler(cfg, st, signaling.NewHub(), web.NewRateLimiter(1000, 1000), nil)
 	if err != nil {

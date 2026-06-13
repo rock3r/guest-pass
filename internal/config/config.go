@@ -59,8 +59,10 @@ type Config struct {
 	GoogleClientSecret string
 	JWTSecret          string
 	JWTSecretPrevious  string // optional verify-only second key in the kid ring (EN-6); set during rotation
+	TokenSecret        string // STABLE HMAC key for magic-link/slot/host token hashing (EN-5)
 	ResendAPIKey       string
 	MailMode           string // "" => Resend (default); "log" => print magic links to stdout (D-2)
+	MailFrom           string // From address for Resend invites; required unless MAIL_MODE=log
 	AdminEmail         string
 	SignupMode         string // open | approval | allowlist (§9.3)
 	TURNURL            string
@@ -100,8 +102,10 @@ func load(getenv func(string) string) (*Config, error) {
 		GoogleClientSecret: getenv("GOOGLE_CLIENT_SECRET"),
 		JWTSecret:          getenv("JWT_SECRET"),
 		JWTSecretPrevious:  getenv("JWT_SECRET_PREVIOUS"),
+		TokenSecret:        getenv("TOKEN_SECRET"),
 		ResendAPIKey:       getenv("RESEND_API_KEY"),
 		MailMode:           strings.TrimSpace(getenv("MAIL_MODE")),
+		MailFrom:           strings.TrimSpace(getenv("MAIL_FROM")),
 		AdminEmail:         strings.TrimSpace(getenv("ADMIN_EMAIL")),
 		SignupMode:         strings.TrimSpace(getenv("SIGNUP_MODE")),
 		TURNURL:            strings.TrimSpace(getenv("TURN_URL")),
@@ -126,6 +130,12 @@ func (c *Config) validate() error {
 	// JWT_SECRET is always required and fails closed (EN-14).
 	if isWeakSecret(c.JWTSecret) {
 		return fmt.Errorf("config: JWT_SECRET: %w", ErrSecretFailClosed)
+	}
+	// TOKEN_SECRET keys the HMAC of magic-link/slot/host tokens (EN-5). It is a STABLE
+	// secret, separate from JWT_SECRET (which rotates via the kid ring, EN-6) — reusing
+	// the rotating key would orphan every stored token hash on rotation.
+	if isWeakSecret(c.TokenSecret) {
+		return fmt.Errorf("config: TOKEN_SECRET: %w", ErrSecretFailClosed)
 	}
 	// JWT_SECRET_PREVIOUS is optional (the verify-only second key during rotation, EN-6),
 	// but when set it must be a real secret too.
@@ -173,7 +183,12 @@ func (c *Config) validateRequired() error {
 		)
 	}
 	if c.MailMode != MailModeLog {
-		required = append(required, struct{ name, val string }{"RESEND_API_KEY", c.ResendAPIKey})
+		// Real mail delivery (Resend) needs an API key and a verified From address; the
+		// log mode (D-2) prints magic links to stdout and needs neither.
+		required = append(required,
+			struct{ name, val string }{"RESEND_API_KEY", c.ResendAPIKey},
+			struct{ name, val string }{"MAIL_FROM", c.MailFrom},
+		)
 	}
 	for _, r := range required {
 		if strings.TrimSpace(r.val) == "" {

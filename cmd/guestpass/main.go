@@ -21,8 +21,10 @@ import (
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/buildinfo"
 	"github.com/rock3r/guest-pass/internal/config"
+	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
+	"github.com/rock3r/guest-pass/internal/token"
 	"github.com/rock3r/guest-pass/internal/web"
 )
 
@@ -146,6 +148,17 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		Secure:       secure,
 	}, authn, st)
 
+	hasher, err := token.NewHasher(cfg.TokenSecret)
+	if err != nil {
+		return nil, fmt.Errorf("building token hasher: %w", err)
+	}
+	var mailer mail.Mailer
+	if cfg.MailMode == config.MailModeLog {
+		mailer = mail.NewLogMailer(os.Stdout)
+	} else {
+		mailer = mail.NewResendMailer(cfg.ResendAPIKey, cfg.MailFrom)
+	}
+
 	return web.NewRouter(web.RouterConfig{
 		SourceURL:   buildinfo.SourceURL(),
 		Hub:         hub,
@@ -157,5 +170,9 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		StaticDir:   "web/dist",
 		RateLimiter: limiter,
 		WSInflight:  wsInflight,
+		Store:       st,
+		Hasher:      hasher,
+		Mailer:      mailer,
+		BaseURL:     cfg.BaseURL,
 	})
 }
