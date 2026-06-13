@@ -91,7 +91,8 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `BASE_URL` | ✅ | — | e.g. `https://guest-pass.link`; origin for the OAuth redirect, magic links, and OBS source URLs. Must match the registered Google redirect host. |
 | `GOOGLE_CLIENT_ID` | ✅ | — | Google is the only host identity provider. |
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | Paired with the client id; supply out-of-band (see checklist §12). |
-| `JWT_SECRET` | ✅ | **✅ (EN-14)** | HS256 host-session cookies. Supports a **`kid` + two-key ring** so rotation isn't a global logout (EN-6). Refuses placeholder/empty. |
+| `JWT_SECRET` | ✅ | **✅ (EN-14)** | HS256 host-session cookies; the current signing key. Part of a **`kid` + two-key ring** so rotation isn't a global logout (EN-6). Refuses placeholder/empty/short. |
+| `JWT_SECRET_PREVIOUS` | optional | **✅ when set** | The retired, **verify-only** second key during a `JWT_SECRET` rotation: set it to the old secret so sessions signed with it keep verifying until they expire, then remove it. Empty in steady state. When set it must be a real (non-placeholder, ≥32-char) secret. |
 | `RESEND_API_KEY` | ✅ unless `MAIL_MODE=log` | — | Invite delivery over the Resend HTTP API (D-2). |
 | `MAIL_MODE` | — | — | `log` prints magic links to stdout (dev / airgapped self-host); production uses Resend. Default is the Resend path. |
 | `ADMIN_EMAIL` | ✅ | — | The first sign-in matching this email is auto-approved as owner/admin (`is_admin`, D-14). |
