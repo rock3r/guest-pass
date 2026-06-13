@@ -67,6 +67,25 @@ func buildCSP(nonce, turnHost string) string {
 	}, "; ")
 }
 
+// CSPTURNHost extracts the host[:port] from a TURN URL (turn:/turns:[//]host:port[?...])
+// for use as a connect-src source (CONVENTIONS §3.5). It returns "" for an empty URL —
+// the STUN-only default (D-38), which keeps the policy tight.
+func CSPTURNHost(turnURL string) string {
+	s := strings.TrimSpace(turnURL)
+	if s == "" {
+		return ""
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	} else if i := strings.Index(s, ":"); i >= 0 {
+		s = s[i+1:] // strip the turn:/turns: scheme
+	}
+	if i := strings.Index(s, "?"); i >= 0 {
+		s = s[:i] // drop ?transport=… query
+	}
+	return strings.TrimSpace(s)
+}
+
 func randomNonce() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

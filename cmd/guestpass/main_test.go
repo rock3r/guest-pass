@@ -47,6 +47,7 @@ func TestBuildHandler_Wiring(t *testing.T) {
 		JWTSecret:          "build-handler-test-secret-aaaaaaaaaaaaaa",
 		SignupMode:         config.SignupModeOpen,
 		AdminEmail:         "admin@example.com",
+		TURNURL:            "turns:turn.example.org:5349",
 	}
 	h, err := buildHandler(cfg, st, signaling.NewHub(), web.NewRateLimiter(1000, 1000))
 	if err != nil {
@@ -64,8 +65,12 @@ func TestBuildHandler_Wiring(t *testing.T) {
 	if root.Code != http.StatusOK {
 		t.Fatalf("/ = %d", root.Code)
 	}
-	if root.Header().Get("Content-Security-Policy") == "" {
+	csp := root.Header().Get("Content-Security-Policy")
+	if csp == "" {
 		t.Error("/ missing CSP header")
+	}
+	if !strings.Contains(csp, "turn.example.org:5349") {
+		t.Errorf("CSP connect-src should include the configured TURN host; got %q", csp)
 	}
 	if !strings.Contains(root.Body.String(), "AGPL-3.0") {
 		t.Error("/ missing AGPL §13 source link")

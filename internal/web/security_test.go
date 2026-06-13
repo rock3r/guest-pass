@@ -52,6 +52,20 @@ func TestSecurityHeaders_TURNHostIncluded(t *testing.T) {
 	}
 }
 
+func TestCSPTURNHost(t *testing.T) {
+	cases := map[string]string{
+		"":                            "",
+		"turns:turn.example.org:5349": "turn.example.org:5349",
+		"turn:turn.example.org:3478?transport=udp": "turn.example.org:3478",
+		"turns://turn.example.org:5349":            "turn.example.org:5349",
+	}
+	for in, want := range cases {
+		if got := CSPTURNHost(in); got != want {
+			t.Errorf("CSPTURNHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSecurityHeaders_NonceIsPerRequest(t *testing.T) {
 	var nonces []string
 	h := SecurityHeaders(SecurityOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
