@@ -144,6 +144,16 @@ func (r *Room) Signal(from PeerID, f Frame) {
 	})
 }
 
+// DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
+// the room goroutine — the sole owner of the conn table and the out channels — so it can
+// never race the channel close on eviction/leave/terminate. Used for per-connection
+// control frames that don't mutate room state, e.g. an {t:ice-refresh} re-mint.
+func (r *Room) DeliverTo(id PeerID, f Frame) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, []outbound{{to: id, frame: f}})
+	})
+}
+
 func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.rebindSlot(slot, occupant))

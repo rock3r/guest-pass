@@ -19,6 +19,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
+	"github.com/rock3r/guest-pass/internal/turn"
 )
 
 const wsTestTokenSecret = "ws-test-token-secret-cccccccccccccccc"
@@ -35,7 +36,7 @@ type wsHarness struct {
 	hub     *signaling.Hub
 	logs    *syncBuffer
 	limiter *RateLimiter // WS reconnect limiter; nil unless a test opts in
-	ice     []signaling.ICEServer
+	ice     ICEConfigurer
 }
 
 // syncBuffer is a goroutine-safe buffer for capturing slog output across the request
@@ -58,7 +59,7 @@ func (b *syncBuffer) String() string {
 }
 
 type wsHarnessOpts struct {
-	ice     []signaling.ICEServer
+	ice     ICEConfigurer
 	limiter *RateLimiter
 }
 
@@ -93,7 +94,7 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 		Hasher:        hasher,
 		Mailer:        mail.NewLogMailer(&bytes.Buffer{}),
 		BaseURL:       "https://gp.example",
-		ICEServers:    o.ice,
+		ICE:           o.ice,
 		WSInflight:    &inflight,
 		WSRateLimiter: o.limiter,
 		Logger:        logger,
@@ -210,7 +211,7 @@ func TestWS_RejectsMissingCredential(t *testing.T) {
 }
 
 func TestWS_HostCookieAdmitted(t *testing.T) {
-	h := newWSHarness(t, wsHarnessOpts{ice: []signaling.ICEServer{{URLs: []string{"stun:stun.example.org:3478"}}}})
+	h := newWSHarness(t, wsHarnessOpts{ice: turn.NewProvider("stun:stun.example.org:3478", "", "")})
 	_, cookie := h.seedHost(t, "host1", store.HostActive)
 	c := h.dialOK(t, "", cookieHeader(cookie))
 	defer c.CloseNow()
@@ -218,6 +219,41 @@ func TestWS_HostCookieAdmitted(t *testing.T) {
 	if f := wsReadFrame(t, c); f.T != "ice" {
 		t.Fatalf("first frame = %q, want ice", f.T)
 	}
+}
+
+// When TURN is configured, the join-ack carries a TURN entry with a fresh ephemeral
+// credential + ttlSec, and an {t:ice-refresh} re-issues a fresh {t:ice} frame (AC-4).
+func TestWS_TURNCredInJoinAckAndRefresh(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{
+		ice: turn.NewProvider("stun:stun.example.org:3478", "turns:turn.example.org:5349", "turn-int-secret-bbbbbbbbbbbbbbbb"),
+	})
+	_, cookie := h.seedHost(t, "host1", store.HostActive)
+	c := h.dialOK(t, "", cookieHeader(cookie))
+	defer c.CloseNow()
+
+	first := wsReadFrameOfType(t, c, "ice")
+	if first.TTLSec <= 0 {
+		t.Fatalf("join-ack ice frame missing ttlSec: %+v", first)
+	}
+	if !hasTURNEntry(first) {
+		t.Fatalf("join-ack ice frame missing a credentialled TURN entry: %+v", first.ICEServers)
+	}
+
+	// An ice-refresh re-issues the ICE config (a fresh credential bound to this peer).
+	wsWriteFrame(t, c, signaling.Frame{T: "ice-refresh"})
+	again := wsReadFrameOfType(t, c, "ice")
+	if again.TTLSec <= 0 || !hasTURNEntry(again) {
+		t.Fatalf("ice-refresh did not return a fresh credentialled ice frame: %+v", again)
+	}
+}
+
+func hasTURNEntry(f signaling.Frame) bool {
+	for _, s := range f.ICEServers {
+		if len(s.URLs) == 1 && s.URLs[0] == "turns:turn.example.org:5349" && s.Username != "" && s.Credential != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWS_GuestPassAdmitted(t *testing.T) {

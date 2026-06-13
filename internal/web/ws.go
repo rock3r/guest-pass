@@ -13,25 +13,33 @@ import (
 	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
+// ICEConfigurer builds the per-peer {t:"ice"} join-ack (AD-14). The peer id is passed so a
+// TURN entry can carry a freshly-minted ephemeral credential bound to that peer (EN-4); ok
+// is false when no ICE servers are configured at all (dev/loopback), so the join-ack is
+// skipped. *turn.Provider implements it.
+type ICEConfigurer interface {
+	ICEFrame(peerID string) (signaling.Frame, bool)
+}
+
 // wsHandler serves GET /ws, the one signaling WebSocket. Each connection is
 // authenticated by credential (session cookie → host, ?pass= → guest/cohost, ?src= →
 // OBS source) and the role/peer/session are derived from that credential against live DB
 // state, never from a frame body (EN-7/AC-1). The handler relays opaque SDP/ICE between
 // peers and never inspects media (D-23).
 type wsHandler struct {
-	hub        *signaling.Hub
-	resolver   *wsResolver
-	inflight   *sync.WaitGroup       // nil-safe; lets a graceful drain wait for terminate flush (RF-21)
-	iceServers []signaling.ICEServer // ICE config handed to every peer in the {t:"ice"} join-ack (AD-14)
-	log        *slog.Logger
+	hub      *signaling.Hub
+	resolver *wsResolver
+	inflight *sync.WaitGroup // nil-safe; lets a graceful drain wait for terminate flush (RF-21)
+	ice      ICEConfigurer   // per-peer ICE join-ack (AD-14); nil = no ICE servers offered
+	log      *slog.Logger
 }
 
 // newWSHandler builds the handler, defaulting the logger so the hot path never nil-panics.
-func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice []signaling.ICEServer, logger *slog.Logger) *wsHandler {
+func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, logger *slog.Logger) *wsHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, iceServers: ice, log: logger}
+	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, log: logger}
 }
 
 func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
@@ -78,11 +86,14 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make(chan signaling.Frame, 64)
-	// Enqueue the ICE join-ack BEFORE Join (AD-14): the buffered channel makes it the
-	// first frame the writer flushes, ahead of anything the room emits on join. Skipped
+	// Enqueue the ICE join-ack BEFORE Join (AD-14): the buffered channel makes it the first
+	// frame the writer flushes, ahead of anything the room emits on join. The config is
+	// built per-peer so a TURN entry carries a fresh ephemeral credential (EN-4); skipped
 	// when no servers are configured (dev/loopback).
-	if len(h.iceServers) > 0 {
-		out <- signaling.Frame{T: "ice", ICEServers: h.iceServers}
+	if h.ice != nil {
+		if iceFrame, ok := h.ice.ICEFrame(string(id.peer)); ok {
+			out <- iceFrame
+		}
 	}
 	if !room.Join(id.peer, id.role, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
@@ -131,6 +142,15 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 	switch f.T {
 	case "signal":
 		room.Signal(id.peer, f) // relayed verbatim; server never inspects (D-23)
+	case "ice-refresh":
+		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
+		// Delivered through the room so the send runs on the room goroutine and can't race
+		// this connection's out-channel close.
+		if h.ice != nil {
+			if iceFrame, ok := h.ice.ICEFrame(string(id.peer)); ok {
+				room.DeliverTo(id.peer, iceFrame)
+			}
+		}
 	case "rebind":
 		if id.role == "host" {
 			room.Rebind(signaling.SlotID(f.Slot), signaling.PeerID(f.OccupantPeerID))

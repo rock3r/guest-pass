@@ -865,9 +865,15 @@ release/override anything.
 
 ```jsonc
 // ICE config join-ack (AD-14) — first frame after join; re-sent on {t:ice-refresh}.
-// STUN always (D-38); a TURN entry with an ephemeral HMAC cred + ttlSec is added when a
-// relay is configured (M2, EN-4). Shape mirrors the browser RTCIceServer dictionary.
-{"t":"ice","iceServers":[{"urls":["stun:stun.example.org:3478"]}]}
+// STUN always (D-38); a TURN entry with a fresh ephemeral HMAC cred + ttlSec is added when
+// a relay is configured (EN-4). The iceServers entries mirror the browser RTCIceServer
+// dictionary; ttlSec is a top-level hint (NOT inside the dict) for scheduling the refresh.
+// The cred is coturn's REST shape: username "<expiryUnix>:<peerId>",
+// credential base64(HMAC-SHA1(TURN_SECRET, username)).
+{"t":"ice","iceServers":[{"urls":["stun:stun.example.org:3478"]}]}                  // STUN-only
+{"t":"ice","ttlSec":90,"iceServers":[                                               // with a relay
+  {"urls":["stun:stun.example.org:3478"]},
+  {"urls":["turns:turn.example.org:5349"],"username":"1700000090:<peerId>","credential":"<base64>"}]}
 
 // Role-filtered roster projection (EN-8) — per-recipient; guests get the reduced shape
 {"t":"roster","peers":[{

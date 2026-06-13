@@ -19,19 +19,19 @@ import (
 // landing, sign-in, health, and static routes. /ws needs the authenticator, store, and
 // token hasher because it authenticates by credential.
 type RouterConfig struct {
-	SourceURL     string                // AGPL §13 link to the running build's source (EN-17)
-	Hub           *signaling.Hub        // signaling hub for /ws
-	OAuth         *auth.GoogleOAuth     // Google sign-in; nil disables /auth/google*
-	Auth          *auth.Authenticator   // session lifecycle (logout); nil disables /auth/logout
-	DevLogin      http.HandlerFunc      // dev sign-in handler; nil (release) disables /auth/dev
-	TURNHost      string                // CSP connect-src TURN host; empty = STUN-only
-	Secure        bool                  // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
-	StaticDir     string                // built frontend assets (web/dist), served at /static
-	RateLimiter   *RateLimiter          // per-IP limiter applied to /auth routes; nil disables
-	WSRateLimiter *RateLimiter          // per-IP limiter applied to /ws (reconnect throttle); nil disables
-	WSInflight    *sync.WaitGroup       // tracks live /ws handlers so a drain can wait for terminate flush
-	ICEServers    []signaling.ICEServer // ICE config sent in the {t:"ice"} join-ack (AD-14); empty = no STUN
-	Logger        *slog.Logger          // structured logger for the WS path; nil uses slog.Default()
+	SourceURL     string              // AGPL §13 link to the running build's source (EN-17)
+	Hub           *signaling.Hub      // signaling hub for /ws
+	OAuth         *auth.GoogleOAuth   // Google sign-in; nil disables /auth/google*
+	Auth          *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout
+	DevLogin      http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
+	TURNHost      string              // CSP connect-src TURN host; empty = STUN-only
+	Secure        bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
+	StaticDir     string              // built frontend assets (web/dist), served at /static
+	RateLimiter   *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
+	WSRateLimiter *RateLimiter        // per-IP limiter applied to /ws (reconnect throttle); nil disables
+	WSInflight    *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
+	ICE           ICEConfigurer       // per-peer ICE join-ack provider (AD-14); nil = no ICE servers offered
+	Logger        *slog.Logger        // structured logger for the WS path; nil uses slog.Default()
 
 	// Host API + guest magic-link page. All four must be set together to enable the
 	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
@@ -63,7 +63,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// landing-only config) /ws is not registered.
 	if cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil {
 		resolver := &wsResolver{auth: cfg.Auth, hasher: cfg.Hasher, store: cfg.Store}
-		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICEServers, cfg.Logger)
+		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, cfg.Logger)
 		r.Group(func(wr chi.Router) {
 			if cfg.WSRateLimiter != nil { // per-IP reconnect throttle (D-36)
 				wr.Use(cfg.WSRateLimiter.Middleware(ClientIP))
