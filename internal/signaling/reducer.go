@@ -49,15 +49,41 @@ func (s *roomState) slot(id SlotID) *slotState {
 	return st
 }
 
+// join registers a peer and emits the roster projection (EN-8): the joiner — if a
+// greenroom participant — receives its rank-filtered roster, and every existing
+// participant that can see the newcomer is told via peer-joined. OBS source pages are
+// minimal (EN-13) and receive no roster; they are also host-only in others' projections.
 func (s *roomState) join(id PeerID, role string) []outbound {
+	// A reconnect (EN-16 eviction → re-join with the same id) is not a new arrival: the
+	// peer never left room state and no peer-left ran, so re-announcing it would desync
+	// other clients' rosters. The reconnecting connection still gets a fresh roster.
+	_, rejoining := s.peers[id]
 	s.peers[id] = &peerInfo{id: id, role: role}
-	return nil // full roster projection (EN-8) is M3 work
+	var out []outbound
+	if isParticipant(role) {
+		out = append(out, outbound{to: id, frame: Frame{T: "roster", Peers: s.rosterFor(role)}})
+	}
+	if rejoining {
+		return out
+	}
+	entry := RosterEntry{ID: string(id), Role: role}
+	for pid, p := range s.peers {
+		if pid == id || !isParticipant(p.role) {
+			continue // only participants receive peer-joined; never echo to the joiner
+		}
+		if visibleTo(role, p.role) {
+			out = append(out, outbound{to: pid, frame: Frame{T: "peer-joined", Peer: &entry}})
+		}
+	}
+	return out
 }
 
-// leave removes a peer and detaches it from any slot it sourced or occupied. An
-// occupied slot is unbound (epoch bump + placeholder), so a reconnecting source
-// resolves to placeholder rather than the departed occupant (EN-3).
+// leave removes a peer, detaches it from any slot it sourced or occupied, and tells the
+// remaining participants it left (peer-left, projected). An occupied slot is unbound
+// (epoch bump + placeholder) so a reconnecting source resolves to placeholder rather
+// than the departed occupant (EN-3).
 func (s *roomState) leave(id PeerID) []outbound {
+	p := s.peers[id]
 	delete(s.peers, id)
 	var out []outbound
 	for sid, st := range s.slots {
@@ -66,6 +92,16 @@ func (s *roomState) leave(id PeerID) []outbound {
 		}
 		if st.occupant == id {
 			out = append(out, s.unbindSlot(sid)...)
+		}
+	}
+	if p != nil {
+		for pid, rp := range s.peers {
+			if !isParticipant(rp.role) {
+				continue
+			}
+			if visibleTo(p.role, rp.role) {
+				out = append(out, outbound{to: pid, frame: Frame{T: "peer-left", PeerID: string(id)}})
+			}
 		}
 	}
 	return out
