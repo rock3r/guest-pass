@@ -31,6 +31,15 @@ jobs:
       - name: go test
         run: go test ./...
 
+      # The dev-auth seam (AUTH_MODE=dev) compiles ONLY under the `dev` build tag
+      # (AD-8 / RF-4). Build + test it here so the dev-build path and its loopback
+      # BASE_URL invariant test stay green — release binaries never include this tag.
+      - name: go vet (dev build tag)
+        run: go vet -tags dev ./...
+
+      - name: go test (dev build tag)
+        run: go test -tags dev ./...
+
       # staticcheck + govulncheck run via `go run` — pure Go, no npm/node anywhere.
       # TODO: pin these to exact versions once the toolchain is settled.
       - name: staticcheck

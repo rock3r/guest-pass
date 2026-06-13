@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/rock3r/guest-pass/internal/buildinfo"
+	"github.com/rock3r/guest-pass/internal/config"
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/web"
 )
@@ -30,7 +31,22 @@ func main() {
 
 // serve runs the SPIKE-2 server: the signaling WebSocket endpoint plus static assets
 // from web/dist. The full route table, TLS, and embedded assets land in M1/M2.
+//
+// Configuration is loaded and validated FIRST, so the binary fails closed (EN-14 /
+// AD-8) on an empty/placeholder JWT_SECRET, a TURN secret missing while TURN is
+// enabled, or AUTH_MODE=dev in a release build — before any socket is bound. (The
+// bare `guestpass` version/source path deliberately does not load config: the AGPL
+// §13 source link must resolve without any secrets configured.)
 func serve(addr string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	log.Printf("config loaded: signup_mode=%q mail_mode=%q turn_enabled=%t auth_mode=%q",
+		cfg.SignupMode, cfg.MailMode, cfg.TURNEnabled(), cfg.AuthMode)
+	// Config fields are wired into server behavior (routes, OAuth, mail, ICE) in the
+	// later M1 steps; here the load is the fail-closed gate.
+
 	hub := signaling.NewHub()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", web.ServeWS(hub))
