@@ -42,6 +42,23 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	return u
 }
 
+// wsReadFrameOfType reads frames until one of type want arrives, skipping the
+// roster/peer-joined/peer-left bookkeeping frames join now emits (EN-8).
+func wsReadFrameOfType(t *testing.T, c *websocket.Conn, want string) signaling.Frame {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for {
+		var f signaling.Frame
+		if err := wsjson.Read(ctx, c, &f); err != nil {
+			t.Fatalf("read (waiting for %q): %v", want, err)
+		}
+		if f.T == want {
+			return f
+		}
+	}
+}
+
 // --- transport-level behaviors (migrated to credential auth) ---
 
 // On a graceful drain (Hub.Shutdown), connected peers receive a terminate:reconnect
@@ -92,8 +109,8 @@ func TestWSSignalRelay(t *testing.T) {
 	defer b.CloseNow()
 
 	wsWriteFrame(t, a, signaling.Frame{T: "signal", To: bPass.ID, SDP: []byte(`"offer"`)})
-	f := wsReadFrame(t, b)
-	if f.T != "signal" || f.From != aPass.ID {
+	f := wsReadFrameOfType(t, b, "signal") // past b's roster frame
+	if f.From != aPass.ID {
 		t.Fatalf("relayed = %+v, want signal stamped from=%s", f, aPass.ID)
 	}
 }

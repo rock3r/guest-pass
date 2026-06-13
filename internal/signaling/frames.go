@@ -22,7 +22,9 @@ type Frame struct {
 	Active         bool            `json:"active,omitempty"`
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
-	Peers          []RosterEntry   `json:"peers,omitempty"`
+	Peers          []RosterEntry   `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer           *RosterEntry    `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID         string          `json:"peerId,omitempty"` // the departed peer in a peer-left frame
 	ICEServers     []ICEServer     `json:"iceServers,omitempty"`
 }
 
@@ -37,8 +39,10 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-// RosterEntry is a peer's projection in a roster frame (minimal for SPIKE-2; the
-// role-filtered projection EN-8 is fleshed out in M3).
+// RosterEntry is a peer's projection in a roster / peer-joined frame. The M2 tracer
+// ships the minimal {id, role} shape; the richer fields (name, cam/mic/level, on-air,
+// locks) land with the M3 greenroom. The rank filtering itself (EN-8) is implemented in
+// M2 — see roster.go.
 type RosterEntry struct {
 	ID   string `json:"id"`
 	Role string `json:"role"`

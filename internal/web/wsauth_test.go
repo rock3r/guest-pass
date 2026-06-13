@@ -356,6 +356,82 @@ func TestWS_RejectsUnknownSrcToken(t *testing.T) {
 	}
 }
 
+// --- Per-rank roster projection (AC-2 / EN-8) ---
+
+func rosterPeerSet(f signaling.Frame) map[string]string {
+	m := map[string]string{}
+	for _, e := range f.Peers {
+		m[e.ID] = e.Role
+	}
+	return m
+}
+
+// Two authenticated clients in the same session see each other: the guest's roster
+// includes the host, the host is told via peer-joined, and the host learns of the
+// guest's departure via peer-left (AC-2).
+func TestWS_TwoClientsSeeEachOther(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "host1", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+
+	hc := h.dialOK(t, "", cookieHeader(cookie))
+	defer hc.CloseNow()
+	if r := wsReadFrameOfType(t, hc, "roster"); rosterPeerSet(r)["host"] != "host" {
+		t.Fatalf("host's initial roster should contain itself, got %+v", r.Peers)
+	}
+
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	gr := wsReadFrameOfType(t, gc, "roster")
+	if set := rosterPeerSet(gr); set["host"] != "host" || set[pass.ID] != "guest" {
+		t.Fatalf("guest roster = %+v, want host + guest(%s)", gr.Peers, pass.ID)
+	}
+	pj := wsReadFrameOfType(t, hc, "peer-joined")
+	if pj.Peer == nil || pj.Peer.ID != pass.ID || pj.Peer.Role != "guest" {
+		t.Fatalf("host peer-joined = %+v, want guest(%s)", pj, pass.ID)
+	}
+
+	// Guest disconnects → the host is told it left.
+	_ = gc.Close(websocket.StatusNormalClosure, "bye")
+	if pl := wsReadFrameOfType(t, hc, "peer-left"); pl.PeerID != pass.ID {
+		t.Fatalf("host peer-left = %+v, want %s", pl, pass.ID)
+	}
+}
+
+// The roster projection differs by rank (EN-8): the host sees the OBS source virtual
+// peer; a guest in the same room does not.
+func TestWS_RosterProjectionDiffersByRank(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "host1", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	srcRaw, _ := h.seedCamSlot(t, host.ID, 1)
+	passRaw, _ := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+
+	src := h.dialOK(t, "src="+srcRaw, nil)
+	defer src.CloseNow()
+	if f := wsReadFrame(t, src); f.T != "slot-unbound" { // sync: src is registered
+		t.Fatalf("source first frame = %q, want slot-unbound", f.T)
+	}
+
+	hc := h.dialOK(t, "", cookieHeader(cookie))
+	defer hc.CloseNow()
+	hr := wsReadFrameOfType(t, hc, "roster")
+	if _, ok := rosterPeerSet(hr)["src-cam-1"]; !ok {
+		t.Fatalf("host roster must include the obs source peer src-cam-1, got %+v", hr.Peers)
+	}
+
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	gr := wsReadFrameOfType(t, gc, "roster")
+	set := rosterPeerSet(gr)
+	if _, ok := set["src-cam-1"]; ok {
+		t.Fatalf("guest roster must NOT include the obs source peer, got %+v", gr.Peers)
+	}
+	if set["host"] != "host" {
+		t.Fatalf("guest roster must include the host, got %+v", gr.Peers)
+	}
+}
+
 // --- Role governs actions (EN-7): only a host rebinds a slot ---
 
 // A host (cookie) rebinds a slot to a guest's pass id and the subscribed OBS source

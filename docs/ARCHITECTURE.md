@@ -876,7 +876,7 @@ release/override anything.
 }]}
 
 {"t":"peer-joined","peer":{…}}                            // same per-recipient shape as a roster entry
-{"t":"peer-left","peer":"<id>"}
+{"t":"peer-left","peerId":"<id>"}                         // string id (distinct key from peer-joined's object)
 {"t":"signal","from":"<peerId>","sdp"|"ice":…}            // relayed SDP/ICE
 {"t":"chat","from":"<peerId>","text":"…"}                 // relayed only (EN-20)
 
@@ -904,6 +904,12 @@ rank:
   source URLs or quality controls (D-15).
 - **Host projection** is the full shape, including the host-only `obs` virtual peers
   (one per slot source page).
+
+> **M2 status.** The roster entry shipped in the M2 tracer is the minimal `{id, role}`
+> shape; the rank distinction enforced is that the `obs`/`obs_screen` source virtual
+> peers are **host-only** (omitted from guest/co-host projections), and OBS source pages
+> receive no roster of their own (EN-13). The richer entry fields (name, cam/mic/level,
+> on-air, locks) and the moderation-aware co-host projection land with the M3 greenroom.
 
 Full `roster` / `peer-joined` / `peer-left` frames go out only on structural change
 (join/leave/lock/role/on-air/slot); continuous audio meters ride a separate batched
