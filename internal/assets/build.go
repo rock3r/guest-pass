@@ -68,11 +68,11 @@ func BuildOptions(root, outDir string) api.BuildOptions {
 				})
 			},
 		}},
+		// The app island bundle. The separate, font-free OBS source-page entry (EN-13) is
+		// added with the real source page in PR-8; the SPIKE-2 scaffolds it superseded were
+		// removed once PR-1 retired their query-param identity.
 		EntryPoints: []string{
 			"web/src/islands/app.js",
-			"web/src/obs/obs.js",
-			"web/src/spike2/guest.js",
-			"web/src/spike2/control.js",
 		},
 		Outdir:           outDir,
 		Bundle:           true,

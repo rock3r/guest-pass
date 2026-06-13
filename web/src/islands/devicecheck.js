@@ -1,5 +1,7 @@
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
+import { Room } from "../rtc/room.js";
+import { Publisher } from "../rtc/publisher.js";
 
 /**
  * passTokenFromPath extracts the magic-link token from the current /p/{token} URL. The
@@ -14,16 +16,20 @@ function passTokenFromPath() {
 }
 
 /**
- * DeviceCheck is the guest device-check island (AC-5): it requests a live camera + mic via
- * getUserMedia, shows a local preview, and — only on the explicit "enter" action — marks
- * the pass opened (EN-10) via a pass-authenticated POST. No media leaves the browser here;
- * the greenroom WebRTC connection is established after entry (PR-7).
+ * DeviceCheck is the guest's journey island (AC-5/AC-6): it requests a live camera + mic via
+ * getUserMedia, shows a local preview, and — only on the explicit "enter" action — marks the
+ * pass opened (EN-10) via a pass-authenticated POST. On a successful entry it keeps that same
+ * camera and publishes it to the greenroom over the guest's pass WS (PR-7), so the host
+ * monitor and OBS sources can render the guest over P2P. The server never sees the media (D-23).
  *
  * @returns {import("preact").VNode}
  */
 function DeviceCheck() {
   /** @type {["idle"|"requesting"|"preview"|"entering"|"entered"|"error", Function]} */
   const [phase, setPhase] = useState("idle");
+  // pubState reflects the greenroom publishing connection once entered: connecting | live |
+  // disconnected — so the guest is never told they're live before the signaling WS is up.
+  const [pubState, setPubState] = useState("connecting");
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -35,6 +41,10 @@ function DeviceCheck() {
   // requesting guards against re-entrant startCheck calls (e.g. a rapid double-click) so at
   // most one getUserMedia is ever in flight — two concurrent ones would leak a stream.
   const requestingRef = useRef(false);
+  /** @type {{current: import("../rtc/room.js").Room|null}} */
+  const roomRef = useRef(null);
+  /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
+  const pubRef = useRef(null);
 
   // stopStream releases the camera/mic so the device light goes off. Called before a retry
   // (so we never leak a prior stream), after a successful entry (the greenroom re-acquires
@@ -75,15 +85,38 @@ function DeviceCheck() {
     }
   }, [phase]);
 
-  // Release the camera/mic when the island unmounts so the device light goes off, and mark
-  // cancelled so a still-pending getUserMedia releases its stream when it resolves.
+  // Tear down on unmount: stop publishing, close the signaling WS, release the camera, and
+  // mark cancelled so a still-pending getUserMedia releases its stream when it resolves.
   useEffect(
     () => () => {
       cancelledRef.current = true;
+      if (pubRef.current) pubRef.current.close();
+      if (roomRef.current) roomRef.current.close();
       stopStream();
     },
     [],
   );
+
+  // startPublishing keeps the already-running preview stream and publishes it to the
+  // greenroom over the guest's pass WS, so consumers (host monitor, OBS source) can render
+  // the guest over P2P. The server only relays the opaque SDP/ICE (D-23).
+  function startPublishing() {
+    const room = new Room(`pass=${encodeURIComponent(passTokenFromPath())}`);
+    roomRef.current = room;
+    const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
+    pubRef.current = publisher;
+    room.on("signal", (f) => publisher.onSignal(f));
+    // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
+    room.onIce((servers) => publisher.applyIceServers(servers));
+    // Only claim "live" once the signaling WS is actually up; on any disconnect — an abrupt
+    // socket close or a server {t:terminate} that closes it — stop publishing (drop the dead
+    // peer connections) and surface a reconnect state.
+    room.ready.then(() => setPubState("live")).catch(() => setPubState("disconnected"));
+    room.onClose(() => {
+      publisher.close();
+      setPubState("disconnected");
+    });
+  }
 
   async function enter() {
     setPhase("entering");
@@ -92,7 +125,13 @@ function DeviceCheck() {
         method: "POST",
       });
       if (!res.ok) throw new Error(`entry failed (${res.status})`);
-      stopStream(); // the device-check preview is done; the greenroom re-acquires media (PR-7)
+      if (cancelledRef.current) {
+        // The island unmounted while the entry POST was in flight — don't start a new
+        // publishing connection that nothing would ever tear down.
+        stopStream();
+        return;
+      }
+      startPublishing(); // keep the camera and publish it to the greenroom (PR-7)
       setPhase("entered");
     } catch (e) {
       stopStream(); // entry failed — don't leave the camera running behind the error UI
@@ -103,9 +142,15 @@ function DeviceCheck() {
 
   if (phase === "entered") {
     return (
-      <p class="dc-entered" data-entered="1">
-        You're in. Waiting for the host to start the greenroom…
-      </p>
+      <div class="dc-entered" data-entered="1" data-pub={pubState}>
+        {pubState === "live" ? (
+          <p>You're in — your camera is live in the greenroom.</p>
+        ) : pubState === "disconnected" ? (
+          <p>You're in, but the greenroom connection dropped. Refresh the page to rejoin.</p>
+        ) : (
+          <p>You're in — connecting your camera to the greenroom…</p>
+        )}
+      </div>
     );
   }
   if (phase === "error") {

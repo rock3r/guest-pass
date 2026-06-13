@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 	"github.com/rock3r/guest-pass/internal/web"
@@ -20,10 +22,17 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
-// seedDeviceCheck builds a real router backed by a seeded store with one active host, a
-// stream, and a sent pass. It returns the store, the server base URL, the pass's raw
-// magic-link token, and the pass id.
-func seedDeviceCheck(t *testing.T) (st *store.Store, baseURL, rawToken, passID string) {
+// devSeed is a running real router (with the signaling hub) over a store seeded with one
+// active host, a stream, and a sent guest pass, plus the credentials the browser tabs need.
+type devSeed struct {
+	store      *store.Store
+	base       string // server base URL
+	rawToken   string // guest's raw magic-link token (/p/{rawToken})
+	passID     string
+	hostCookie string // host session JWT for the gp_session cookie (/greenroom + host /ws)
+}
+
+func seedDeviceCheck(t *testing.T) *devSeed {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "devcheck.db"))
@@ -63,6 +72,7 @@ func seedDeviceCheck(t *testing.T) (st *store.Store, baseURL, rawToken, passID s
 	}
 	handler, err := web.NewRouter(web.RouterConfig{
 		SourceURL: "https://github.com/rock3r/guest-pass/tree/test",
+		Hub:       signaling.NewHub(),
 		Auth:      auth.NewAuthenticator(ring, st, false),
 		Store:     st,
 		Hasher:    hasher,
@@ -73,30 +83,31 @@ func seedDeviceCheck(t *testing.T) (st *store.Store, baseURL, rawToken, passID s
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	return st, Serve(t, handler).URL, raw, pass.ID
+	sess, err := ring.Issue(host.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("issue host session: %v", err)
+	}
+	return &devSeed{store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID, hostCookie: sess}
 }
 
-// T-6: the device-check island renders a live cam/mic preview (getUserMedia), a bare GET of
-// the magic link does NOT mark the pass opened (EN-10), and the explicit "enter" action
-// transitions it to opened. Driven in real Chrome with fake media.
+// T-6/AC-5+AC-6: the device-check renders a live preview, a bare GET never marks opened
+// (EN-10), explicit entry transitions to opened, and on entry the camera CONTINUES (it is
+// handed to the greenroom publisher, PR-7) rather than being released.
 func TestDeviceCheck_PreviewAndExplicitEntry(t *testing.T) {
-	st, base, raw, passID := seedDeviceCheck(t)
+	s := seedDeviceCheck(t)
 	ctx := context.Background()
 
 	Chrome(t, 120*time.Second, func(cctx context.Context) {
-		// 1. GET the magic link → the island appears, but the pass is NOT marked opened.
 		if err := chromedp.Run(cctx,
-			chromedp.Navigate(base+"/p/"+raw),
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
 			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("navigate: %v", err)
 		}
-		if p, _ := st.GetPass(ctx, passID); p.Status != store.PassSent || p.OpenedAt != nil {
+		if p, _ := s.store.GetPass(ctx, s.passID); p.Status != store.PassSent || p.OpenedAt != nil {
 			t.Fatalf("a bare GET must not mark opened (EN-10): status=%q openedAt=%v", p.Status, p.OpenedAt)
 		}
 
-		// 2. Start the camera check → a live preview with real (fake-device) frames. Capture
-		// the live video track so we can confirm it is released after entry.
 		var trackState string
 		if err := chromedp.Run(cctx,
 			chromedp.Click(`.dc-start`, chromedp.ByQuery),
@@ -111,17 +122,20 @@ func TestDeviceCheck_PreviewAndExplicitEntry(t *testing.T) {
 			t.Fatalf("preview camera track = %q, want live", trackState)
 		}
 
-		// 3. Explicit entry → the pass transitions to opened AND the camera is released
-		// (the captured track ends), so the device light goes off before the greenroom.
+		// Explicit entry → opened, and the camera keeps running (handed to the publisher).
 		if err := chromedp.Run(cctx,
 			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
 			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
-			chromedp.Poll(`window.__dcTrack && window.__dcTrack.readyState === "ended"`,
-				nil, chromedp.WithPollingTimeout(10*time.Second)),
 		); err != nil {
-			t.Fatalf("entry did not complete (or camera not released): %v", err)
+			t.Fatalf("entry did not complete: %v", err)
 		}
-		p, err := st.GetPass(ctx, passID)
+		if err := chromedp.Run(cctx, chromedp.Evaluate(`window.__dcTrack.readyState`, &trackState)); err != nil {
+			t.Fatalf("read track state: %v", err)
+		}
+		if trackState != "live" {
+			t.Fatalf("after entry the camera must keep running for the greenroom, track = %q", trackState)
+		}
+		p, err := s.store.GetPass(ctx, s.passID)
 		if err != nil {
 			t.Fatalf("GetPass: %v", err)
 		}
@@ -131,16 +145,16 @@ func TestDeviceCheck_PreviewAndExplicitEntry(t *testing.T) {
 	})
 }
 
-// A failed entry must not leave the camera running behind the error UI: the preview track
-// is released even when the entry POST fails (here forced by retiring the pass server-side).
+// A failed entry must not leave the camera running behind the error UI: the preview track is
+// released even when the entry POST fails (here forced by retiring the pass server-side).
 func TestDeviceCheck_EntryFailureReleasesCamera(t *testing.T) {
-	st, base, raw, passID := seedDeviceCheck(t)
+	s := seedDeviceCheck(t)
 	ctx := context.Background()
 
 	Chrome(t, 120*time.Second, func(cctx context.Context) {
 		var trackState string
 		if err := chromedp.Run(cctx,
-			chromedp.Navigate(base+"/p/"+raw),
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
 			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
 			chromedp.Click(`.dc-start`, chromedp.ByQuery),
 			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
@@ -155,10 +169,9 @@ func TestDeviceCheck_EntryFailureReleasesCamera(t *testing.T) {
 		}
 
 		// Retire the pass server-side so the entry POST fails (410).
-		if err := st.SetPassStatus(ctx, passID, store.PassRevoked); err != nil {
+		if err := s.store.SetPassStatus(ctx, s.passID, store.PassRevoked); err != nil {
 			t.Fatalf("SetPassStatus: %v", err)
 		}
-
 		if err := chromedp.Run(cctx,
 			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
 			chromedp.WaitVisible(`.dc-error`, chromedp.ByQuery),
@@ -167,8 +180,64 @@ func TestDeviceCheck_EntryFailureReleasesCamera(t *testing.T) {
 		); err != nil {
 			t.Fatalf("a failed entry must release the camera: %v", err)
 		}
-		if p, _ := st.GetPass(ctx, passID); p.Status == store.PassOpened {
+		if p, _ := s.store.GetPass(ctx, s.passID); p.Status == store.PassOpened {
 			t.Fatalf("a failed entry must not mark opened, got %q", p.Status)
 		}
 	})
+}
+
+// T-7 / AC-6: a guest publishes its camera and a host-monitor tile renders it over P2P, and
+// an ICE restart (the Reconnect control) keeps the media flowing. Two real Chrome tabs in one
+// browser exchange media over loopback with fake devices.
+func TestPeerLink_GuestPublishesToHostMonitor(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+
+	// Tab 1: the guest. Tab 2 (the host) is created in the SAME browser so loopback P2P works.
+	guestCtx, cancelGuest := chromedp.NewContext(allocCtx)
+	defer cancelGuest()
+	guestCtx, cancelGuestT := context.WithTimeout(guestCtx, 150*time.Second)
+	defer cancelGuestT()
+	hostCtx, cancelHost := chromedp.NewContext(guestCtx)
+	defer cancelHost()
+
+	// Guest: open the magic link, run the device check, and enter → starts publishing.
+	if err := chromedp.Run(guestCtx,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest publish flow: %v", err)
+	}
+
+	// Host: authenticate via the session cookie, open the greenroom → the host-monitor
+	// consumes the guest's camera over P2P and the tile shows live (fake-device) frames.
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.hm-tile`, chromedp.ByQuery),
+		chromedp.Poll(`!!document.querySelector('.hm-tile') && document.querySelector('.hm-tile').videoWidth > 0`,
+			nil, chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("host monitor did not render the guest over P2P: %v", err)
+	}
+
+	// ICE restart: the Reconnect control re-offers with an ICE restart; media keeps flowing.
+	if err := chromedp.Run(hostCtx,
+		chromedp.Click(`.hm-reconnect`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.hm-tile') && document.querySelector('.hm-tile').videoWidth > 0`,
+			nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("media did not survive an ICE restart: %v", err)
+	}
 }

@@ -36,7 +36,7 @@ type renderer struct {
 
 // pageFiles are the server-rendered pages; each defines a "content" template composed
 // into base.html.
-var pageFiles = []string{"landing.html", "signin.html", "pass.html"}
+var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html"}
 
 // newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
 // styleIntegrity is the SRI hash for the app CSS bundle (empty when no build manifest
@@ -82,6 +82,12 @@ func (rd *renderer) landing(w http.ResponseWriter, r *http.Request) {
 
 func (rd *renderer) signin(w http.ResponseWriter, r *http.Request) {
 	rd.render(w, r, "signin.html", pageData{Title: "Host sign-in"})
+}
+
+// greenroom renders the host's thin monitor page (host-authenticated upstream): it mounts
+// the host-monitor island, which consumes each guest's camera over P2P (PR-7).
+func (rd *renderer) greenroom(w http.ResponseWriter, r *http.Request) {
+	rd.render(w, r, "greenroom.html", pageData{Title: "Greenroom"})
 }
 
 // passLandingPage renders the guest's magic-link landing (side-effect-free, EN-10): it

@@ -462,8 +462,9 @@ internal/
   livecheck/          D-29 scraping, SSRF-closed
   jobs/               24h PII purge + idle-session reaper tickers (D-37/D-40)
 web/
-  src/rtc/            PeerLink, Room orchestrator, getStats sampling (shared)
-  src/islands/        device-check, guest-session, greenroom  (app esbuild entry)
+  src/rtc/            PeerLink (consume), Publisher (publish), Room (signaling WS + ICE
+                      config from the join-ack + {t:ice-refresh}), getStats sampling
+  src/islands/        device-check(+publish), host-monitor, guest-session, greenroom (app entry)
   src/obs/            cam + screen source pages (separate minimal entry — no fonts, EN-13)
   src/styles/         tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored MIT (D-32)   ·   fonts/  OFL woff2 ×3 (EN-17)

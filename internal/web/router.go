@@ -58,6 +58,17 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
 
+	// The host-only greenroom monitor page. Its island connects to /ws, so it is gated on the
+	// same dependencies as /ws (below) — there's no point serving the page where signaling
+	// can't run. Host-authenticated (EN-6) so only a signed-in, active host reaches it.
+	greenroomReady := cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil
+	if greenroomReady {
+		r.Group(func(gr chi.Router) {
+			gr.Use(cfg.Auth.RequireHost)
+			gr.Get("/greenroom", rd.greenroom)
+		})
+	}
+
 	// The signaling WebSocket authenticates by credential against the live DB, so it
 	// needs the authenticator, store, and token hasher. Without them (a minimal
 	// landing-only config) /ws is not registered.

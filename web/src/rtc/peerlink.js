@@ -1,18 +1,23 @@
 /**
- * PeerLink is one RTCPeerConnection to a single remote peer, with trickle ICE
- * relayed over the Room's signaling channel. This SPIKE-2 variant is the consuming
- * (recvonly) side used by an OBS source page; the publishing side and the per-link
- * bitrate caps / degradation (AD-21) land in M2/M3.
+ * PeerLink is the CONSUMING side of one P2P connection: a recvonly RTCPeerConnection to a
+ * single remote publisher (a guest), with trickle ICE relayed over the Room's signaling
+ * channel. It is used by the host-monitor tile and the OBS source page. The ICE config
+ * (STUN, and a TURN entry with an ephemeral credential when configured) comes from the
+ * Room's join-ack (AD-14/EN-4); the publishing side is in publisher.js.
  */
 export class PeerLink {
-  /** @param {import("./room.js").Room} room @param {string} remoteId */
-  constructor(room, remoteId) {
+  /**
+   * @param {import("./room.js").Room} room
+   * @param {string} remoteId the peer id to consume from
+   * @param {RTCIceServer[]} [iceServers] ICE config from the Room's join-ack
+   */
+  constructor(room, remoteId, iceServers) {
     this.room = room;
     this.remoteId = remoteId;
     this.closed = false;
     /** @type {RTCIceCandidateInit[]} ICE that arrived before the remote description */
     this.pendingIce = [];
-    this.pc = new RTCPeerConnection();
+    this.pc = new RTCPeerConnection({ iceServers: iceServers || [] });
     this.pc.onicecandidate = (e) => {
       if (e.candidate && !this.closed) {
         room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON() });
@@ -20,11 +25,30 @@ export class PeerLink {
     };
   }
 
-  /** Create and send a recvonly offer to the remote peer. Guarded so a link closed
-   *  mid-negotiation (a rapid rebind) never sends a stale offer to a prior occupant. */
-  async offer() {
+  /**
+   * offer creates and sends a recvonly offer to the remote publisher. Guarded so a link
+   * closed mid-negotiation (a rapid rebind) never sends a stale offer to a prior occupant.
+   * @param {RTCOfferOptions} [opts]
+   */
+  async offer(opts) {
+    // recvonly video + audio so a publisher's getUserMedia({video,audio}) stream negotiates
+    // cleanly (matching m-lines); the tile renders video and (muted) audio rides along.
     this.pc.addTransceiver("video", { direction: "recvonly" });
-    const o = await this.pc.createOffer();
+    this.pc.addTransceiver("audio", { direction: "recvonly" });
+    return this._negotiate(opts);
+  }
+
+  /**
+   * restartIce re-offers with ICE restart so a path that dropped (e.g. a NAT rebinding or a
+   * network change) re-gathers candidates and recovers without tearing down the link.
+   */
+  async restartIce() {
+    return this._negotiate({ iceRestart: true });
+  }
+
+  /** @param {RTCOfferOptions} [opts] */
+  async _negotiate(opts) {
+    const o = await this.pc.createOffer(opts);
     if (this.closed) return;
     await this.pc.setLocalDescription(o);
     if (this.closed) return;
