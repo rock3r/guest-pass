@@ -129,6 +129,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		Auth:        authn,
 		DevLogin:    devLoginHandler(cfg, authn, st),
 		TURNHost:    web.CSPTURNHost(cfg.TURNURL), // empty in the STUN-only default (D-38)
+		Secure:      secure,
 		StaticDir:   "web/dist",
 		RateLimiter: limiter,
 	})

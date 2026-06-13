@@ -14,6 +14,11 @@ type SecurityOptions struct {
 	// configured TURN relay. Empty in the STUN-only default (D-38), keeping the policy
 	// tight.
 	TURNHost string
+	// Secure is true for an HTTPS origin. When false (a plain-HTTP dev/loopback origin),
+	// connect-src also allows ws: so the signaling socket isn't CSP-blocked — some
+	// browsers don't treat 'self' as covering WebSocket schemes. Production stays
+	// wss:-only.
+	Secure bool
 }
 
 type nonceKey struct{}
@@ -38,7 +43,7 @@ func SecurityHeaders(opts SecurityOptions) func(http.Handler) http.Handler {
 				return
 			}
 			h := w.Header()
-			h.Set("Content-Security-Policy", buildCSP(nonce, opts.TURNHost))
+			h.Set("Content-Security-Policy", buildCSP(nonce, opts.TURNHost, opts.Secure))
 			h.Set("Referrer-Policy", "no-referrer")
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
@@ -48,10 +53,14 @@ func SecurityHeaders(opts SecurityOptions) func(http.Handler) http.Handler {
 	}
 }
 
-// buildCSP assembles the policy. connect-src includes the wss: signaling endpoint and a
-// TURN host only when one is configured (CONVENTIONS §3.5).
-func buildCSP(nonce, turnHost string) string {
+// buildCSP assembles the policy. connect-src includes the signaling endpoint (wss:,
+// plus ws: on a non-secure dev origin) and a TURN host only when one is configured
+// (CONVENTIONS §3.5).
+func buildCSP(nonce, turnHost string, secure bool) string {
 	connect := "connect-src 'self' wss:"
+	if !secure {
+		connect += " ws:" // plain-HTTP dev origin: the signaling socket is ws://
+	}
 	if turnHost != "" {
 		connect += " " + turnHost
 	}

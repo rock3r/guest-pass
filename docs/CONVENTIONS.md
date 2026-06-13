@@ -320,7 +320,9 @@ pages.
 
   `connect-src` **must include the WS origin** (the `wss:` signaling endpoint) and
   a **TURN host only when one is configured** — omit `<turn-host?>` in the
-  STUN-only default.
+  STUN-only default. On a **non-secure (plain-HTTP) dev/loopback origin** `connect-src`
+  also includes `ws:` so the signaling socket isn't blocked (some browsers don't treat
+  `'self'` as covering WebSocket schemes); a production HTTPS origin stays `wss:`-only.
 - **SRI (RF-10) — via build manifest.** `cmd/build` emits a **build manifest**
   mapping each emitted JS/CSS bundle to its integrity hash; templates inject the
   `integrity=` attribute from that manifest. SRI hashes are never hand-maintained.

@@ -52,6 +52,25 @@ func TestSecurityHeaders_TURNHostIncluded(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders_WSSchemeByOrigin(t *testing.T) {
+	csp := func(secure bool) string {
+		h := SecurityHeaders(SecurityOptions{Secure: secure})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		return rec.Header().Get("Content-Security-Policy")
+	}
+	// Plain-HTTP dev origin allows ws: so the signaling socket isn't CSP-blocked.
+	if dev := csp(false); !strings.Contains(dev, " ws:") {
+		t.Errorf("non-secure CSP should allow ws:; got %q", dev)
+	}
+	// Production HTTPS origin stays wss:-only (no ws:).
+	if prod := csp(true); strings.Contains(prod, " ws:") {
+		t.Errorf("secure CSP must not allow ws:; got %q", prod)
+	} else if !strings.Contains(prod, "wss:") {
+		t.Errorf("secure CSP should still allow wss:; got %q", prod)
+	}
+}
+
 func TestCSPTURNHost(t *testing.T) {
 	cases := map[string]string{
 		"":                            "",

@@ -19,6 +19,7 @@ type RouterConfig struct {
 	Auth        *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout
 	DevLogin    http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
 	TURNHost    string              // CSP connect-src TURN host; empty = STUN-only
+	Secure      bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
 	StaticDir   string              // built frontend assets (web/dist), served at /static
 	RateLimiter *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
 }
@@ -34,7 +35,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	}
 
 	r := chi.NewRouter()
-	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost}))
+	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
 
 	r.Get("/", rd.landing)
 	r.Get("/signin", rd.signin)
