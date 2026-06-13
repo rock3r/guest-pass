@@ -8,6 +8,9 @@ import (
 	"testing"
 )
 
+// i64 returns a pointer to n, for optional *int64 params in tests.
+func i64(n int64) *int64 { return &n }
+
 // openTestStore opens a Store backed by a fresh temp-file database (not in-memory, so
 // WAL applies) and registers cleanup.
 func openTestStore(t *testing.T) *Store {

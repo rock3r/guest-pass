@@ -630,10 +630,19 @@ CREATE TABLE slots (                            -- host-global pool, wired into 
     source_token_hash TEXT    NOT NULL,         -- HMAC(secret,token); permanent, host-only (EN-5)
     source_token_last_used_at   INTEGER,        -- leak-detection metadata (EN-5/AD-23)
     source_token_last_source_ip TEXT,           -- leak-detection metadata (EN-5/AD-23)
-    epoch             INTEGER NOT NULL DEFAULT 0 -- in-memory authoritative; persisted at lifecycle edges only (RF-6)
+    epoch             INTEGER NOT NULL DEFAULT 0, -- in-memory authoritative; persisted at lifecycle edges only (RF-6)
+    -- Slot shape (D-20): cam slots are addressable 1..8; the host (D-18) and shared
+    -- screenshare (D-21) slots carry no idx. `idx IS NOT NULL` is load-bearing (a NULL
+    -- cam idx would make the clause evaluate to NULL, which SQLite treats as passing).
+    CHECK ((kind = 'cam' AND idx IS NOT NULL AND idx BETWEEN 1 AND 8)
+        OR (kind IN ('host','screenshare') AND idx IS NULL))
 );
 CREATE INDEX idx_slots_host ON slots(host_id);
 CREATE UNIQUE INDEX idx_slots_source_token ON slots(source_token_hash);  -- slot WS auth (/ws?src=) lookup
+-- Host-global pool uniqueness (D-20): at most one cam slot per (host, idx), and at most
+-- one host slot + one screenshare slot per host.
+CREATE UNIQUE INDEX idx_slots_cam ON slots(host_id, idx) WHERE kind = 'cam';
+CREATE UNIQUE INDEX idx_slots_singleton ON slots(host_id, kind) WHERE kind IN ('host','screenshare');
 
 CREATE TABLE passes (
     id           TEXT    PRIMARY KEY,

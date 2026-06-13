@@ -110,11 +110,67 @@ func TestSlotRepo_SourceTokenUnique(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
 	h := seedHost(t, st, "host-slot-uniq")
-	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "dup"}); err != nil {
+	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "dup"}); err != nil {
 		t.Fatalf("first slot: %v", err)
 	}
-	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "dup"}); err == nil {
+	// Different idx so this trips the source-token unique index, not the cam-idx one.
+	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(2), SourceTokenHash: "dup"}); err == nil {
 		t.Fatal("expected UNIQUE violation on duplicate source_token_hash, got nil")
+	}
+}
+
+func TestSlotRepo_OneCamPerIdx(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-cam-idx")
+	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "c1a"}); err != nil {
+		t.Fatalf("first cam-1: %v", err)
+	}
+	// A second cam slot with the same idx for the same host is a duplicate fixed slot (D-20).
+	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "c1b"}); err == nil {
+		t.Fatal("expected unique violation for duplicate cam idx, got nil")
+	}
+	// A different idx is fine.
+	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(2), SourceTokenHash: "c2"}); err != nil {
+		t.Fatalf("cam-2: %v", err)
+	}
+}
+
+func TestSlotRepo_SingletonKinds(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-singleton")
+	for _, kind := range []string{SlotHost, SlotScreenshare} {
+		if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: kind, SourceTokenHash: kind + "-1"}); err != nil {
+			t.Fatalf("first %s: %v", kind, err)
+		}
+		// At most one host slot and one screenshare slot per host (D-18/D-21/D-20).
+		if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: kind, SourceTokenHash: kind + "-2"}); err == nil {
+			t.Fatalf("expected unique violation for a second %s slot, got nil", kind)
+		}
+	}
+}
+
+func TestSlotRepo_ShapeConstraint(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-shape")
+	cases := []struct {
+		name string
+		p    CreateSlotParams
+	}{
+		{"cam without idx", CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "s1"}},
+		{"cam idx out of range", CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(9), SourceTokenHash: "s2"}},
+		{"cam idx zero", CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(0), SourceTokenHash: "s3"}},
+		{"screenshare with idx", CreateSlotParams{HostID: h.ID, Kind: SlotScreenshare, Idx: i64(1), SourceTokenHash: "s4"}},
+		{"host with idx", CreateSlotParams{HostID: h.ID, Kind: SlotHost, Idx: i64(1), SourceTokenHash: "s5"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := st.CreateSlot(ctx, tc.p); err == nil {
+				t.Fatalf("expected shape CHECK violation for %q, got nil", tc.name)
+			}
+		})
 	}
 }
 
@@ -164,8 +220,8 @@ func TestPassRepo_AssignSlotSameHostInvariant(t *testing.T) {
 	hostA := seedHost(t, st, "host-A")
 	hostB := seedHost(t, st, "host-B")
 	streamA, _ := st.CreateStream(ctx, CreateStreamParams{HostID: hostA.ID, Title: "A"})
-	slotA, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: hostA.ID, Kind: SlotCam, SourceTokenHash: "src-A"})
-	slotB, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: hostB.ID, Kind: SlotCam, SourceTokenHash: "src-B"})
+	slotA, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: hostA.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-A"})
+	slotB, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: hostB.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-B"})
 
 	passA, _ := st.CreatePass(ctx, CreatePassParams{StreamID: streamA.ID, TokenHash: "p-A"})
 
@@ -211,7 +267,7 @@ func TestSlotRepo_RecordTokenUse(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
 	h := seedHost(t, st, "host-tokuse")
-	sl, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "src-use"})
+	sl, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-use"})
 	if sl.SourceTokenLastUsedAt != nil || sl.SourceTokenLastSourceIP != nil {
 		t.Fatalf("new slot should have nil last-used metadata: %+v", sl)
 	}
@@ -237,7 +293,7 @@ func TestPassRepo_OneActiveOccupantPerSlot(t *testing.T) {
 	st := openTestStore(t)
 	h := seedHost(t, st, "host-occ")
 	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
-	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, SourceTokenHash: "src-occ"})
+	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-occ"})
 
 	p1, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "occ-1"})
 	p2, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "occ-2"})
