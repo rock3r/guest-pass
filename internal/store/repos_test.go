@@ -313,6 +313,35 @@ func TestPassRepo_OneActiveOccupantPerSlot(t *testing.T) {
 	}
 }
 
+// TestHostSourceTokenUniquePerStreamRole exercises the (stream_id, role) unique index:
+// a host/obs/obs_screen source token is one-active-value-per-role per stream (EN-5), so
+// reissuing must replace, not append a second valid token. host_source_tokens has no
+// repo in step 2 (D-18 routing lands in M2/M4), so this is a schema-level raw-SQL test.
+func TestHostSourceTokenUniquePerStreamRole(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-hst")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+
+	insert := func(id, role, tokenHash string) error {
+		_, err := st.writer.ExecContext(ctx,
+			"INSERT INTO host_source_tokens (id, stream_id, role, token_hash) VALUES (?, ?, ?, ?)",
+			id, stream.ID, role, tokenHash)
+		return err
+	}
+	if err := insert("hst-1", "host", "hash-1"); err != nil {
+		t.Fatalf("first host token: %v", err)
+	}
+	// A second token for the same (stream, role) must be rejected (one active value).
+	if err := insert("hst-2", "host", "hash-2"); err == nil {
+		t.Fatal("expected unique violation for a second host-source token on (stream, role), got nil")
+	}
+	// A different role on the same stream is fine.
+	if err := insert("hst-3", "obs_screen", "hash-3"); err != nil {
+		t.Fatalf("obs_screen token should be allowed: %v", err)
+	}
+}
+
 // TestOneLiveSessionPerHost exercises the partial unique index idx_sessions_one_live
 // (EN-2/RF-2) at the schema level: a host may have at most one active session.
 func TestOneLiveSessionPerHost(t *testing.T) {

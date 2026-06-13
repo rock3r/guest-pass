@@ -677,6 +677,8 @@ CREATE TABLE host_source_tokens (               -- D-18 host cam/screen routing,
 );
 CREATE INDEX idx_host_source_tokens_stream ON host_source_tokens(stream_id);
 CREATE UNIQUE INDEX idx_host_source_tokens_token ON host_source_tokens(token_hash);  -- source WS auth lookup
+-- one active value per role per stream (EN-5): rotation replaces, never appends
+CREATE UNIQUE INDEX idx_host_source_tokens_stream_role ON host_source_tokens(stream_id, role);
 
 CREATE TABLE sessions (
     id         TEXT    PRIMARY KEY,
