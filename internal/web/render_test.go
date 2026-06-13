@@ -27,6 +27,14 @@ func TestRenderer_LandingHasSourceLinkAndLicense(t *testing.T) {
 	if !strings.Contains(body, "AGPL-3.0") {
 		t.Error("landing missing AGPL-3.0 license mention")
 	}
+	// The stylesheet loads even without a build manifest (no integrity) so the page is
+	// never unstyled; integrity is added only when the manifest is present (next test).
+	if !strings.Contains(body, `href="/static/app.css"`) {
+		t.Error("landing should always link the stylesheet")
+	}
+	if strings.Contains(body, "integrity=") {
+		t.Error("no integrity attribute expected without a manifest")
+	}
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q", ct)
 	}

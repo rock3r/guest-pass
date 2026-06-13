@@ -49,7 +49,7 @@ func TestBuildHandler_Wiring(t *testing.T) {
 		AdminEmail:         "admin@example.com",
 		TURNURL:            "turns:turn.example.org:5349",
 	}
-	h, err := buildHandler(cfg, st, signaling.NewHub(), web.NewRateLimiter(1000, 1000))
+	h, err := buildHandler(cfg, st, signaling.NewHub(), web.NewRateLimiter(1000, 1000), nil)
 	if err != nil {
 		t.Fatalf("buildHandler: %v", err)
 	}

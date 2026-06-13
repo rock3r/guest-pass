@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,6 +23,7 @@ type RouterConfig struct {
 	Secure      bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
 	StaticDir   string              // built frontend assets (web/dist), served at /static
 	RateLimiter *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
+	WSInflight  *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
 }
 
 // NewRouter builds the GuestPass HTTP handler: strict security headers globally, the
@@ -42,7 +44,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/healthz", healthz)
 
 	if cfg.Hub != nil {
-		r.Get("/ws", ServeWS(cfg.Hub))
+		r.Get("/ws", ServeWS(cfg.Hub, cfg.WSInflight))
 	}
 	if cfg.StaticDir != "" {
 		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(cfg.StaticDir))))

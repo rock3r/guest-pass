@@ -4,6 +4,7 @@ package web
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -18,7 +19,10 @@ import (
 // handling incl. the null OBS-CEF Origin, and token redaction (EN-16) land in M2
 // step 1. The role is still inferred from the connection, never trusted from a
 // frame body (EN-7).
-func ServeWS(hub *signaling.Hub) http.HandlerFunc {
+//
+// inflight (nil-safe) tracks each upgraded connection so a graceful drain can wait for
+// terminate frames to flush before the process exits (RF-21).
+func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		session, peer := q.Get("session"), q.Get("peer")
@@ -34,6 +38,10 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 			return
 		}
 		defer c.CloseNow()
+		if inflight != nil {
+			inflight.Add(1)
+			defer inflight.Done()
+		}
 
 		ctx := r.Context()
 		room := hub.Room(session)
@@ -54,6 +62,10 @@ func ServeWS(hub *signaling.Hub) http.HandlerFunc {
 					return
 				}
 			}
+			// out was closed by the room (Leave / drain Terminate). All queued frames —
+			// including a terminate sent during a graceful drain — are now flushed, so
+			// close the socket to unblock the reader and let the handler return promptly.
+			c.CloseNow()
 		}()
 
 		// Reader loop: parse frames → room commands.

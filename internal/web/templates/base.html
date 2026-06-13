@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · GuestPass</title>
-{{if .StyleIntegrity}}<link rel="stylesheet" href="/static/app.css" integrity="{{.StyleIntegrity}}" crossorigin="anonymous">{{end}}
+<link rel="stylesheet" href="/static/app.css"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}" crossorigin="anonymous"{{end}}>{{/* integrity added when the build manifest is present; the stylesheet still loads without it */}}
 </head>
 <body>
 <main>{{template "content" .}}</main>
