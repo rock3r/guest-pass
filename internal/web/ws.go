@@ -58,7 +58,12 @@ func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 		}
 		pid := signaling.PeerID(peer)
 		out := make(chan signaling.Frame, 64)
-		room.Join(pid, role, signaling.SlotID(slot), out)
+		if !room.Join(pid, role, signaling.SlotID(slot), out) {
+			// The room started draining between hub.Room and Join. Tell the client to
+			// reconnect and close; we never registered, so there's no writer to drain.
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+			return
+		}
 
 		// Single writer goroutine (EN-12): the ONLY place this socket is written. It
 		// ends when the room closes out (during Leave below).

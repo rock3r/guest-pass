@@ -41,6 +41,21 @@ func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	}
 }
 
+// A connection that resolved a room just before it started draining must not be admitted
+// after the terminate broadcast — Join refuses it so it can't strand itself.
+func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
+	r := newRoom("s")
+	go r.run()
+	defer r.Close()
+
+	r.Terminate("reconnect") // marks the room terminating (does not stop the goroutine)
+
+	out := make(chan Frame, 4)
+	if r.Join(PeerID("late"), "guest", "", out) {
+		t.Fatal("Join after Terminate should be refused")
+	}
+}
+
 // TestRoomTerminate_DoesNotDropTerminate uses an unbuffered out (no reader) so a send
 // can only proceed once a reader appears. The terminate frame is terminal (RF-16) and
 // must NOT be dropped: Terminate must block on the send rather than return immediately.

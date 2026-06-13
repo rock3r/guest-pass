@@ -68,14 +68,26 @@ func deliver(conns map[PeerID]*peerConn, outs []outbound) {
 	}
 }
 
-// Join registers a connection and enters it into the room. An OBS source page
-// (role obs/obs_screen) also subscribes to its slot and is told the current binding.
+// Join registers a connection and enters it into the room, returning whether it was
+// admitted. An OBS source page (role obs/obs_screen) also subscribes to its slot and is
+// told the current binding.
 //
 // One connection per identity (EN-16): if a peer id is already connected, the prior
 // connection is evicted (its out channel closed) before the new one is installed, so
 // a duplicate id can't leave a stale conn that a later Leave would mis-target.
-func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
-	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+//
+// Join returns false (admitting nothing) if the room is draining (Terminate ran) or its
+// goroutine has stopped — so a connection that resolved this room just before a shutdown
+// can't slip in after the terminate broadcast and strand itself with no teardown. The
+// caller then closes the connection itself. Join is synchronous: it waits for the
+// command to run, so the result reflects the room's actual state.
+func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) bool {
+	admitted := make(chan bool, 1)
+	cmd := func(st *roomState, conns map[PeerID]*peerConn) {
+		if st.terminating {
+			admitted <- false
+			return
+		}
 		if old := conns[id]; old != nil {
 			// Tell the evicted client to reconnect (EN-9 transient) before closing
 			// its channel, so a duplicate identity is a clean handover.
@@ -91,7 +103,14 @@ func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) {
 			outs = append(outs, st.attachSource(slot, id)...)
 		}
 		deliver(conns, outs)
-	})
+		admitted <- true
+	}
+	select {
+	case r.cmds <- cmd:
+		return <-admitted
+	case <-r.done:
+		return false
+	}
 }
 
 // Leave removes a peer and CLOSES its out channel from the room goroutine — the only
@@ -153,7 +172,8 @@ const terminateBudget = 2 * time.Second
 // (identity-checked).
 func (r *Room) Terminate(reason string) {
 	done := make(chan struct{})
-	r.post(func(_ *roomState, conns map[PeerID]*peerConn) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		st.terminating = true // refuse any late Join that arrives after this command
 		var wg sync.WaitGroup
 		for id, c := range conns {
 			wg.Add(1)
