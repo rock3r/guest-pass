@@ -75,15 +75,21 @@ func serve(addr string) error {
 		log.Println("draining: terminating WS peers and finishing in-flight writes…")
 		sctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
-		// Notify WS peers FIRST: Hub.Shutdown closes the hub and sends terminate, which
-		// unblocks each /ws reader so its handler returns. Doing this before srv.Shutdown
-		// means srv.Shutdown isn't left waiting on read-blocked WS handlers until the
-		// timeout. A /ws request arriving in the window before srv stops accepting hits a
-		// closed hub (Room → nil) and is told to reconnect, so no new room is created.
-		hub.Shutdown("reconnect")
-		_ = srv.Shutdown(sctx)                   // stop accepting; drain in-flight HTTP handlers
-		waitTimeout(&wsInflight, 10*time.Second) // ensure WS handlers flushed terminate and exited
-		_ = st.Close()                           // flush in-flight DB writes (writer pool drains on Close)
+		// Close the listener and terminate WS rooms CONCURRENTLY: srv.Shutdown closes the
+		// listener at once (no new traffic) and drains in-flight HTTP handlers, while
+		// Hub.Shutdown sends terminate to unblock the read-blocked WS handlers. Running
+		// them together means a slow Room.Terminate can't keep the listener open, and
+		// srv.Shutdown isn't left waiting on WS handlers that haven't been told to stop.
+		var phase sync.WaitGroup
+		phase.Add(2)
+		go func() { defer phase.Done(); _ = srv.Shutdown(sctx) }()
+		go func() { defer phase.Done(); hub.Shutdown("reconnect") }()
+		phase.Wait()
+		// The listener is now closed, so no new /ws handlers can start; only the ones that
+		// began earlier remain, finishing as they flush terminate. Waiting on them here
+		// can't race a fresh Add-from-zero.
+		waitTimeout(&wsInflight, 10*time.Second)
+		_ = st.Close() // flush in-flight DB writes (writer pool drains on Close)
 		close(stop)
 	}()
 

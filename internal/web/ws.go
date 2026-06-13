@@ -24,6 +24,15 @@ import (
 // terminate frames to flush before the process exits (RF-21).
 func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Count the handler at entry — before the upgrade — so a drain's Wait can't race
+		// a handler sitting between Accept and a later Add (which would be an Add-from-zero
+		// concurrent with Wait). Done covers every exit path, including validation/Accept
+		// failure.
+		if inflight != nil {
+			inflight.Add(1)
+			defer inflight.Done()
+		}
+
 		q := r.URL.Query()
 		session, peer := q.Get("session"), q.Get("peer")
 		role, slot := q.Get("role"), q.Get("slot")
@@ -38,10 +47,6 @@ func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup) http.HandlerFunc {
 			return
 		}
 		defer c.CloseNow()
-		if inflight != nil {
-			inflight.Add(1)
-			defer inflight.Done()
-		}
 
 		ctx := r.Context()
 		room := hub.Room(session)
