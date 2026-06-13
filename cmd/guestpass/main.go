@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -60,9 +61,10 @@ func serve(addr string) error {
 	}
 
 	hub := signaling.NewHub()
-	limiter := web.NewRateLimiter(5, 20) // ~5 req/s/IP sustained, burst 20, on /auth routes
-	var wsInflight sync.WaitGroup        // live /ws handlers, so the drain can wait for terminate flush
-	handler, err := buildHandler(cfg, st, hub, limiter, &wsInflight)
+	limiter := web.NewRateLimiter(5, 20)    // ~5 req/s/IP sustained, burst 20, on /auth routes
+	wsLimiter := web.NewRateLimiter(10, 40) // /ws reconnect throttle: lenient so OBS sources + tabs reattach
+	var wsInflight sync.WaitGroup           // live /ws handlers, so the drain can wait for terminate flush
+	handler, err := buildHandler(cfg, st, hub, limiter, wsLimiter, &wsInflight)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("building handler: %w", err)
@@ -104,6 +106,7 @@ func serve(addr string) error {
 			select {
 			case <-t.C:
 				limiter.Cleanup(10 * time.Minute)
+				wsLimiter.Cleanup(10 * time.Minute)
 			case <-stop:
 				return
 			}
@@ -134,7 +137,7 @@ func waitTimeout(wg *sync.WaitGroup, d time.Duration) {
 // buildHandler assembles the HTTP handler from config, the store, and the hub: the JWT
 // key ring + live-DB authenticator (EN-6), the Google OAuth flow, the dev-login seam
 // (nil unless this is a dev build with AUTH_MODE=dev), and the route table.
-func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limiter *web.RateLimiter, wsInflight *sync.WaitGroup) (http.Handler, error) {
+func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limiter, wsLimiter *web.RateLimiter, wsInflight *sync.WaitGroup) (http.Handler, error) {
 	ring, err := auth.NewKeyRing(cfg.JWTSecret, cfg.JWTSecretPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("building key ring: %w", err)
@@ -161,20 +164,22 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 	}
 
 	return web.NewRouter(web.RouterConfig{
-		SourceURL:   buildinfo.SourceURL(),
-		Hub:         hub,
-		OAuth:       oauth,
-		Auth:        authn,
-		DevLogin:    devLoginHandler(cfg, authn, st),
-		TURNHost:    web.CSPTURNHost(cfg.TURNURL), // empty in the STUN-only default (D-38)
-		Secure:      secure,
-		StaticDir:   "web/dist",
-		RateLimiter: limiter,
-		WSInflight:  wsInflight,
-		ICEServers:  turn.ICEServers(cfg.STUNURL), // STUN-only (D-38); TURN entry + creds land in M2
-		Store:       st,
-		Hasher:      hasher,
-		Mailer:      mailer,
-		BaseURL:     cfg.BaseURL,
+		SourceURL:     buildinfo.SourceURL(),
+		Hub:           hub,
+		OAuth:         oauth,
+		Auth:          authn,
+		DevLogin:      devLoginHandler(cfg, authn, st),
+		TURNHost:      web.CSPTURNHost(cfg.TURNURL), // empty in the STUN-only default (D-38)
+		Secure:        secure,
+		StaticDir:     "web/dist",
+		RateLimiter:   limiter,
+		WSRateLimiter: wsLimiter,
+		WSInflight:    wsInflight,
+		ICEServers:    turn.ICEServers(cfg.STUNURL), // STUN-only (D-38); TURN entry + creds land in M2
+		Store:         st,
+		Hasher:        hasher,
+		Mailer:        mailer,
+		BaseURL:       cfg.BaseURL,
+		Logger:        slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
 }
