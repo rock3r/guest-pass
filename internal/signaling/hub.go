@@ -26,3 +26,21 @@ func (h *Hub) Room(session string) *Room {
 	}
 	return r
 }
+
+// Shutdown gracefully terminates every live room for a server drain (RF-21): each room
+// broadcasts a terminate frame with reason to its peers, then is stopped. The registry
+// is cleared so no new work is routed to a stopping room.
+func (h *Hub) Shutdown(reason string) {
+	h.mu.Lock()
+	rooms := make([]*Room, 0, len(h.rooms))
+	for _, r := range h.rooms {
+		rooms = append(rooms, r)
+	}
+	h.rooms = map[string]*Room{}
+	h.mu.Unlock()
+
+	for _, r := range rooms {
+		r.Terminate(reason)
+		r.Close()
+	}
+}

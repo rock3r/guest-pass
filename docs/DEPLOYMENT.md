@@ -102,6 +102,7 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `ALLOWED_HOSTS` | optional | — | Email allowlist consulted when `SIGNUP_MODE=allowlist`. |
 | `CODEC_OPTIN` | optional | — | Higher-efficiency codecs offered beyond the H.264/VP8 default (comma list, e.g. `vp9,av1,h265`); **OFF by default** — better compression at guests' CPU/battery cost, negotiated only where both peers support it (D-39). |
 | `AUTH_MODE` | dev-only | **✅ in prod (AD-8)** | `dev` mints a fake host session without Google for local dev + hermetic tests (mirrors `MAIL_MODE=log`). **INVARIANT: the binary refuses to start if `AUTH_MODE=dev` outside dev** (same fail-closed posture as EN-14, AD-8). Never set in production. |
+| `DB_PATH` | optional | — | SQLite file path; defaults to `guestpass.db`. In docker-compose point it at the mounted volume (§6), e.g. `/data/guestpass.db`. |
 
 ¹ `TURN_SECRET` is unrequired when STUN-only (no TURN), but **fail-closed-critical
 whenever TURN is enabled**. Together with `JWT_SECRET` it is the fail-closed pair

@@ -65,7 +65,12 @@ type Config struct {
 	AllowedHosts       []string
 	CodecOptin         []string
 	AuthMode           string // "" => production (Google OAuth); "dev" => fake host session (AD-8)
+	DBPath             string // SQLite file path (DB_PATH); defaults to guestpass.db
 }
+
+// defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
+// mounted volume (DEPLOYMENT §6).
+const defaultDBPath = "guestpass.db"
 
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
 // STUN-only (D-38) and TURN_SECRET is not required.
@@ -93,6 +98,10 @@ func load(getenv func(string) string) (*Config, error) {
 		AllowedHosts:       splitList(getenv("ALLOWED_HOSTS")),
 		CodecOptin:         splitList(getenv("CODEC_OPTIN")),
 		AuthMode:           strings.TrimSpace(getenv("AUTH_MODE")),
+		DBPath:             strings.TrimSpace(getenv("DB_PATH")),
+	}
+	if c.DBPath == "" {
+		c.DBPath = defaultDBPath
 	}
 	if err := c.validate(); err != nil {
 		return nil, err

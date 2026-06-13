@@ -198,6 +198,19 @@ func TestLoad_InvalidEnumsRejected(t *testing.T) {
 	}
 }
 
+func TestLoad_DBPathDefaultAndOverride(t *testing.T) {
+	c, err := envLoad(validEnv())
+	if err != nil || c.DBPath != "guestpass.db" {
+		t.Fatalf("default DBPath = %q (err %v), want guestpass.db", c.DBPath, err)
+	}
+	env := validEnv()
+	env["DB_PATH"] = "/data/guestpass.db"
+	c, err = envLoad(env)
+	if err != nil || c.DBPath != "/data/guestpass.db" {
+		t.Fatalf("DBPath override = %q (err %v)", c.DBPath, err)
+	}
+}
+
 func TestLoad_ParsesFields(t *testing.T) {
 	env := validEnv()
 	env["BASE_URL"] = "https://guest-pass.link"

@@ -130,5 +130,29 @@ func (r *Room) ObsActive(slot SlotID, active bool, epoch int) {
 	})
 }
 
+// Terminate sends a terminate frame (best-effort) to every connected peer, then closes
+// their out channels and clears the roster. Used for graceful shutdown (RF-21): the
+// transient reason "reconnect" tells clients to retry with backoff (keyed by pass_id),
+// so a deploy/restart isn't a hard mass-drop. It runs on the room goroutine, so a
+// concurrent readLoop Leave for a now-removed conn is a no-op (identity-checked).
+func (r *Room) Terminate(reason string) {
+	done := make(chan struct{})
+	r.post(func(_ *roomState, conns map[PeerID]*peerConn) {
+		for id, c := range conns {
+			select {
+			case c.out <- Frame{T: "terminate", Reason: reason}:
+			default:
+			}
+			close(c.out)
+			delete(conns, id)
+		}
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-r.done:
+	}
+}
+
 // Close stops the room goroutine.
 func (r *Room) Close() { close(r.done) }
