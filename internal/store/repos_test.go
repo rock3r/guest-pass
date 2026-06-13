@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // seedHost creates an active host and returns it.
@@ -211,6 +212,52 @@ func TestPassRepo_CRUDAndStatus(t *testing.T) {
 
 	if _, err := st.GetPassByTokenHash(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing token: %v, want ErrNotFound", err)
+	}
+}
+
+// MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
+// whether it did, never re-stamps opened_at, and never regresses a further-along pass.
+func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-open")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show"})
+	p, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "tok-open", Status: PassSent})
+
+	ok, err := st.MarkPassOpened(ctx, p.ID)
+	if err != nil || !ok {
+		t.Fatalf("first MarkPassOpened: ok=%v err=%v, want true", ok, err)
+	}
+	first, _ := st.GetPass(ctx, p.ID)
+	if first.Status != PassOpened || first.OpenedAt == nil {
+		t.Fatalf("after open: status=%q opened_at=%v", first.Status, first.OpenedAt)
+	}
+
+	// A second call is a no-op (already opened): returns false, opened_at unchanged.
+	ok, _ = st.MarkPassOpened(ctx, p.ID)
+	second, _ := st.GetPass(ctx, p.ID)
+	if ok || second.OpenedAt == nil || *second.OpenedAt != *first.OpenedAt {
+		t.Fatalf("repeat MarkPassOpened should be a no-op: ok=%v openedAt %v→%v", ok, first.OpenedAt, second.OpenedAt)
+	}
+
+	// It must not regress a further-along (accepted) pass.
+	_ = st.SetPassStatus(ctx, p.ID, PassAccepted)
+	if ok, _ := st.MarkPassOpened(ctx, p.ID); ok {
+		t.Fatal("MarkPassOpened must not transition an accepted pass")
+	}
+	if reload, _ := st.GetPass(ctx, p.ID); reload.Status != PassAccepted {
+		t.Fatalf("accepted pass regressed to %q", reload.Status)
+	}
+
+	// A pass past its expiry deadline can't be opened, even from a sent state — the
+	// deadline is enforced inside the atomic UPDATE (no read-then-write race).
+	past := time.Now().Add(-time.Minute).Unix()
+	exp, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "tok-open-exp", Status: PassSent, ExpiresAt: &past})
+	if ok, err := st.MarkPassOpened(ctx, exp.ID); err != nil || ok {
+		t.Fatalf("MarkPassOpened on a past-deadline pass: ok=%v err=%v, want false", ok, err)
+	}
+	if reload, _ := st.GetPass(ctx, exp.ID); reload.Status != PassSent || reload.OpenedAt != nil {
+		t.Fatalf("past-deadline pass must not be opened: status=%q openedAt=%v", reload.Status, reload.OpenedAt)
 	}
 }
 

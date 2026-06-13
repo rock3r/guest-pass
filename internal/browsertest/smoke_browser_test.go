@@ -12,27 +12,27 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// The harness builds the REAL app bundle, serves it, and drives it in headless Chrome:
-// the SPIKE-1 island mounts (vendored Preact + hooks) and its useState counter increments
-// on a click. This proves the esbuild→serve→chromedp toolchain end to end (T-5 / [BROWSER]).
-func TestSmoke_AppIslandMountsAndIncrements(t *testing.T) {
+// The harness builds the REAL app bundle, serves it, and drives it in headless Chrome: the
+// app dispatcher mounts the device-check island (vendored Preact + hooks) on its root
+// element. This proves the esbuild→serve→chromedp toolchain end to end (T-5 / [BROWSER]).
+// The full device-check journey (preview + entry) is exercised in devicecheck_browser_test.
+func TestSmoke_AppIslandMounts(t *testing.T) {
 	h := New(t, func(mux *http.ServeMux) {
 		mux.HandleFunc("/", Page(`<!doctype html><html><head><meta charset="utf-8"></head>`+
-			`<body><div id="app"></div><script type="module" src="/static/app.js"></script></body></html>`))
+			`<body><div id="device-check"></div><script type="module" src="/static/app.js"></script></body></html>`))
 	})
 
 	Chrome(t, 90*time.Second, func(ctx context.Context) {
 		var text string
 		if err := chromedp.Run(ctx,
 			chromedp.Navigate(h.URL),
-			chromedp.WaitVisible(`.gp-probe`, chromedp.ByQuery),
-			chromedp.Click(`.gp-probe`, chromedp.ByQuery),
-			chromedp.Text(`.gp-probe`, &text, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Text(`.dc-start`, &text, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("chromedp run: %v", err)
 		}
-		if !strings.Contains(text, "clicked 1") {
-			t.Fatalf("island counter text = %q, want it to show 'clicked 1 time'", text)
+		if !strings.Contains(text, "camera check") {
+			t.Fatalf("device-check start button text = %q, want it to mention the camera check", text)
 		}
 	})
 }

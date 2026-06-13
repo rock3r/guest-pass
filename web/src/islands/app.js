@@ -1,22 +1,8 @@
-import { render } from "preact";
-import { useState } from "preact/hooks";
 import "../styles/tokens.css";
+import { mountDeviceCheck } from "./devicecheck.js";
 
-/**
- * Counter is a throwaway SPIKE-1 island proving the npm-free toolchain end to end:
- * vendored Preact + hooks + automatic JSX (authored in plain .js, D-32). Real
- * islands (device-check, guest-session, greenroom) replace this in M2/M3.
- *
- * @returns {import("preact").VNode}
- */
-function Counter() {
-  const [n, setN] = useState(0);
-  return (
-    <button class="gp-probe" onClick={() => setN(n + 1)}>
-      clicked {n} {n === 1 ? "time" : "times"}
-    </button>
-  );
-}
-
-const root = document.getElementById("app");
-if (root) render(<Counter />, root);
+// The app bundle is a small dispatcher: it mounts whichever island the server-rendered
+// page asked for by its root element. The device-check island lands here in M2; the
+// guest-session / greenroom islands join it in M3.
+const deviceCheck = document.getElementById("device-check");
+if (deviceCheck) mountDeviceCheck(deviceCheck);

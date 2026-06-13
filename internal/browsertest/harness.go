@@ -37,6 +37,28 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
+// BuildDist builds the frontend bundles into a fresh temp dir and returns its path, so a
+// test can serve them (e.g. as the real router's static dir, which also reads the SRI
+// manifest from here). The dir is cleaned up with the test.
+func BuildDist(t *testing.T) string {
+	t.Helper()
+	dist := t.TempDir()
+	if err := assets.Build(repoRoot(t), dist); err != nil {
+		t.Fatalf("assets.Build: %v", err)
+	}
+	return dist
+}
+
+// Serve starts a test server for handler and returns it (closed with the test). Use with
+// BuildDist when a test needs the real HTTP handler (e.g. web.NewRouter) rather than the
+// bare static mux that New provides.
+func Serve(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 // Harness is a running test server fronting the freshly-built frontend bundles.
 type Harness struct {
 	URL  string // base URL of the test server
@@ -47,10 +69,7 @@ type Harness struct {
 // at /static plus any page routes the caller registers.
 func New(t *testing.T, routes func(*http.ServeMux)) *Harness {
 	t.Helper()
-	dist := t.TempDir()
-	if err := assets.Build(repoRoot(t), dist); err != nil {
-		t.Fatalf("assets.Build: %v", err)
-	}
+	dist := BuildDist(t)
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(dist))))
 	if routes != nil {

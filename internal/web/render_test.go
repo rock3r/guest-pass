@@ -10,7 +10,7 @@ import (
 const testSourceURL = "https://github.com/rock3r/guest-pass/tree/deadbeef"
 
 func TestRenderer_LandingHasSourceLinkAndLicense(t *testing.T) {
-	rd, err := newRenderer(testSourceURL, "", false)
+	rd, err := newRenderer(testSourceURL, "", "", false)
 	if err != nil {
 		t.Fatalf("newRenderer: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRenderer_LandingHasSourceLinkAndLicense(t *testing.T) {
 
 func TestRenderer_SigninDevToggle(t *testing.T) {
 	// Without dev login, only the Google affordance shows.
-	rd, _ := newRenderer(testSourceURL, "", false)
+	rd, _ := newRenderer(testSourceURL, "", "", false)
 	rec := httptest.NewRecorder()
 	rd.signin(rec, httptest.NewRequest(http.MethodGet, "/signin", nil))
 	body := rec.Body.String()
@@ -54,7 +54,7 @@ func TestRenderer_SigninDevToggle(t *testing.T) {
 	}
 
 	// With dev login, the dev affordance appears.
-	rdDev, _ := newRenderer(testSourceURL, "", true)
+	rdDev, _ := newRenderer(testSourceURL, "", "", true)
 	rec2 := httptest.NewRecorder()
 	rdDev.signin(rec2, httptest.NewRequest(http.MethodGet, "/signin", nil))
 	if !strings.Contains(rec2.Body.String(), "/auth/dev") {
@@ -63,7 +63,7 @@ func TestRenderer_SigninDevToggle(t *testing.T) {
 }
 
 func TestRenderer_StyleIntegrityInjectedWhenPresent(t *testing.T) {
-	rd, _ := newRenderer(testSourceURL, "sha384-abc123", false)
+	rd, _ := newRenderer(testSourceURL, "sha384-abc123", "", false)
 	rec := httptest.NewRecorder()
 	rd.landing(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := rec.Body.String()

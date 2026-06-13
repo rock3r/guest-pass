@@ -14,22 +14,24 @@ var templateFS embed.FS
 // the corresponding source of the running build, surfaced on every page including
 // guest-facing ones (EN-17). Nonce is the per-request CSP script nonce (§3.5).
 type pageData struct {
-	Title          string
-	SourceURL      string
-	StyleIntegrity string
-	DevLogin       bool
-	Nonce          string
-	StreamTitle    string // pass landing page only
-	GuestName      string // pass landing page only
+	Title           string
+	SourceURL       string
+	StyleIntegrity  string
+	ScriptIntegrity string // SRI for the app.js island bundle (pages that mount an island)
+	DevLogin        bool
+	Nonce           string
+	StreamTitle     string // pass landing page only
+	GuestName       string // pass landing page only
 }
 
 // renderer holds the parsed page templates and the per-build constants injected into
 // every render.
 type renderer struct {
-	pages          map[string]*template.Template
-	sourceURL      string
-	styleIntegrity string
-	devLogin       bool
+	pages           map[string]*template.Template
+	sourceURL       string
+	styleIntegrity  string
+	scriptIntegrity string
+	devLogin        bool
 }
 
 // pageFiles are the server-rendered pages; each defines a "content" template composed
@@ -39,7 +41,7 @@ var pageFiles = []string{"landing.html", "signin.html", "pass.html"}
 // newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
 // styleIntegrity is the SRI hash for the app CSS bundle (empty when no build manifest
 // is present, e.g. in tests); devLogin toggles the dev sign-in affordance.
-func newRenderer(sourceURL, styleIntegrity string, devLogin bool) (*renderer, error) {
+func newRenderer(sourceURL, styleIntegrity, scriptIntegrity string, devLogin bool) (*renderer, error) {
 	pages := make(map[string]*template.Template, len(pageFiles))
 	for _, p := range pageFiles {
 		t, err := template.New("base").ParseFS(templateFS, "templates/base.html", "templates/"+p)
@@ -48,7 +50,7 @@ func newRenderer(sourceURL, styleIntegrity string, devLogin bool) (*renderer, er
 		}
 		pages[p] = t
 	}
-	return &renderer{pages: pages, sourceURL: sourceURL, styleIntegrity: styleIntegrity, devLogin: devLogin}, nil
+	return &renderer{pages: pages, sourceURL: sourceURL, styleIntegrity: styleIntegrity, scriptIntegrity: scriptIntegrity, devLogin: devLogin}, nil
 }
 
 // render executes a page into a buffer first, so a template error never writes a partial
@@ -62,6 +64,7 @@ func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page string, 
 	}
 	data.SourceURL = rd.sourceURL
 	data.StyleIntegrity = rd.styleIntegrity
+	data.ScriptIntegrity = rd.scriptIntegrity
 	data.DevLogin = rd.devLogin
 	data.Nonce = NonceFromContext(r.Context())
 	var buf bytes.Buffer
