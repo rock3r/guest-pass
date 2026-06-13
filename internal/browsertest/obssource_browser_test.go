@@ -131,6 +131,24 @@ func TestOBSSource_RendersBoundOccupant(t *testing.T) {
 		t.Fatalf("obs source did not render the bound occupant over P2P: %v", err)
 	}
 
+	// D-41: the guest's mic rides the cam source into OBS — the page must carry the guest's
+	// live audio and must NOT be muted (a muted <video> would silence the program audio OBS
+	// captures). Asserted explicitly so a regression to muted/audio-less is caught.
+	var audioOK bool
+	if err := chromedp.Run(obsCtx, chromedp.Evaluate(`(() => {
+		const v = document.querySelector('#obs-video');
+		if (!v || v.muted) return false;
+		const s = v.srcObject;
+		if (!s) return false;
+		const a = s.getAudioTracks();
+		return a.length > 0 && a[0].readyState === 'live';
+	})()`, &audioOK)); err != nil {
+		t.Fatalf("read audio track state: %v", err)
+	}
+	if !audioOK {
+		t.Fatalf("OBS cam source must carry the guest's live, unmuted audio (D-41)")
+	}
+
 	// EN-15: the source token authenticates the WS, it is never written into the DOM.
 	var html string
 	if err := chromedp.Run(obsCtx, chromedp.Evaluate(`document.documentElement.outerHTML`, &html)); err != nil {
