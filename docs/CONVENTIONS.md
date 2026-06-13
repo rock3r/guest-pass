@@ -26,8 +26,9 @@ CI gates, see `TESTING.md`. For config, secrets, and self-hosting, see
 
 ### 1.1 Package boundaries
 
-The module path is `github.com/rock3r/guest-pass`; Go **1.24+** is a floor, not a
-pin (AD-15). Layout (AD-4):
+The module path is `github.com/rock3r/guest-pass`; Go **1.25+** is a floor, not a
+pin (AD-15) — raised from 1.24 so the project tracks the current `modernc.org/sqlite`,
+whose recent releases require Go 1.25. Layout (AD-4):
 
 | Package | Owns | Must not |
 |---|---|---|

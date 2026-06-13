@@ -416,7 +416,7 @@ JSON signaling frames and projecting room state — it does **no media processin
 
 | Concern | Choice | Why / contract |
 |---|---|---|
-| Language | **Go 1.24+** (AD-15) | Toolchain floor (a minimum, not a pinned version); single static binary. Module path `github.com/rock3r/guest-pass`. |
+| Language | **Go 1.25+** (AD-15) | Toolchain floor (a minimum, not a pinned version), raised from 1.24 to track current `modernc.org/sqlite`; single static binary. Module path `github.com/rock3r/guest-pass`. |
 | Router | `go-chi/chi` | Idiomatic, tiny, stdlib-shaped middleware. |
 | WebSockets | **`coder/websocket`** (AD-16), wrapped behind `internal/signaling/conn` as an in-process **test seam** | Actively maintained, context-first, ergonomic. Its self-serialization is *redundant* with our single-writer `writeLoop` (EN-12), not extra safety (RF-19). |
 | DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame stats** — `peers.used_turn` written once at disconnect. |
