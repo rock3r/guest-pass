@@ -3,6 +3,7 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -12,114 +13,136 @@ import (
 	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
-// ServeWS handles GET /ws.
-//
-// SPIKE-2 scope: peer identity, role, slot and session arrive as query params
-// (session, peer, role, slot). Real token auth (?pass / ?src), strict Origin
-// handling incl. the null OBS-CEF Origin, and token redaction (EN-16) land in M2
-// step 1. The role is still inferred from the connection, never trusted from a
-// frame body (EN-7).
-//
-// inflight (nil-safe) tracks each upgraded connection so a graceful drain can wait for
-// terminate frames to flush before the process exits (RF-21).
-//
-// iceServers is the ICE configuration handed to every peer in the {t:"ice"} join-ack
-// (AD-14). It is empty in the STUN-less dev/loopback default and STUN-only otherwise
-// (D-38); the TURN entry + ephemeral HMAC credential (EN-4) land in M2.
-func ServeWS(hub *signaling.Hub, inflight *sync.WaitGroup, iceServers []signaling.ICEServer) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Count the handler at entry — before the upgrade — so a drain's Wait can't race
-		// a handler sitting between Accept and a later Add (which would be an Add-from-zero
-		// concurrent with Wait). Done covers every exit path, including validation/Accept
-		// failure.
-		if inflight != nil {
-			inflight.Add(1)
-			defer inflight.Done()
-		}
+// wsHandler serves GET /ws, the one signaling WebSocket. Each connection is
+// authenticated by credential (session cookie → host, ?pass= → guest/cohost, ?src= →
+// OBS source) and the role/peer/session are derived from that credential against live DB
+// state, never from a frame body (EN-7/AC-1). The handler relays opaque SDP/ICE between
+// peers and never inspects media (D-23).
+type wsHandler struct {
+	hub        *signaling.Hub
+	resolver   *wsResolver
+	inflight   *sync.WaitGroup       // nil-safe; lets a graceful drain wait for terminate flush (RF-21)
+	iceServers []signaling.ICEServer // ICE config handed to every peer in the {t:"ice"} join-ack (AD-14)
+	log        *slog.Logger
+}
 
-		q := r.URL.Query()
-		session, peer := q.Get("session"), q.Get("peer")
-		role, slot := q.Get("role"), q.Get("slot")
-		if session == "" || peer == "" {
-			http.Error(w, "missing session/peer", http.StatusBadRequest)
-			return
-		}
+// newWSHandler builds the handler, defaulting the logger so the hot path never nil-panics.
+func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice []signaling.ICEServer, logger *slog.Logger) *wsHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, iceServers: ice, log: logger}
+}
 
-		// localhost spike: skip Origin verification (M2 implements EN-16).
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-		if err != nil {
-			return
-		}
-		defer c.CloseNow()
+func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
+	// Count the handler at entry — before the upgrade — so a drain's Wait can't race a
+	// handler sitting between Accept and a later Add. Done covers every exit path.
+	if h.inflight != nil {
+		h.inflight.Add(1)
+		defer h.inflight.Done()
+	}
 
-		ctx := r.Context()
-		room := hub.Room(session)
-		if room == nil {
-			// The hub is draining (Hub.Shutdown ran). Tell the client to reconnect
-			// (transient, EN-9) and close; never spawn a room on a shutting-down hub.
-			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
-			return
-		}
-		pid := signaling.PeerID(peer)
-		out := make(chan signaling.Frame, 64)
-		// Enqueue the ICE config join-ack BEFORE Join (AD-14): the buffered channel makes
-		// it the first frame the writer flushes, ahead of anything the room emits on join
-		// (e.g. a source's slot-unbound), so the client has its ICE config before any
-		// signaling. Skipped when no servers are configured (dev/loopback).
-		if len(iceServers) > 0 {
-			out <- signaling.Frame{T: "ice", ICEServers: iceServers}
-		}
-		if !room.Join(pid, role, signaling.SlotID(slot), out) {
-			// The room started draining between hub.Room and Join. Tell the client to
-			// reconnect and close; we never registered, so there's no writer to drain.
-			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
-			return
-		}
+	// Authenticate BEFORE the upgrade, so a rejected credential is a clean HTTP status
+	// (no half-open socket) and never logs the token (EN-16).
+	id, aerr := h.resolver.resolve(r)
+	if aerr != nil {
+		h.log.Warn("ws handshake rejected",
+			"reason", aerr.reason, "status", aerr.status,
+			"path", redactWSURL(r.URL), "ip", ClientIP(r))
+		http.Error(w, http.StatusText(aerr.status), aerr.status)
+		return
+	}
 
-		// Single writer goroutine (EN-12): the ONLY place this socket is written. It
-		// ends when the room closes out (during Leave below).
-		writerDone := make(chan struct{})
-		go func() {
-			defer close(writerDone)
-			for f := range out {
-				if err := wsjson.Write(ctx, c, f); err != nil {
-					// Unblock the reader so it breaks and the room Leave runs;
-					// otherwise the peer stays registered with no drainer.
-					c.CloseNow()
-					return
-				}
-			}
-			// out was closed by the room (Leave / drain Terminate). All queued frames —
-			// including a terminate sent during a graceful drain — are now flushed, so
-			// close the socket to unblock the reader and let the handler return promptly.
-			c.CloseNow()
-		}()
+	// An OBS browser source (OBS-CEF) may send a literal "null" Origin. Normalize it to
+	// absent so the same-origin verification inside websocket.Accept admits it — the slot
+	// source token is the credential, so there is no CSRF risk. This relaxation is for
+	// source-token connections ONLY (TESTING.md §WS): host/guest connections keep strict
+	// Origin validation. No InsecureSkipVerify — the library still verifies Origin.
+	if id.isSource() && r.Header.Get("Origin") == "null" {
+		r.Header.Del("Origin")
+	}
 
-		// Reader loop: parse frames → room commands.
-		for {
-			var f signaling.Frame
-			if err := wsjson.Read(ctx, c, &f); err != nil {
-				break
-			}
-			switch f.T {
-			case "signal":
-				room.Signal(pid, f) // relayed verbatim; server never inspects (D-23)
-			case "rebind":
-				room.Rebind(signaling.SlotID(f.Slot), signaling.PeerID(f.OccupantPeerID))
-			case "unbind":
-				room.Unbind(signaling.SlotID(f.Slot))
-			case "obs":
-				if f.Event == "sourceActive" {
-					// Epoch echoed by the source; the room ignores stale epochs (EN-3).
-					room.ObsActive(signaling.SlotID(slot), f.Active, f.Epoch)
-				}
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+	if err != nil {
+		// Accept already wrote the response (e.g. 403 on a disallowed Origin).
+		return
+	}
+	defer c.CloseNow()
+
+	ctx := r.Context()
+	room := h.hub.Room(id.session)
+	if room == nil {
+		// The hub is draining; tell the client to reconnect (transient, EN-9) and close.
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+		return
+	}
+
+	out := make(chan signaling.Frame, 64)
+	// Enqueue the ICE join-ack BEFORE Join (AD-14): the buffered channel makes it the
+	// first frame the writer flushes, ahead of anything the room emits on join. Skipped
+	// when no servers are configured (dev/loopback).
+	if len(h.iceServers) > 0 {
+		out <- signaling.Frame{T: "ice", ICEServers: h.iceServers}
+	}
+	if !room.Join(id.peer, id.role, id.slot, out) {
+		// The room started draining between hub.Room and Join. Tell the client to
+		// reconnect and close; we never registered, so there's no writer to drain.
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+		return
+	}
+
+	// Single writer goroutine (EN-12): the ONLY place this socket is written. It ends when
+	// the room closes out (during Leave below or an eviction/terminate).
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for f := range out {
+			if err := wsjson.Write(ctx, c, f); err != nil {
+				// Unblock the reader so it breaks and the room Leave runs.
+				c.CloseNow()
+				return
 			}
 		}
+		// out was closed by the room (Leave / eviction / drain). Close the socket to
+		// unblock the reader and let the handler return promptly.
+		c.CloseNow()
+	}()
 
-		// Leave closes out (on the room goroutine), which ends the writer. We must
-		// call it here, not via defer, so <-writerDone doesn't deadlock. The out
-		// channel identifies THIS connection so a since-evicted duplicate is a no-op.
-		room.Leave(pid, out)
-		<-writerDone
+	// Reader loop: parse frames → room commands, gated by role (EN-7).
+	for {
+		var f signaling.Frame
+		if err := wsjson.Read(ctx, c, &f); err != nil {
+			break
+		}
+		h.dispatch(room, id, f)
+	}
+
+	// Leave closes out (on the room goroutine), which ends the writer. Called here, not via
+	// defer, so <-writerDone doesn't deadlock. The out channel identifies THIS connection
+	// so a since-evicted duplicate is a no-op.
+	room.Leave(id.peer, out)
+	<-writerDone
+}
+
+// dispatch routes a client frame to the room, enforcing role authority (EN-7): only a
+// host (re)binds slots; only an OBS source reflects on-air program state; any peer may
+// relay signaling. The role comes from the credential, never the frame.
+func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Frame) {
+	switch f.T {
+	case "signal":
+		room.Signal(id.peer, f) // relayed verbatim; server never inspects (D-23)
+	case "rebind":
+		if id.role == "host" {
+			room.Rebind(signaling.SlotID(f.Slot), signaling.PeerID(f.OccupantPeerID))
+		}
+	case "unbind":
+		if id.role == "host" {
+			room.Unbind(signaling.SlotID(f.Slot))
+		}
+	case "obs":
+		if id.isSource() && f.Event == "sourceActive" {
+			// Epoch echoed by the source; the room ignores stale epochs (EN-3).
+			room.ObsActive(id.slot, f.Active, f.Epoch)
+		}
 	}
 }

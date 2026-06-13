@@ -12,6 +12,19 @@ import (
 // SameSite + Secure at login (see the web layer); this package only reads it.
 const SessionCookie = "gp_session"
 
+// Session-authz outcomes, returned by AuthenticateSessionToken so every entry point
+// (the HTTP middleware and the /ws handshake) maps them to the same status. Callers
+// branch with errors.Is.
+//
+//   - ErrUnauthorized — re-auth: missing/invalid/expired token, or the host no longer
+//     exists. The credential itself is no good (→ 401).
+//   - ErrForbidden — the host exists but is not active (pending/suspended), read LIVE
+//     so a suspend takes effect mid-session (→ 403).
+var (
+	ErrUnauthorized = errors.New("auth: unauthorized")
+	ErrForbidden    = errors.New("auth: forbidden")
+)
+
 // HostStore is the narrow slice of the store the authz middleware needs. *store.Store
 // satisfies it; tests pass a fake. Reading the host on every request is what makes
 // authz live (EN-6).
@@ -69,6 +82,30 @@ func (a *Authenticator) RequireAdmin(next http.Handler) http.Handler {
 	}))
 }
 
+// AuthenticateSessionToken verifies a raw session JWT and loads its host LIVE from the
+// DB, requiring status=active (EN-6). It is the single source of truth for host-session
+// authz, shared by the HTTP middleware and the /ws handshake. It returns ErrUnauthorized
+// (invalid/expired token or unknown host), ErrForbidden (host not active), or a wrapped
+// store error on an infrastructure failure. The token is never logged (EN-16).
+func (a *Authenticator) AuthenticateSessionToken(ctx context.Context, raw string) (*store.Host, error) {
+	hostID, err := a.ring.Verify(raw)
+	if err != nil {
+		// Expired and otherwise-invalid sessions both route to re-auth.
+		return nil, ErrUnauthorized
+	}
+	host, err := a.hosts.GetHost(ctx, hostID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, ErrUnauthorized
+	}
+	if err != nil {
+		return nil, err
+	}
+	if host.Status != store.HostActive { // live status read (EN-6): suspend/pending take effect now
+		return nil, ErrForbidden
+	}
+	return host, nil
+}
+
 // authenticate validates the session cookie and loads the host live, enforcing
 // status=active. On any failure it writes the response and returns ok=false. The token
 // (cookie value) is never logged (EN-16).
@@ -78,23 +115,16 @@ func (a *Authenticator) authenticate(w http.ResponseWriter, r *http.Request) (*s
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return nil, false
 	}
-	hostID, err := a.ring.Verify(cookie.Value)
-	if err != nil {
-		// Expired and otherwise-invalid sessions both route to re-auth (401).
+	host, err := a.AuthenticateSessionToken(r.Context(), cookie.Value)
+	switch {
+	case errors.Is(err, ErrUnauthorized):
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return nil, false
-	}
-	host, err := a.hosts.GetHost(r.Context(), hostID)
-	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return nil, false
-	}
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return nil, false
-	}
-	if host.Status != store.HostActive { // live status read (EN-6): suspend/pending take effect now
+	case errors.Is(err, ErrForbidden):
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return nil, false
+	case err != nil:
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil, false
 	}
 	return host, true
