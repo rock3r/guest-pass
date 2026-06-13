@@ -23,7 +23,8 @@ AGPL-3.0 is affirmed per `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` (EN-17,
 | `golang.org/x/oauth2` | BSD-3-Clause |
 | `github.com/golang-jwt/jwt/v5` | MIT |
 | `github.com/google/uuid` | BSD-3-Clause |
-| `github.com/evanw/esbuild` | MIT (build-time library, via `cmd/build`) |
+| `github.com/evanw/esbuild` | MIT (build-time library, via `cmd/build` / `internal/assets`) |
+| `github.com/chromedp/chromedp` | MIT (test-time only, via `internal/browsertest`; not in the binary) |
 
 Exact licenses are verified at import time; full texts are included alongside vendored
 components as they are added.
