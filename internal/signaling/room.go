@@ -107,7 +107,15 @@ func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) bool 
 	}
 	select {
 	case r.cmds <- cmd:
-		return <-admitted
+		// The command was enqueued, but the room goroutine may still exit on r.done
+		// (Close) before running it — so wait on both, never just <-admitted, or a
+		// Close racing the enqueue would block Join forever.
+		select {
+		case ok := <-admitted:
+			return ok
+		case <-r.done:
+			return false
+		}
 	case <-r.done:
 		return false
 	}
