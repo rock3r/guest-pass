@@ -79,6 +79,14 @@ const defaultDBPath = "guestpass.db"
 // STUN-only (D-38) and TURN_SECRET is not required.
 func (c *Config) TURNEnabled() bool { return strings.TrimSpace(c.TURNURL) != "" }
 
+// Secure reports whether BASE_URL is an https origin, matching the scheme normalization
+// the validator uses (case- and space-insensitive). It is the single source of truth
+// for the session-cookie Secure flag and the CSP ws/wss scheme, so a "HTTPS://" or
+// space-padded value can't desync cookie security from validation.
+func (c *Config) Secure() bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.BaseURL)), "https://")
+}
+
 // Load reads configuration from the process environment and validates it, returning a
 // fail-closed error (EN-14 / AD-8) rather than a partially-valid Config.
 func Load() (*Config, error) { return load(os.Getenv) }
@@ -183,7 +191,7 @@ func (c *Config) validateBaseURLScheme() error {
 	if c.AuthMode == AuthModeDev {
 		return nil
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.BaseURL)), "https://") {
+	if !c.Secure() {
 		return fmt.Errorf("config: BASE_URL %q: %w", c.BaseURL, ErrInsecureBaseURL)
 	}
 	return nil

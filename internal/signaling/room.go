@@ -1,5 +1,10 @@
 package signaling
 
+import (
+	"context"
+	"time"
+)
+
 // peerConn is the room goroutine's handle to a connected peer. Frames are delivered
 // by a NON-blocking send to out, so a slow/stalled peer never blocks the room
 // (AD-12 — drop slow peers); the transport owns the goroutine draining out.
@@ -130,18 +135,30 @@ func (r *Room) ObsActive(slot SlotID, active bool, epoch int) {
 	})
 }
 
-// Terminate sends a terminate frame (best-effort) to every connected peer, then closes
-// their out channels and clears the roster. Used for graceful shutdown (RF-21): the
-// transient reason "reconnect" tells clients to retry with backoff (keyed by pass_id),
-// so a deploy/restart isn't a hard mass-drop. It runs on the room goroutine, so a
-// concurrent readLoop Leave for a now-removed conn is a no-op (identity-checked).
+// terminateBudget bounds how long Terminate will wait, across all peers, to enqueue
+// terminate frames into backed-up out queues during a drain.
+const terminateBudget = 2 * time.Second
+
+// Terminate sends a terminate frame to every connected peer, then closes their out
+// channels and clears the roster. Used for graceful shutdown (RF-21): the transient
+// reason "reconnect" tells clients to retry with backoff (keyed by pass_id), so a
+// deploy/restart isn't a hard mass-drop.
+//
+// terminate is a terminal control frame, so it must not be silently dropped on a full
+// queue (RF-16). The send therefore BLOCKS until the conn's writeLoop drains a slot,
+// bounded by a shared deadline so a single wedged socket can't stall the drain — a
+// genuinely stuck peer is given up on (its socket is dead anyway) and still closed. It
+// runs on the room goroutine, so a concurrent readLoop Leave for a now-removed conn is a
+// no-op (identity-checked).
 func (r *Room) Terminate(reason string) {
 	done := make(chan struct{})
 	r.post(func(_ *roomState, conns map[PeerID]*peerConn) {
+		ctx, cancel := context.WithTimeout(context.Background(), terminateBudget)
+		defer cancel()
 		for id, c := range conns {
 			select {
 			case c.out <- Frame{T: "terminate", Reason: reason}:
-			default:
+			case <-ctx.Done(): // budget exhausted by wedged peers; stop waiting
 			}
 			close(c.out)
 			delete(conns, id)

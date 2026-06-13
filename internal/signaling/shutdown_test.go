@@ -1,6 +1,9 @@
 package signaling
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 	h := NewHub()
@@ -26,4 +29,34 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 	if again := h.Room("s1"); again == room {
 		t.Fatal("Shutdown should clear the room registry")
 	}
+}
+
+// TestRoomTerminate_DoesNotDropTerminate uses an unbuffered out (no reader) so a send
+// can only proceed once a reader appears. The terminate frame is terminal (RF-16) and
+// must NOT be dropped: Terminate must block on the send rather than return immediately.
+func TestRoomTerminate_DoesNotDropTerminate(t *testing.T) {
+	r := newRoom("s")
+	go r.run()
+	defer r.Close()
+
+	out := make(chan Frame) // unbuffered: Join's non-blocking roster deliver drops (no reader)
+	r.Join(PeerID("p"), "guest", "", out)
+
+	returned := make(chan struct{})
+	go func() { r.Terminate("reconnect"); close(returned) }()
+
+	// With no reader, the OLD non-blocking send would drop and Terminate would return
+	// immediately. The blocking send must still be waiting after a grace period.
+	select {
+	case <-returned:
+		t.Fatal("Terminate returned without delivering the terminate frame (dropped)")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// A reader appears; the blocked terminate send proceeds.
+	f := <-out
+	if f.T != "terminate" || f.Reason != "reconnect" {
+		t.Fatalf("delivered frame = %+v, want terminate:reconnect", f)
+	}
+	<-returned
 }

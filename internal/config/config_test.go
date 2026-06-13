@@ -198,6 +198,21 @@ func TestLoad_InvalidEnumsRejected(t *testing.T) {
 	}
 }
 
+func TestConfig_Secure(t *testing.T) {
+	cases := map[string]bool{
+		"https://guest-pass.link":   true,
+		"HTTPS://guest-pass.link":   true, // scheme is case-insensitive
+		"  https://guest-pass.link": true, // leading space tolerated
+		"http://guest-pass.link":    false,
+		"":                          false,
+	}
+	for base, want := range cases {
+		if got := (&Config{BaseURL: base}).Secure(); got != want {
+			t.Errorf("Secure(%q) = %v, want %v", base, got, want)
+		}
+	}
+}
+
 func TestLoad_ProductionRequiresHTTPSBaseURL(t *testing.T) {
 	// Production (AUTH_MODE unset) requires an https:// BASE_URL.
 	env := validEnv()

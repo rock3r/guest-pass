@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -126,7 +125,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 	if err != nil {
 		return nil, fmt.Errorf("building key ring: %w", err)
 	}
-	secure := strings.HasPrefix(cfg.BaseURL, "https://")
+	secure := cfg.Secure() // normalized https check; the single source of truth (config.Secure)
 	authn := auth.NewAuthenticator(ring, st, secure)
 	oauth := auth.NewGoogleOAuth(auth.GoogleConfig{
 		ClientID:     cfg.GoogleClientID,
