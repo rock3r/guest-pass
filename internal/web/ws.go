@@ -158,6 +158,13 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if !id.isSource() {
 			room.ApplyState(id.peer, f.Cam, f.Mic, f.Screen, f.Level)
 		}
+	case "stats":
+		// Self-degradation report (AD-21): the publisher's OWN coarse signal/RTT and shedding state,
+		// folded into its roster entry so the host sees per-tile health + a degrading/recovering
+		// badge. Per-frame stats stay in memory (EN-11). Only a participant publishes media stats.
+		if !id.isSource() {
+			room.ApplyStats(id.peer, f.Signal, f.RttMs, f.Degraded)
+		}
 	case "force-mute", "force-no-cam", "force-no-share":
 		// Suppressive, authority-locked forces (D-13/EN-7). The actor is the credential's peer;
 		// the target is the `peerId` string. Rank authority (strictly-above, demotion-safe) is

@@ -16,6 +16,13 @@ type peerInfo struct {
 	// level is the last reported audio meter (0..1), held in-memory only (EN-11: never
 	// persisted) and coalesced onto the batched {t:levels} tick (AD-13), never the roster.
 	level float64
+	// Degradation self-report (AD-21), set by {t:stats}: signal is a coarse 1..5 connection-health
+	// level (0 = unknown), rttMs the round-trip estimate, and degraded the active shedding state
+	// (nil = not degraded). In-memory only (EN-11: per-frame stats are never persisted); folded
+	// into the roster so the host sees per-tile health + a degrading/recovering badge (PR-13/14).
+	signal   int
+	rttMs    int
+	degraded *DegradedView
 }
 
 // lockState is a suppression lock on one (target, modality): the applier and the rank FLOOR
@@ -221,6 +228,33 @@ func (s *roomState) applyState(id PeerID, cam, mic, screen *bool, level *float64
 		return []outbound{s.rosterFrame(id, p.role)}
 	}
 	return nil
+}
+
+// applyStats folds a publisher's {t:stats} self-report (AD-21) into its roster entry: signal +
+// degraded drive the host's per-tile connection health and degrading/recovering badge. Only a
+// participant reports stats (an OBS source reflects on-air, not media health). rttMs ticks on every
+// sample, so a report that leaves signal AND degraded unchanged is a NO-OP that must not spam the
+// roster (EN-11: per-frame stats live in memory and are never persisted). A material change — the
+// signal level, or the degraded direction/reason — folds in and re-broadcasts.
+func (s *roomState) applyStats(id PeerID, signal, rttMs int, degraded *DegradedView) []outbound {
+	p := s.peers[id]
+	if p == nil || !isParticipant(p.role) {
+		return nil
+	}
+	changed := p.signal != signal || !sameDegraded(p.degraded, degraded)
+	p.signal, p.rttMs, p.degraded = signal, rttMs, degraded
+	if changed {
+		return s.rebroadcastRoster()
+	}
+	return nil
+}
+
+// sameDegraded compares two degradation views by value (nil == nil; the pointers are never aliased).
+func sameDegraded(a, b *DegradedView) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // buildLevels coalesces every participant's last-reported audio meter into ONE batched

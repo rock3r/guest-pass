@@ -48,6 +48,7 @@ function onAirLabel(onAir) {
  *   selfStream: MediaStream|null, peers: any[], selfId: string,
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
+ *   selfDegraded: {dir:string,reason:string}|null,
  *   thumbnails: Array<{id:string, entry:any, stream:MediaStream|null}>, viewerRole: string,
  *   onThumbForce: (id:string, m:string)=>void, onThumbRelease: (id:string, m:string)=>void,
  *   onThumbRole: (id:string, role:string)=>void, onThumbDismissHand: (id:string)=>void,
@@ -67,6 +68,7 @@ export function GuestSession({
   handRaised,
   onSendChat,
   onToggleHand,
+  selfDegraded,
   thumbnails,
   viewerRole,
   onThumbForce,
@@ -108,7 +110,13 @@ export function GuestSession({
   };
 
   return (
-    <div class="dc-entered gs-root" data-entered="1" data-pub={pubState} data-locked={(lockedMods || []).join(",")}>
+    <div
+      class="dc-entered gs-root"
+      data-entered="1"
+      data-pub={pubState}
+      data-locked={(lockedMods || []).join(",")}
+      data-degraded={selfDegraded ? `${selfDegraded.dir}:${selfDegraded.reason}` : ""}
+    >
       <div class="gs-stage">
         <video ref={selfRef} class="gs-selfview" autoplay playsinline muted />
         <div class="gs-status">
@@ -119,6 +127,13 @@ export function GuestSession({
           ) : (
             <p>You're in — connecting your camera to the greenroom…</p>
           )}
+          {selfDegraded ? (
+            <p class="gs-degraded" data-degraded={`${selfDegraded.dir}:${selfDegraded.reason}`}>
+              {selfDegraded.dir === "recovering"
+                ? "Recovering your video quality…"
+                : "Trimming your video to protect your stream."}
+            </p>
+          ) : null}
           <p class="dc-onair" data-onair={onAir}>
             {onAirLabel(onAir)}
             {onAir === "status-unavailable" ? (

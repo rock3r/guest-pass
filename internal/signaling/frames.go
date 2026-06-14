@@ -32,17 +32,24 @@ type Frame struct {
 	// false, and a presence-only update must not zero the meter (a plain value would unmarshal
 	// absent → zero). Level is held in-memory only and coalesced onto the {t:levels} tick
 	// (AD-13), never echoed in the roster (EN-11: no per-frame persistence).
-	Cam        *bool              `json:"cam,omitempty"`
-	Mic        *bool              `json:"mic,omitempty"`
-	Screen     *bool              `json:"screen,omitempty"`
-	Level      *float64           `json:"level,omitempty"`
-	Levels     map[string]float64 `json:"levels,omitempty"` // {t:levels} batched meter tick: peerId → level (AD-13)
-	Peers      []RosterEntry      `json:"peers,omitempty"`  // roster projection (EN-8)
-	Peer       *RosterEntry       `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID     string             `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
-	Recipient  string             `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
-	ICEServers []ICEServer        `json:"iceServers,omitempty"`
-	TTLSec     int                `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
+	Cam    *bool              `json:"cam,omitempty"`
+	Mic    *bool              `json:"mic,omitempty"`
+	Screen *bool              `json:"screen,omitempty"`
+	Level  *float64           `json:"level,omitempty"`
+	Levels map[string]float64 `json:"levels,omitempty"` // {t:levels} batched meter tick: peerId → level (AD-13)
+	// Self-degradation report on an inbound {t:"stats"} frame (AD-21): the publisher's own coarse
+	// connection-health signal (1..5), RTT estimate, and active shedding state (Degraded nil = not
+	// degraded). Folded into the sender's roster entry; held in memory only (EN-11). Signal/RttMs
+	// reuse the RosterEntry json keys so a stats frame and a roster entry read the same.
+	Signal     int           `json:"signal,omitempty"`
+	RttMs      int           `json:"rttMs,omitempty"`
+	Degraded   *DegradedView `json:"degraded,omitempty"`
+	Peers      []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer       *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID     string        `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
+	Recipient  string        `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
+	ICEServers []ICEServer   `json:"iceServers,omitempty"`
+	TTLSec     int           `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
 }
 
 // ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the

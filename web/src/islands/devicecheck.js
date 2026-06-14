@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "preact/hooks";
 import { Publisher } from "../rtc/publisher.js";
 import { ReconnectingSession, TERMINAL_REASONS } from "../rtc/session.js";
 import { MeshManager, isMeshRole } from "../rtc/mesh.js";
+import { DegradationController } from "../rtc/degradation.js";
 import { FORCE_FRAME } from "./grid-tile.js";
 import { GuestSession } from "./guest-session.js";
 
@@ -61,6 +62,10 @@ function DeviceCheck() {
   // host-only /greenroom isn't reachable with a pass (AC-11 "a co-host, within rank").
   const [thumbnails, setThumbnails] = useState(/** @type {Array<{id:string, entry:any, stream:MediaStream|null}>} */ ([]));
   const [viewerRole, setViewerRole] = useState("guest");
+  // selfDegraded is THIS guest's own degradation state (AD-21), read back from its self roster entry
+  // (the round-trip: the local controller sheds + reports {t:stats}, the server folds it, and the
+  // roster reflects it here) — a guest sees only its OWN degradation (AC-15).
+  const [selfDegraded, setSelfDegraded] = useState(/** @type {{dir:string,reason:string}|null} */ (null));
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -78,6 +83,8 @@ function DeviceCheck() {
   const pubRef = useRef(null);
   /** @type {{current: import("../rtc/mesh.js").MeshManager|null}} */
   const meshRef = useRef(null);
+  /** @type {{current: import("../rtc/degradation.js").DegradationController|null}} */
+  const degRef = useRef(null);
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -147,6 +154,33 @@ function DeviceCheck() {
     setThumbnails(tiles);
   }
 
+  // degradationTargets lists this guest's live video senders for the degradation sampler, tagged
+  // with the shed priority (LOWER sheds FIRST): other-guest thumbnails (1) before co-host
+  // thumbnails (2) before the program/monitor publish (3). The Publisher serves the host monitor +
+  // OBS program; the mesh serves the backstage thumbnails (D-33 — thumbnails are the amplifier).
+  function degradationTargets() {
+    const targets = [];
+    const pub = pubRef.current;
+    if (pub) {
+      for (const id of Object.keys(pub.pcs)) {
+        const sender = pub.pcs[id].getSenders().find((s) => s.track && s.track.kind === "video");
+        // protected: the program/monitor publish path is never hard-disabled by cpu shedding (that
+        // would kill the broadcast) — only the thumbnail mesh senders are (D-33/DESIGN ladder).
+        if (sender) targets.push({ key: "pub:" + id, priority: 3, protected: true, sender });
+      }
+    }
+    const mesh = meshRef.current;
+    if (mesh) {
+      for (const [id, mp] of mesh.peers) {
+        const sender = mp.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        if (!sender) continue;
+        const peer = peersRef.current.find((p) => p.id === id);
+        targets.push({ key: "mesh:" + id, priority: peer && peer.role === "cohost" ? 2 : 1, sender });
+      }
+    }
+    return targets;
+  }
+
   // startPublishing keeps the already-running preview stream and publishes it to the greenroom over
   // the guest's pass WS, so consumers (host monitor, OBS source) render the guest over P2P. The
   // server only relays the opaque SDP/ICE (D-23). It runs inside a ReconnectingSession (AC-13): a
@@ -196,6 +230,7 @@ function DeviceCheck() {
               publisher.setModalityEnabled(m, !locked.includes(m));
             }
             setLockedMods(locked);
+            setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
           syncThumbnails();
@@ -227,17 +262,29 @@ function DeviceCheck() {
           publisher.applyIceServers(servers);
           mesh.applyIceServers(servers);
         });
+        // Per-publisher-local degradation (AD-21): sample our OWN senders (Publisher = program/
+        // monitor, highest priority; mesh = co-host/other-guest thumbnails, shed first), shed on
+        // cpu/bandwidth pressure with hysteresis, and self-report {t:stats}. The server folds it and
+        // the round-trip lights our own degradation. No peer controls another's encoders (D-23/EN-7).
+        const deg = new DegradationController({
+          getTargets: degradationTargets,
+          report: (stats) => room.send({ t: "stats", signal: stats.signal, rttMs: stats.rttMs, degraded: stats.degraded }),
+        });
+        degRef.current = deg;
+        deg.start();
       },
       teardown: () => {
-        // The link dropped (or we're closing): stop publishing + tear down the mesh (drop the dead
-        // peer connections), clear the thumbnails, and degrade the reflected on-air + "we're live"
-        // state rather than assert stale values (D-24). A reconnect re-arms all of it from the
-        // fresh roster + replay.
+        // The link dropped (or we're closing): stop the degradation sampler, stop publishing + tear
+        // down the mesh (drop the dead peer connections), clear the thumbnails, and degrade the
+        // reflected on-air + "we're live" + own-degradation state rather than assert stale values
+        // (D-24). A reconnect re-arms all of it from the fresh roster + replay.
+        if (degRef.current) degRef.current.stop();
         if (pubRef.current) pubRef.current.close();
         if (meshRef.current) meshRef.current.close();
         setThumbnails([]);
         setOnAir("status-unavailable");
         setStreaming(false);
+        setSelfDegraded(null);
       },
       onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
       onTerminal: (reason) => {
@@ -334,6 +381,7 @@ function DeviceCheck() {
         handRaised={handRaised}
         onSendChat={sendChat}
         onToggleHand={toggleHand}
+        selfDegraded={selfDegraded}
         thumbnails={thumbnails}
         viewerRole={viewerRole}
         onThumbForce={thumbForce}

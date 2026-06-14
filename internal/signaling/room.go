@@ -266,6 +266,15 @@ func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool, level *float64) {
 	})
 }
 
+// ApplyStats folds a publisher's {t:stats} self-report (AD-21) into its roster entry on the room
+// goroutine, broadcasting only when signal/degraded materially changed (per-frame stats stay in
+// memory, EN-11).
+func (r *Room) ApplyStats(id PeerID, signal, rttMs int, degraded *DegradedView) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.applyStats(id, signal, rttMs, degraded))
+	})
+}
+
 // Force applies a suppression force (force-mute/force-no-cam/force-no-share) from actor onto
 // target's modality (D-13/EN-7). Authority is enforced server-side against current rank — a
 // guest's or peer's attempt is a no-op. Modality is mic | cam | share.

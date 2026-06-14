@@ -39,7 +39,8 @@ func (s *roomState) entryFor(p *peerInfo) RosterEntry {
 		e.Cam, e.Mic, e.Screen = p.cam, p.mic, p.screen
 		e.HandRaised = p.handRaised
 		e.OnAir = s.onAirFor(p.id)
-		e.Locks = s.locksOf(p.id) // live-visible suppression locks (D-13/EN-7), with applierRank
+		e.Locks = s.locksOf(p.id)                                     // live-visible suppression locks (D-13/EN-7), with applierRank
+		e.Signal, e.RttMs, e.Degraded = p.signal, p.rttMs, p.degraded // degradation health (AD-21)
 	}
 	return e
 }
