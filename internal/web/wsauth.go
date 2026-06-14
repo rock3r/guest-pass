@@ -28,6 +28,9 @@ type wsIdentity struct {
 	peer signaling.PeerID
 	// role is host | guest | cohost | obs | obs_screen, derived from the credential.
 	role string
+	// name is the display name folded into the roster (EN-8), resolved from auth (the host's
+	// account name or the guest pass name) — never from a frame (EN-7). "" for OBS sources.
+	name string
 	// slot is the slot an OBS source subscribes to ("cam-1"/"host"/"screen"); "" otherwise.
 	slot signaling.SlotID
 }
@@ -102,7 +105,7 @@ func (wr *wsResolver) resolveCookie(ctx context.Context, r *http.Request) (wsIde
 	case err != nil:
 		return wsIdentity{}, &wsAuthError{http.StatusInternalServerError, "host lookup failed"}
 	}
-	return wsIdentity{session: host.ID, peer: "host", role: "host"}, nil
+	return wsIdentity{session: host.ID, peer: "host", role: "host", name: host.Name}, nil
 }
 
 func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, *wsAuthError) {
@@ -124,7 +127,11 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	if aerr := wr.requireActiveHost(ctx, stream.HostID); aerr != nil {
 		return wsIdentity{}, aerr
 	}
-	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role}, nil
+	name := ""
+	if pass.Name != nil {
+		name = *pass.Name
+	}
+	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
 }
 
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {

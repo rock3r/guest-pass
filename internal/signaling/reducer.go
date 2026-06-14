@@ -8,6 +8,11 @@ type SlotID string
 type peerInfo struct {
 	id   PeerID
 	role string
+	name string // display name resolved from auth at handshake (EN-7), never from a frame
+	// Self-presence (EN-7), set by {t:state}. cam/mic/screen are the live modality flags
+	// folded into the roster; handRaised is the soft "bring me in" nudge (PR-7).
+	cam, mic, screen bool
+	handRaised       bool
 }
 
 type slotState struct {
@@ -56,41 +61,83 @@ func (s *roomState) slot(id SlotID) *slotState {
 // greenroom participant — receives its rank-filtered roster, and every existing
 // participant that can see the newcomer is told via peer-joined. OBS source pages are
 // minimal (EN-13) and receive no roster; they are also host-only in others' projections.
-func (s *roomState) join(id PeerID, role string) []outbound {
+func (s *roomState) join(id PeerID, role, name string) []outbound {
 	// A reconnect (EN-16 eviction → re-join with the same id) is not a new arrival: the
 	// peer never left room state and no peer-left ran, so re-announcing it would desync
-	// other clients' rosters. The reconnecting connection still gets a fresh roster.
-	_, rejoining := s.peers[id]
-	s.peers[id] = &peerInfo{id: id, role: role}
+	// other clients' rosters. The reconnecting connection still gets a fresh roster. Preserve
+	// any presence/hand state a still-registered peer already had (a rejoin keeps its slot
+	// binding, so it keeps its folded on-air too — carried in the fresh roster, not replayed).
+	prev, rejoining := s.peers[id]
+	p := &peerInfo{id: id, role: role, name: name}
+	if prev != nil {
+		p.cam, p.mic, p.screen, p.handRaised = prev.cam, prev.mic, prev.screen, prev.handRaised
+	}
+	s.peers[id] = p
 	var out []outbound
 	if isParticipant(role) {
-		out = append(out, outbound{to: id, frame: Frame{T: "roster", Peers: s.rosterFor(role)}})
-		// Replay the room's current OBS reflections (D-24) so a participant joining mid-stream
-		// doesn't sit at the defaults until OBS next toggles: the global "we're live" state, and
-		// the on-air of any slot this peer already occupies (an eviction-rejoin keeps its
-		// binding). These events are otherwise transition-only.
+		// The roster carries the joiner's full projection including its own (self-marked) entry,
+		// whose onAir field folds in any slot it already occupies (D-24) — so a mid-stream joiner
+		// gets its on-air pill straight from the roster, no separate replay needed.
+		out = append(out, s.rosterFrame(id, role))
+		// The broadcast-level "we're live" state is room-global (not slot-scoped, not in the
+		// roster), so it is still replayed to a participant joining mid-stream (D-24).
 		if s.streaming {
 			out = append(out, outbound{to: id, frame: Frame{T: "streaming", Active: true}})
-		}
-		for sid, st := range s.slots {
-			if st.occupant == id && st.onAir != OnAirUnknown {
-				out = append(out, outbound{to: id, frame: Frame{T: "onair", Slot: string(sid), OnAir: st.onAir}})
-			}
 		}
 	}
 	if rejoining {
 		return out
 	}
-	entry := RosterEntry{ID: string(id), Role: role}
-	for pid, p := range s.peers {
-		if pid == id || !isParticipant(p.role) {
+	entry := s.entryFor(p)
+	for pid, rp := range s.peers {
+		if pid == id || !isParticipant(rp.role) {
 			continue // only participants receive peer-joined; never echo to the joiner
 		}
-		if visibleTo(role, p.role) {
+		if visibleTo(role, rp.role) {
 			out = append(out, outbound{to: pid, frame: Frame{T: "peer-joined", Peer: &entry}})
 		}
 	}
 	return out
+}
+
+// rosterFrame builds the {t:roster} frame for one recipient: its rank-filtered projection
+// (EN-8) plus the recipient's own peer id, so a client can locate its self entry (e.g. the
+// guest self on-air pill, which the entry's onAir field now carries instead of {t:onair}).
+func (s *roomState) rosterFrame(id PeerID, role string) outbound {
+	return outbound{to: id, frame: Frame{T: "roster", Recipient: string(id), Peers: s.rosterFor(id, role)}}
+}
+
+// rebroadcastRoster re-sends every participant its current projected roster. It is the
+// vehicle for a roster-visible change that is not a join/leave delta — a presence toggle
+// ({t:state}), a folded on-air change, a hand-raise, and (later) a lock or role change.
+// Full roster frames go out only on these structural changes; continuous audio meters ride
+// the separate batched {t:levels} tick (AD-13), so this is not an N² hot path.
+func (s *roomState) rebroadcastRoster() []outbound {
+	var out []outbound
+	for pid, p := range s.peers {
+		if isParticipant(p.role) {
+			out = append(out, s.rosterFrame(pid, p.role))
+		}
+	}
+	return out
+}
+
+// applyState folds a participant's self-presence ({t:state}, EN-7) into the roster: it
+// updates cam/mic/screen and, on a real change, re-broadcasts the roster so every viewer's
+// tile reflects it. A no-op update (e.g. a level-only tick) emits nothing, avoiding roster
+// churn. A non-participant (OBS source) has no presence and is ignored. The live audio meter
+// is NOT stored here — it is coalesced onto the {t:levels} tick (AD-13, PR-2). Lock
+// enforcement against a suppressed modality lands in PR-3.
+func (s *roomState) applyState(id PeerID, cam, mic, screen bool) []outbound {
+	p := s.peers[id]
+	if p == nil || !isParticipant(p.role) {
+		return nil
+	}
+	if p.cam == cam && p.mic == mic && p.screen == screen {
+		return nil
+	}
+	p.cam, p.mic, p.screen = cam, mic, screen
+	return s.rebroadcastRoster()
 }
 
 // leave removes a peer, detaches it from any slot it sourced or occupied, and tells the
@@ -104,14 +151,17 @@ func (s *roomState) leave(id PeerID) []outbound {
 	for sid, st := range s.slots {
 		if st.source == id {
 			st.source = ""
-			// The OBS reflection for this slot is gone — its on-air state is now UNKNOWN, not
-			// whatever it last was (D-24: never assert on-air with no live signal behind it).
-			// Degrade the occupant's pill. Streaming is room-global and not tied to any one
-			// source, so it is NOT reset here.
-			out = append(out, s.degradeOnAir(sid, st, st.occupant)...)
+			// The OBS reflection for this slot is gone — its on-air is now UNKNOWN, not whatever
+			// it last was (D-24: never assert on-air with no live signal behind it). Reset it; the
+			// occupant's folded onAir then degrades in the roster re-broadcast below. Streaming is
+			// room-global and not tied to any one source, so it is NOT reset here.
+			s.degradeStaleOnAir(st)
 		}
 		if st.occupant == id {
-			out = append(out, s.unbindSlot(sid)...)
+			// The occupant left: free its slot (epoch bump + placeholder) so a reconnecting source
+			// resolves to placeholder, not the departed occupant (EN-3). Only the source frame is
+			// collected here; the roster re-broadcast below folds in the now-vacated slot.
+			out = append(out, s.vacateSlot(sid)...)
 		}
 	}
 	if p != nil {
@@ -124,15 +174,17 @@ func (s *roomState) leave(id PeerID) []outbound {
 			}
 		}
 	}
-	return out
+	// The leaver is already removed, so the re-broadcast excludes it; remaining viewers see any
+	// freed slot / degraded on-air folded into their roster (alongside the peer-left delta).
+	return append(out, s.rebroadcastRoster()...)
 }
 
-// attachSource subscribes an OBS source page to a slot and immediately tells it the
-// current binding so it can connect to the occupant (or show a placeholder). A
-// (re)attaching source has reported no program transition yet, so the slot's on-air is
-// UNKNOWN: on a reconnect/eviction (a source-page refresh re-opens /ws and Room.Join evicts
-// the old conn WITHOUT running leave) the prior on-air may be stale — reset it and degrade
-// the occupant's pill, so a refreshed source never strands a stale on-air (D-24).
+// attachSource subscribes an OBS source page to a slot and immediately tells it the current
+// binding so it can connect to the occupant (or show a placeholder). A (re)attaching source
+// has reported no program transition yet, so the slot's on-air is UNKNOWN: on a
+// reconnect/eviction (a source-page refresh re-opens /ws and Room.Join evicts the old conn
+// WITHOUT running leave) the prior on-air may be stale — reset it so a refreshed source never
+// strands a stale on-air (D-24). The occupant's folded onAir then degrades in the roster.
 func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	st := s.slot(sid)
 	// A source replacing a still-registered one is an eviction reattach (the page reloaded and
@@ -144,31 +196,25 @@ func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 		st.epoch++
 	}
 	st.source = source
-	out := s.degradeOnAir(sid, st, st.occupant)
-	return append(out, outbound{to: source, frame: s.bindingFrame(sid, st)})
-}
-
-// degradeOnAir resets a slot's on-air to UNKNOWN and returns the frames degrading the given
-// peers' self pills to status-unavailable — but ONLY if the slot was asserting a real state
-// (on-air/not-on-air). A slot already UNKNOWN needs no notification, so a fresh bind stays
-// quiet: this degrades a STALE assertion, it does not spam status-unavailable (D-24). Empty
-// and duplicate peers are skipped, so the incoming and a displaced occupant can both be
-// passed even when they are the same id.
-func (s *roomState) degradeOnAir(sid SlotID, st *slotState, peers ...PeerID) []outbound {
-	if st.onAir == OnAirUnknown {
-		return nil
-	}
-	st.onAir = OnAirUnknown
-	seen := map[PeerID]bool{}
-	var out []outbound
-	for _, p := range peers {
-		if p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		out = append(out, outbound{to: p, frame: Frame{T: "onair", Slot: string(sid), OnAir: OnAirUnknown}})
+	staleReset := s.degradeStaleOnAir(st)
+	out := []outbound{{to: source, frame: s.bindingFrame(sid, st)}}
+	// Only a stale-on-air reset (an occupied slot that WAS asserting a real state) changes a
+	// roster entry; a fresh attach to a quiet slot stays silent — no roster churn.
+	if staleReset && st.occupant != "" {
+		out = append(out, s.rebroadcastRoster()...)
 	}
 	return out
+}
+
+// degradeStaleOnAir resets a slot's on-air to UNKNOWN if it was asserting a real state, so a
+// stale assertion never outlives the live OBS signal behind it (D-24). Returns whether it
+// changed; the caller re-broadcasts the roster so the occupant's folded onAir field updates.
+func (s *roomState) degradeStaleOnAir(st *slotState) bool {
+	if st.onAir == OnAirUnknown {
+		return false
+	}
+	st.onAir = OnAirUnknown
+	return true
 }
 
 // epochPtr returns a pointer to a copy of e, so a slot frame carries its epoch (incl. 0,
@@ -182,62 +228,76 @@ func (s *roomState) bindingFrame(sid SlotID, st *slotState) Frame {
 	return Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}
 }
 
-// rebindSlot binds (or re-binds) a slot to an occupant: bump the epoch, reset on-air
-// to unknown until a fresh obsSourceActiveChanged arrives (EN-3, so a stale
-// active:true can't mislight the new occupant), and tell the source to renegotiate.
-func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
-	if _, ok := s.peers[occupant]; !ok {
-		return nil // ignore a rebind to an unknown/departed peer (don't advance epoch)
-	}
+// bindSlot is the core of a (re)bind: degrade any stale on-air, bump the epoch, set the new
+// occupant, and reset on-air to UNKNOWN (EN-3, so a stale active:true can't mislight the new
+// occupant). It returns ONLY the slot-rebind frame to the source; the caller re-broadcasts
+// the roster (occupancy changed, so both the old and new occupant's folded onAir move).
+func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	st := s.slot(sid)
-	// If the slot was asserting a real on-air it is now stale (epoch bumps, the source
-	// renegotiates): degrade BOTH the incoming occupant AND any displaced one — including the
-	// case where they are the SAME id (a host re-applying the slot to bump the epoch) — so
-	// neither keeps showing the prior pill (EN-3/D-24). A fresh bind stays quiet.
-	out := s.degradeOnAir(sid, st, st.occupant, occupant)
+	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = occupant
 	st.onAir = OnAirUnknown
-	if st.source != "" {
-		out = append(out, outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}})
+	if st.source == "" {
+		return nil
 	}
-	return out
+	return []outbound{{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}}}
 }
 
-// unbindSlot clears a slot (kick / leave): bump the epoch BEFORE any teardown
-// broadcast (EN-3) and tell the source to fall back to a placeholder.
-func (s *roomState) unbindSlot(sid SlotID) []outbound {
+// rebindSlot binds (or re-binds) a slot to an occupant and re-broadcasts the roster so the
+// occupants' folded on-air pills move (EN-3/D-24). A rebind naming a peer not in the room is
+// a no-op (no epoch advance) — the slot must never bind to a peer that can't receive media.
+func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
+	if _, ok := s.peers[occupant]; !ok {
+		return nil
+	}
+	out := s.bindSlot(sid, occupant)
+	return append(out, s.rebroadcastRoster()...)
+}
+
+// vacateSlot is the core of clearing a slot (kick / leave / unbind): degrade stale on-air,
+// bump the epoch BEFORE any teardown broadcast (EN-3), clear the occupant, and reset on-air.
+// It returns ONLY the slot-unbound frame to the source; the caller folds the vacated slot
+// into the roster.
+func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	st := s.slot(sid)
-	// The unbound occupant is no longer sourced — degrade its pill if the slot was asserting a
-	// real on-air (D-24). Harmless if it is also leaving the room (the frame to a since-removed
-	// conn is dropped).
-	out := s.degradeOnAir(sid, st, st.occupant)
+	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = ""
 	st.onAir = OnAirUnknown
-	if st.source != "" {
-		out = append(out, outbound{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}})
+	if st.source == "" {
+		return nil
 	}
-	return out
+	return []outbound{{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}}}
 }
 
-// obsSourceActive applies an OBS on-program reflection ONLY when its epoch matches
-// the slot's current epoch (EN-3): a stale event from a previous occupant is ignored
-// so it cannot mislight the new occupant; a future epoch is also ignored.
+// unbindSlot clears a slot and re-broadcasts the roster so the freed occupant's folded on-air
+// degrades to status-unavailable (D-24). Used by the host {t:unbind} and by kick (PR-8).
+func (s *roomState) unbindSlot(sid SlotID) []outbound {
+	out := s.vacateSlot(sid)
+	return append(out, s.rebroadcastRoster()...)
+}
+
+// obsSourceActive folds an OBS on-program reflection into the occupant's roster onAir, but
+// ONLY when its epoch matches the slot's current epoch (EN-3): a stale event from a previous
+// occupant is ignored so it can't mislight the new occupant; a future epoch is also ignored.
+// A real change with a bound occupant re-broadcasts the roster; an unchanged or unoccupied
+// slot stays silent.
 func (s *roomState) obsSourceActive(sid SlotID, active bool, epoch int) []outbound {
 	st := s.slots[sid]
 	if st == nil || epoch != st.epoch {
 		return nil
 	}
+	want := OnAirNo
 	if active {
-		st.onAir = OnAirYes
-	} else {
-		st.onAir = OnAirNo
+		want = OnAirYes
 	}
-	if st.occupant == "" {
+	changed := st.onAir != want
+	st.onAir = want
+	if !changed || st.occupant == "" {
 		return nil
 	}
-	return []outbound{{to: st.occupant, frame: Frame{T: "onair", Slot: string(sid), OnAir: st.onAir}}}
+	return s.rebroadcastRoster()
 }
 
 // obsStreaming reflects OBS's broadcast-level "we're live" state (D-24) to every

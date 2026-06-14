@@ -43,13 +43,13 @@ func TestRoomDeliversSlotRebindToSource(t *testing.T) {
 	defer r.Close()
 
 	srcOut := make(chan Frame, 8)
-	r.Join("src", "obs", "cam-1", srcOut)
+	r.Join("src", "obs", "", "cam-1", srcOut)
 	if f := recvFrame(t, srcOut); f.T != "slot-unbound" {
 		t.Fatalf("source's initial frame = %q, want slot-unbound", f.T)
 	}
 
 	g1Out := make(chan Frame, 8)
-	r.Join("g1", "guest", "", g1Out)
+	r.Join("g1", "guest", "", "", g1Out)
 	r.Rebind("cam-1", "g1")
 
 	f := recvFrame(t, srcOut)
@@ -67,10 +67,10 @@ func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
 	defer r.Close()
 
 	out1 := make(chan Frame, 8)
-	r.Join("g1", "guest", "", out1)
+	r.Join("g1", "guest", "", "", out1)
 
 	out2 := make(chan Frame, 8)
-	r.Join("g1", "guest", "", out2) // same id → evicts out1
+	r.Join("g1", "guest", "", "", out2) // same id → evicts out1
 
 	// out1 must be closed by the eviction.
 	select {
@@ -87,7 +87,7 @@ func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
 
 	// out2 is still the live g1: a relayed signal reaches it (past the roster/peer-joined
 	// bookkeeping frames that join now emits).
-	r.Join("peer", "guest", "", make(chan Frame, 8))
+	r.Join("peer", "guest", "", "", make(chan Frame, 8))
 	r.Signal("peer", Frame{T: "signal", To: "g1", SDP: []byte(`"x"`)})
 	if f := recvFrameOfType(t, out2, "signal"); f.From != "peer" {
 		t.Fatalf("live connection should still receive the relayed signal, got %+v", f)
@@ -101,8 +101,8 @@ func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
 
 	aOut := make(chan Frame, 8)
 	bOut := make(chan Frame, 8)
-	r.Join("a", "guest", "", aOut)
-	r.Join("b", "guest", "", bOut)
+	r.Join("a", "guest", "", "", aOut)
+	r.Join("b", "guest", "", "", bOut)
 
 	r.Signal("a", Frame{T: "signal", To: "b", SDP: []byte(`"offer"`)})
 	f := recvFrameOfType(t, bOut, "signal") // past b's roster frame
