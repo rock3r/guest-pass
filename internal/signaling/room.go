@@ -160,7 +160,7 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			// Tell the evicted client to reconnect (EN-9 transient) before closing
 			// its channel, so a duplicate identity is a clean handover.
 			select {
-			case old.out <- Frame{T: "terminate", Reason: "reconnect"}:
+			case old.out <- Frame{T: "terminate", Reason: TerminateReconnect}:
 			default:
 			}
 			close(old.out)
@@ -227,6 +227,31 @@ func (r *Room) Chat(from PeerID, text string) {
 func (r *Room) SetHand(actor, target PeerID, raised bool) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.setHand(actor, target, raised))
+	})
+}
+
+// Kick removes a target from the room (D-25). Authority (rank strictly above) is enforced
+// server-side. When authorized, it runs `invalidate` (the caller's token-revocation closure)
+// FIRST — on the room goroutine, before the teardown evicts the socket — so a reconnect is
+// already refused (refuse-rejoin, race-free); then it clears the target's slot (epoch bump
+// before the teardown, EN-3), broadcasts peer-left, sends the target a terminal
+// {t:terminate,kicked} (EN-9), and evicts its connection. An unauthorized kick is a no-op and
+// `invalidate` is NOT called. invalidate may be nil (tests).
+func (r *Room) Kick(actor, target PeerID, invalidate func()) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		if !st.canKick(actor, target) {
+			return
+		}
+		if invalidate != nil {
+			invalidate() // revoke the target's token BEFORE teardown — refuse-rejoin is race-free
+		}
+		deliver(conns, st.kickPeer(target))
+		// Evict the connection AFTER delivering the terminate frame: the buffered terminate
+		// flushes through the single writer before the closed channel ends it and shuts the socket.
+		if c := conns[target]; c != nil {
+			delete(conns, target)
+			close(c.out)
+		}
 	})
 }
 

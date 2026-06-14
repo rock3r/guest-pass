@@ -100,3 +100,16 @@ const (
 	OnAirNo      = "not-on-air"
 	OnAirUnknown = "status-unavailable"
 )
+
+// Terminate-reason taxonomy (EN-9). The server sends {t:terminate,reason} BEFORE closing a
+// socket so the client routes correctly: a TRANSIENT reason reconnects with backoff (keyed by
+// pass_id); a TERMINAL reason stops and routes to the matching error screen. An ABSENT terminate
+// frame is treated as transient unless reconnect-time validation is terminal (RF-22).
+const (
+	TerminateReconnect    = "reconnect"     // TRANSIENT — server drain / eviction / network blip
+	TerminateKicked       = "kicked"        // TERMINAL — removed by host (D-25)
+	TerminateExpired      = "expired"       // TERMINAL — pass past its deadline
+	TerminateRevoked      = "revoked"       // TERMINAL — pass revoked
+	TerminateSessionEnded = "session-ended" // TERMINAL — host ended the stream (D-40; emitted in M4)
+	TerminateTokenRotated = "token-rotated" // TERMINAL — slot token rotated (D-22; emitted later)
+)

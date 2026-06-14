@@ -3,15 +3,23 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/rock3r/guest-pass/internal/signaling"
+	"github.com/rock3r/guest-pass/internal/store"
 )
+
+// kickRevokeTimeout bounds the pass-revocation write that backs a kick (D-25/RF-22), so a wedged
+// disk can't stall the room goroutine indefinitely (it is a rare control-plane action).
+const kickRevokeTimeout = 5 * time.Second
 
 // ICEConfigurer builds the per-peer {t:"ice"} join-ack (AD-14). The peer id is passed so a
 // TURN entry can carry a freshly-minted ephemeral credential bound to that peer (EN-4); ok
@@ -81,7 +89,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	room := h.hub.Room(id.session)
 	if room == nil {
 		// The hub is draining; tell the client to reconnect (transient, EN-9) and close.
-		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
 		return
 	}
 
@@ -98,7 +106,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
 		// reconnect and close; we never registered, so there's no writer to drain.
-		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
 		return
 	}
 
@@ -182,6 +190,21 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		// dismiss another's by addressing a peerId (lower-only). Authority is server-side (EN-7).
 		if !id.isSource() {
 			room.SetHand(id.peer, signaling.PeerID(f.PeerID), f.Raised)
+		}
+	case "kick":
+		// Kick a participant (D-25). The revoke closure runs INSIDE Room.Kick on the room
+		// goroutine, before the teardown evicts the socket, so a reconnect with the now-revoked
+		// pass is refused (refuse-rejoin, race-free, RF-22). Rank authority is enforced in the
+		// reducer; the closure only runs when the kick is authorized.
+		if !id.isSource() {
+			target := signaling.PeerID(f.PeerID)
+			room.Kick(id.peer, target, func() {
+				kctx, cancel := context.WithTimeout(context.Background(), kickRevokeTimeout)
+				defer cancel()
+				if err := h.resolver.store.SetPassStatus(kctx, string(target), store.PassRevoked); err != nil && !errors.Is(err, store.ErrNotFound) {
+					h.log.Error("revoking kicked pass", "target", target, "err", err)
+				}
+			})
 		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
