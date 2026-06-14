@@ -343,6 +343,12 @@ tile. Each slot carries a monotonic **epoch**.
   the teardown broadcast**, so a reconnecting modified source resolves to
   placeholder, not the kicked occupant. The cooperative source drops the target
   instantly → off-broadcast.
+- On a **suppression lock/release** of the bound occupant (RF-8): the server sends the source an
+  `{t:occupant-locks}` carrying the occupant's locked **kinds** (and re-sends it on (re)attach to an
+  occupied slot), so the source **detaches the locked remote track** from the program output even if
+  the occupant is a modified client that keeps sending. It is epoch+occupant-gated like the slot
+  frames so a straggler can't mislight air. A disabled remote video track renders black — the same
+  result as a voluntary source-side cam-off, so the composition stays consistent.
 - Cam slot with no occupant or screenshare slot with no live share → transparent
   "waiting" placeholder; the cam source never switches away from camera.
 
@@ -933,6 +939,16 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 {"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","epoch":8}
 {"t":"slot-unbound","slot":"cam-3","epoch":9}
 
+// Occupant suppression-lock projection to a slot's OBS source page (RF-8 receiver-side). A source
+// gets no roster (EN-13), so this carries the bound occupant's active lock KINDS so the source
+// detaches the locked REMOTE track from the program output, independent of the (possibly modified)
+// occupant. KINDS-ONLY — never applierPeerId/applierRank (the crown-jewel source learns no moderator
+// metadata, EN-5). Rides the slot epoch + occupantPeerId; the source applies it only for its current
+// occupant at epoch ≥ the last it acted on (EN-3 straggler defence). Emitted alongside slot-rebind
+// (and on (re)attach to an occupied slot) and on every force/release of the occupant. Moderators read
+// the full LockView (with applier) from the roster's `locks` field instead.
+{"t":"occupant-locks","slot":"cam-3","occupantPeerId":"<id>","epoch":8,"lockKinds":["mic","cam"]}
+
 // On-air reflection (D-24). Per-guest on-air folds into the roster entry's `onAir` field (M3
 // PR-1 retired the interim standalone {t:onair} frame): the server recomputes the occupant's
 // folded on-air from the slot state and re-broadcasts the roster on any change, and a (re)joiner
@@ -1002,9 +1018,12 @@ Each force creates **one lock per `(target, modality)`**, keyed to
 - **Receiver-side enforcement too (RF-8).** Server-reject-self-state is necessary but
   not sufficient in a P2P mesh: a modified client can keep *sending* media to
   cooperating peers. So on a lock, every cooperating peer must **detach/mute the
-  target's corresponding remote track** from rendering *and* OBS output, independent of
-  the target's self-state. The force also stops the outbound track at source on
-  cooperating clients, so it dies in the mesh and in any OBS source.
+  target's corresponding remote track** (`receiver.track.enabled = false`, reversible — never
+  `stop()`) from rendering *and* OBS output, independent of the target's self-state. The
+  greenroom monitor and the backstage mesh learn the lock from the roster's `locks` field; an OBS
+  source page (which gets no roster, EN-13) learns it from the dedicated `{t:occupant-locks}` frame
+  (kinds-only, EN-5). The force also stops the outbound track at source on cooperating clients, so it
+  dies in the mesh and in any OBS source — but receiver-side detach is what holds when it does not.
 - Co-hosts may `force-no-share` (moderation) but **cannot** `screen-select`
   (host-only direction).
 

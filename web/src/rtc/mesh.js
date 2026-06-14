@@ -130,6 +130,23 @@ export class MeshPeer {
     }
   }
 
+  /**
+   * setRemoteTrackEnabled mutes/unmutes the REMOTE track of a modality on this mesh link, so a
+   * suppression lock detaches the locked peer's thumbnail media independent of the (possibly modified)
+   * target — receiver-side enforcement (RF-8). It operates on getReceivers() (the INBOUND track only —
+   * our own outbound sender is untouched): mic → audio, cam → video; share has no consumed track in M3.
+   * Uses track.enabled (reversible — a release re-enables it), never track.stop().
+   * @param {"mic"|"cam"|"share"} modality
+   * @param {boolean} enabled
+   */
+  setRemoteTrackEnabled(modality, enabled) {
+    const kind = modality === "mic" ? "audio" : modality === "cam" ? "video" : null;
+    if (!kind) return; // share: no consumed track in M3
+    for (const r of this.pc.getReceivers()) {
+      if (r.track && r.track.kind === kind) r.track.enabled = enabled;
+    }
+  }
+
   close() {
     this.closed = true;
     this.pc.close();
@@ -160,6 +177,10 @@ export class MeshManager {
     this.selfId = "";
     /** @type {RTCIceServer[]} */
     this.iceServers = [];
+    // Per-peer suppression-locked modalities (RF-8 receiver-side), set from the roster by the owner.
+    // Held here (not just applied once) so a freshly-arrived thumbnail track re-asserts the lock.
+    /** @type {Map<string, string[]>} */
+    this._locked = new Map();
   }
 
   /** streams returns the received remote thumbnail streams, keyed by remote peer id. */
@@ -193,6 +214,7 @@ export class MeshManager {
     const mp = new MeshPeer(this.room, this.selfId, remoteId, localStream, this.iceServers);
     mp.ontrack = (stream) => {
       this._streams.set(remoteId, stream);
+      this._applyLocks(remoteId); // re-assert any suppression lock on the freshly-arrived track (RF-8)
       this.onUpdate();
     };
     this.peers.set(remoteId, mp);
@@ -204,7 +226,29 @@ export class MeshManager {
     if (mp) mp.close();
     this.peers.delete(id);
     this._streams.delete(id);
+    this._locked.delete(id);
     this.onUpdate();
+  }
+
+  /**
+   * setLocks records a peer's suppression-locked modalities (from the roster's entry.locks) and
+   * detaches/re-attaches its remote thumbnail tracks accordingly (RF-8 receiver-side) — independent
+   * of whether that peer cooperates. A no-op for a peer with no live mesh link yet; the lock re-asserts
+   * when its track arrives (see _ensure).
+   * @param {string} id
+   * @param {string[]} lockedKinds  modalities currently locked for the peer (mic|cam|share)
+   */
+  setLocks(id, lockedKinds) {
+    this._locked.set(id, lockedKinds || []);
+    this._applyLocks(id);
+  }
+
+  /** _applyLocks enforces the stored lock set on one peer's live mesh link. */
+  _applyLocks(id) {
+    const mp = this.peers.get(id);
+    if (!mp) return;
+    const locked = this._locked.get(id) || [];
+    for (const m of ["mic", "cam", "share"]) mp.setRemoteTrackEnabled(m, !locked.includes(m));
   }
 
   /**

@@ -346,6 +346,13 @@ func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	st.source = source
 	staleReset := s.degradeStaleOnAir(st)
 	out := []outbound{{to: source, frame: s.bindingFrame(sid, st)}}
+	// A source (re)attaching to an OCCUPIED slot also gets the occupant's current lock kinds (RF-8),
+	// so a pre-existing lock (force-then-source-connects, or a seeded lock re-applied on reconnect
+	// after a restart) detaches the locked remote track the moment the source binds. An unbound slot
+	// has no occupant, so no occupant-locks.
+	if st.occupant != "" {
+		out = append(out, outbound{to: source, frame: s.occupantLocksFrame(sid, st)})
+	}
 	// Only a stale-on-air reset (an occupied slot that WAS asserting a real state) changes a
 	// roster entry; a fresh attach to a quiet slot stays silent — no roster churn.
 	if staleReset && st.occupant != "" {
@@ -376,6 +383,30 @@ func (s *roomState) bindingFrame(sid SlotID, st *slotState) Frame {
 	return Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}
 }
 
+// occupantLocksFrame projects a bound occupant's active lock KINDS to that slot's OBS source page
+// (RF-8 receiver-side enforcement): an OBS source gets no roster (EN-13), so it learns the lock here
+// and detaches the locked REMOTE track from the program output, independent of the (possibly
+// modified) occupant. It rides the slot epoch + occupantPeerId so the source can ignore a straggler
+// for a previous occupant/epoch (EN-3), mirroring the slot-rebind gate; it is KINDS-ONLY (no applier
+// identity) to keep the crown-jewel source page minimal (EN-5).
+func (s *roomState) occupantLocksFrame(sid SlotID, st *slotState) Frame {
+	return Frame{T: "occupant-locks", Slot: string(sid), OccupantPeerID: string(st.occupant), Epoch: epochPtr(st.epoch), LockKinds: s.lockKindsOf(st.occupant)}
+}
+
+// sourceLockFrames emits an occupant-locks frame to the OBS source page of every slot whose occupant
+// is target, so a lock/release on target reaches the air-critical source surface (RF-8) even though
+// sources receive no roster. Returns nil when target occupies no sourced slot.
+func (s *roomState) sourceLockFrames(target PeerID) []outbound {
+	var out []outbound
+	for sid, st := range s.slots {
+		if st.occupant != target || st.source == "" {
+			continue
+		}
+		out = append(out, outbound{to: st.source, frame: s.occupantLocksFrame(sid, st)})
+	}
+	return out
+}
+
 // bindSlot is the core of a (re)bind: degrade any stale on-air, bump the epoch, set the new
 // occupant, and reset on-air to UNKNOWN (EN-3, so a stale active:true can't mislight the new
 // occupant). It returns ONLY the slot-rebind frame to the source; the caller re-broadcasts
@@ -389,7 +420,13 @@ func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	if st.source == "" {
 		return nil
 	}
-	return []outbound{{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}}}
+	// Send the binding, then the new occupant's authoritative lock kinds (RF-8): a (re)bind to a
+	// locked occupant detaches the locked track at once, and a rebind to a fresh occupant clears any
+	// stale lock view the source held for the previous occupant (empty kinds → re-enable all).
+	return []outbound{
+		{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}},
+		{to: st.source, frame: s.occupantLocksFrame(sid, st)},
+	}
 }
 
 // rebindSlot binds (or re-binds) a slot to an occupant and re-broadcasts the roster so the
