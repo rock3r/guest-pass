@@ -110,3 +110,21 @@ func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
 		t.Fatalf("relayed frame = %+v, want signal from=a", f)
 	}
 }
+
+// AD-13 (end to end): a reported audio level is coalesced onto the room's batched {t:levels}
+// tick — the ticker fires on the room goroutine and delivers the meter map, proving the wiring
+// (applyState stores level → tick → buildLevels → deliver), not just the pure reducer.
+func TestRoomLevelsTickDelivers(t *testing.T) {
+	r := newRoom("lvl")
+	go r.run()
+	defer r.Close()
+
+	out := make(chan Frame, 16)
+	r.Join("g1", "guest", "", "", out)
+	r.ApplyState("g1", nil, nil, nil, fptr(0.7)) // a meter-only {t:state}
+
+	f := recvFrameOfType(t, out, "levels") // past the join roster frame
+	if f.Levels["g1"] != 0.7 {
+		t.Fatalf("levels tick should carry g1=0.7, got %+v", f.Levels)
+	}
+}

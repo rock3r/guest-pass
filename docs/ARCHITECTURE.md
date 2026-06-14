@@ -900,6 +900,12 @@ release/override anything.
 {"t":"signal","from":"<peerId>","sdp"|"ice":…}            // relayed SDP/ICE
 {"t":"chat","from":"<peerId>","text":"…"}                 // relayed only (EN-20)
 
+// Batched audio-meter tick (AD-13) — every participant's last-reported {t:state} level coalesced
+// onto ONE ~6–7 Hz room tick instead of riding the roster (no N² spam at the cap). In-memory
+// only, never persisted (EN-11); stays silent in a quiet room (one trailing all-zero frame when
+// it falls silent so clients settle their meters). OBS source virtual peers have no meter.
+{"t":"levels","levels":{"<peerId>":0.4,…}}                // peerId → level (0..1), to each participant
+
 // Screenshare preview-switcher state (host-only) (D-21)
 {"t":"screen-roster","previews":["<peerId>",…],"live":"<peerId>"|null}
 

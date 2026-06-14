@@ -33,6 +33,9 @@ func onAirSeenBy(out []outbound, to, peer PeerID) string {
 // (nil) modality means "leave unchanged" (a meter-only update must not clobber presence).
 func bptr(b bool) *bool { return &b }
 
+// fptr returns a pointer to f, for a {t:state} audio-meter value (absent = leave unchanged).
+func fptr(f float64) *float64 { return &f }
+
 // EN-3: a rebind bumps the epoch, swaps the occupant, resets on-air to unknown, and tells
 // the source page to renegotiate to the new occupant at the new epoch. The occupant's folded
 // on-air starts at status-unavailable until a fresh transition (D-24).
@@ -63,7 +66,7 @@ func TestStateFoldsPresenceIntoRoster(t *testing.T) {
 	s.join("host", "host", "")
 	s.join("g1", "guest", "Greta")
 
-	out := s.applyState("g1", bptr(false), bptr(true), bptr(false)) // mic on, cam + screen off
+	out := s.applyState("g1", bptr(false), bptr(true), bptr(false), nil) // mic on, cam + screen off
 
 	e, ok := rosterEntryFor(out, "host", "g1")
 	if !ok {
@@ -84,8 +87,8 @@ func TestStateNoChangeIsQuiet(t *testing.T) {
 	s := newRoomState()
 	s.join("host", "host", "")
 	s.join("g1", "guest", "")
-	s.applyState("g1", bptr(true), bptr(true), bptr(false))
-	if out := s.applyState("g1", bptr(true), bptr(true), bptr(false)); out != nil {
+	s.applyState("g1", bptr(true), bptr(true), bptr(false), nil)
+	if out := s.applyState("g1", bptr(true), bptr(true), bptr(false), nil); out != nil {
 		t.Fatalf("an unchanged state must not churn the roster, got %+v", out)
 	}
 }
@@ -97,14 +100,17 @@ func TestStateLevelOnlyPreservesPresence(t *testing.T) {
 	s := newRoomState()
 	s.join("host", "host", "")
 	s.join("g1", "guest", "")
-	s.applyState("g1", bptr(true), bptr(true), bptr(true)) // all on
+	s.applyState("g1", bptr(true), bptr(true), bptr(true), nil) // all on
 
-	out := s.applyState("g1", nil, nil, nil) // a level-only {t:state}: no presence fields
+	out := s.applyState("g1", nil, nil, nil, fptr(0.6)) // a meter-only {t:state}: level, no presence
 	if out != nil {
 		t.Fatalf("a presence-less {t:state} must not re-broadcast the roster, got %+v", out)
 	}
+	if s.peers["g1"].level != 0.6 {
+		t.Fatalf("the meter-only update must still store the level, got %v", s.peers["g1"].level)
+	}
 	// A subsequent change confirms presence was preserved (still all-on, so a partial off shows).
-	out = s.applyState("g1", bptr(false), nil, nil) // turn cam off only
+	out = s.applyState("g1", bptr(false), nil, nil, nil) // turn cam off only
 	e, ok := rosterEntryFor(out, "host", "g1")
 	if !ok || e.Cam || !e.Mic || !e.Screen {
 		t.Fatalf("presence must survive a meter-only update; got %+v (want cam:false mic:true screen:true)", e)
@@ -115,7 +121,7 @@ func TestStateLevelOnlyPreservesPresence(t *testing.T) {
 func TestStateFromNonParticipantIgnored(t *testing.T) {
 	s := newRoomState()
 	s.join("src", "obs", "")
-	if out := s.applyState("src", bptr(true), bptr(true), bptr(true)); out != nil {
+	if out := s.applyState("src", bptr(true), bptr(true), bptr(true), fptr(0.9)); out != nil {
 		t.Fatalf("an OBS source has no presence; state must be ignored, got %+v", out)
 	}
 }

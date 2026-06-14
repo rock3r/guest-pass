@@ -144,10 +144,11 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		room.Signal(id.peer, f) // relayed verbatim; server never inspects (D-23)
 	case "state":
 		// Self-presence (EN-7): cam/mic/screen are the sender's OWN modality flags, folded into
+		// the roster; level is the audio meter, coalesced onto the {t:levels} tick (AD-13), never
 		// the roster. Only a participant has presence — an OBS source reflects on-air, not state.
 		// Lock enforcement against a suppressed modality lands in PR-3.
 		if !id.isSource() {
-			room.ApplyState(id.peer, f.Cam, f.Mic, f.Screen)
+			room.ApplyState(id.peer, f.Cam, f.Mic, f.Screen, f.Level)
 		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
