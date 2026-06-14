@@ -96,12 +96,20 @@ func run() error {
 		return fmt.Errorf("create pass: %w", err)
 	}
 
+	// Pick the lowest free cam idx (1..8): a cam slot is unique per (host_id, idx), so reusing
+	// idx 1 would crash on a second run against the same DB. Each run takes the next free slot.
+	camIdx, err := freeCamIdx(ctx, st, host.ID)
+	if err != nil {
+		return err
+	}
+	camLabel := fmt.Sprintf("cam-%d", camIdx)
+
 	srcRaw, err := token.Mint()
 	if err != nil {
 		return err
 	}
 	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
-		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw),
+		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(camIdx), SourceTokenHash: hasher.Hash(srcRaw),
 	}); err != nil {
 		return fmt.Errorf("create slot: %w", err)
 	}
@@ -111,18 +119,18 @@ func run() error {
 Smoke fixtures ready (host=dev-local-host, stream=%s).
 
   Guest link:   %s/p/%s
-  OBS source:   %s/s/cam-1?token=%s
+  OBS source:   %s/s/%s?token=%s
   Greenroom:    %s/greenroom   (sign in at %s/auth/dev first; not needed for the OBS test)
   pass id:      %s
 
 Steps:
   1. Open the Guest link, allow camera/mic, click "Enter the greenroom" — wait until it
      says "your camera is live in the greenroom".
-  2. Press Enter here to bind cam-1 -> the guest.
+  2. Press Enter here to bind %s -> the guest.
   3. Add the OBS source URL as a Browser Source in OBS (width 1280, height 720); it should
      render the guest. Bring that source on-program to light the guest's on-air pill.
 
-`, stream.ID, base, passRaw, base, srcRaw, base, base, pass.ID)
+`, stream.ID, base, passRaw, base, camLabel, srcRaw, base, base, pass.ID, camLabel)
 
 	// Mint a host session JWT with the same ring the server uses, for the rebind connection.
 	ring, err := auth.NewKeyRing(cfg.JWTSecret)
@@ -136,9 +144,9 @@ Steps:
 	wsURL := strings.Replace(base, "http", "ws", 1) + "/ws"
 
 	in := bufio.NewScanner(os.Stdin)
-	fmt.Print("Press Enter to bind cam-1 -> the guest (Ctrl-C to quit): ")
+	fmt.Printf("Press Enter to bind %s -> the guest (Ctrl-C to quit): ", camLabel)
 	for in.Scan() {
-		if err := sendRebind(ctx, wsURL, session, pass.ID); err != nil {
+		if err := sendRebind(ctx, wsURL, session, camLabel, pass.ID); err != nil {
 			fmt.Printf("  rebind failed: %v\n", err)
 		} else {
 			fmt.Println("  rebind sent. OBS should render the guest; bring the source on-program to light the on-air pill.")
@@ -148,10 +156,31 @@ Steps:
 	return nil
 }
 
-// sendRebind opens a short-lived host /ws connection and sends one {t:rebind} for cam-1. The
+// freeCamIdx returns the lowest unused cam-slot index (1..8) for the host, so repeated runs
+// against the same DB don't collide on the unique (host_id, idx) cam constraint.
+func freeCamIdx(ctx context.Context, st *store.Store, hostID string) (int64, error) {
+	slots, err := st.ListSlotsByHost(ctx, hostID)
+	if err != nil {
+		return 0, fmt.Errorf("listing slots: %w", err)
+	}
+	used := map[int64]bool{}
+	for _, sl := range slots {
+		if sl.Kind == store.SlotCam && sl.Idx != nil {
+			used[*sl.Idx] = true
+		}
+	}
+	for i := int64(1); i <= 8; i++ {
+		if !used[i] {
+			return i, nil
+		}
+	}
+	return 0, errors.New("all 8 cam slots are in use for the dev host — reset with `rm $DB_PATH*` and re-run")
+}
+
+// sendRebind opens a short-lived host /ws connection and sends one {t:rebind} for the slot. The
 // binding is held in room state by the still-connected guest + OBS source, so the host
 // connection can close immediately afterward (a host leaving does not unbind a slot).
-func sendRebind(ctx context.Context, wsURL, session, passID string) error {
+func sendRebind(ctx context.Context, wsURL, session, slot, passID string) error {
 	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	cookie := (&http.Cookie{Name: auth.SessionCookie, Value: session}).String()
@@ -162,7 +191,7 @@ func sendRebind(ctx context.Context, wsURL, session, passID string) error {
 		return fmt.Errorf("dial host /ws: %w", err)
 	}
 	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
-	if err := wsjson.Write(dctx, c, signaling.Frame{T: "rebind", Slot: "cam-1", OccupantPeerID: passID}); err != nil {
+	if err := wsjson.Write(dctx, c, signaling.Frame{T: "rebind", Slot: slot, OccupantPeerID: passID}); err != nil {
 		return err
 	}
 	time.Sleep(300 * time.Millisecond) // let the room apply the rebind before the socket closes
