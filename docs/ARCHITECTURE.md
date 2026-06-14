@@ -906,7 +906,8 @@ release/override anything.
 // On-air reflection (D-24). M2 INTERIM: until the M3 greenroom folds on-air into the roster's
 // `onAir` field, the server delivers the OBS reflection as standalone frames — {t:onair} to the
 // affected slot's occupant (drives its self pill), and a global {t:streaming} broadcast to every
-// participant. Driven by the source page's {t:obs,event:"sourceActive"/"streamingStarted"/...}.
+// participant. Driven by the source page's {t:obs,event:"sourceActive"/"streamingStarted"/...},
+// and ALSO replayed to a participant on (re)join so a mid-stream joiner isn't stuck at defaults.
 {"t":"onair","slot":"cam-3","onAir":"on-air"|"not-on-air"|"status-unavailable"}  // → the slot occupant
 {"t":"streaming","active":true}                          // global "we're live" → all participants
 

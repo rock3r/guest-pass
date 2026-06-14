@@ -283,6 +283,52 @@ func TestSourceReattachResetsStaleOnAir(t *testing.T) {
 	}
 }
 
+// D-24: a participant joining/rejoining mid-stream is replayed the room's current OBS
+// reflections — the global "we're live" state, and the on-air of any slot it already occupies
+// (an eviction-rejoin keeps its binding) — so it doesn't sit at the defaults until OBS next
+// toggles. OBS source virtual peers don't receive these (EN-13).
+func TestJoinReplaysCurrentObsState(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // slot on-air
+	s.obsStreaming(true)                // broadcast live
+
+	// A new participant joining mid-stream is told the broadcast is live.
+	out := s.join("h", "host")
+	var hStreaming bool
+	for _, o := range out {
+		if o.to == "h" && o.frame.T == "streaming" && o.frame.Active {
+			hStreaming = true
+		}
+	}
+	if !hStreaming {
+		t.Fatalf("a participant joining mid-stream must be replayed the live state, got %+v", out)
+	}
+
+	// An OBS source page joining is NOT replayed participant reflections (EN-13).
+	out = s.join("src2", "obs")
+	for _, o := range out {
+		if o.frame.T == "streaming" || o.frame.T == "onair" {
+			t.Fatalf("OBS source pages must not receive on-air/streaming replays, got %+v", o.frame)
+		}
+	}
+
+	// The occupant rejoining (eviction keeps its binding) is replayed its slot's on-air.
+	out = s.join("g1", "guest")
+	var g1OnAir bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirYes {
+			g1OnAir = true
+		}
+	}
+	if !g1OnAir {
+		t.Fatalf("a rejoining occupant must be replayed its slot's on-air, got %+v", out)
+	}
+}
+
 // D-24/EN-3: a source reattach (eviction reload — Room.Join swaps the conn without running
 // leave) bumps the epoch, so an in-flight sourceActive from the EVICTED connection — carrying
 // the old epoch — is rejected and can't re-light a stale pill after the reset.

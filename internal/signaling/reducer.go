@@ -65,6 +65,18 @@ func (s *roomState) join(id PeerID, role string) []outbound {
 	var out []outbound
 	if isParticipant(role) {
 		out = append(out, outbound{to: id, frame: Frame{T: "roster", Peers: s.rosterFor(role)}})
+		// Replay the room's current OBS reflections (D-24) so a participant joining mid-stream
+		// doesn't sit at the defaults until OBS next toggles: the global "we're live" state, and
+		// the on-air of any slot this peer already occupies (an eviction-rejoin keeps its
+		// binding). These events are otherwise transition-only.
+		if s.streaming {
+			out = append(out, outbound{to: id, frame: Frame{T: "streaming", Active: true}})
+		}
+		for sid, st := range s.slots {
+			if st.occupant == id && st.onAir != OnAirUnknown {
+				out = append(out, outbound{to: id, frame: Frame{T: "onair", Slot: string(sid), OnAir: st.onAir}})
+			}
+		}
 	}
 	if rejoining {
 		return out
