@@ -26,6 +26,45 @@ func TestRebindBumpsEpochAndResetsOnAir(t *testing.T) {
 	}
 }
 
+// D-24: a source's streamingStarted/Stopped reflection broadcasts a GLOBAL "we're live"
+// state to every participant (host/co-host/guest) — but never to OBS source virtual peers
+// (EN-13) — and is not epoch-scoped.
+func TestObsStreamingBroadcastsToParticipantsOnly(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host")
+	s.join("g1", "guest")
+	s.join("src-cam-1", "obs") // a source page — must NOT receive the streaming broadcast
+
+	out := s.obsStreaming(true)
+	if !s.streaming {
+		t.Fatalf("obsStreaming(true) must set the room streaming state")
+	}
+	got := map[PeerID]bool{}
+	for _, o := range out {
+		if o.frame.T != "streaming" || !o.frame.Active {
+			t.Fatalf("unexpected outbound %+v, want {t:streaming, active:true}", o.frame)
+		}
+		got[o.to] = true
+	}
+	if !got["host"] || !got["g1"] {
+		t.Fatalf("host and g1 must receive the streaming broadcast, got %v", got)
+	}
+	if got["src-cam-1"] {
+		t.Fatalf("OBS source pages must NOT receive the streaming broadcast (EN-13), got %v", got)
+	}
+
+	// streamingStopped flips the global state back and carries active=false.
+	out = s.obsStreaming(false)
+	if s.streaming {
+		t.Fatalf("obsStreaming(false) must clear the room streaming state")
+	}
+	for _, o := range out {
+		if o.frame.Active {
+			t.Fatalf("a streamingStopped broadcast must carry active=false, got %+v", o.frame)
+		}
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous
 // epoch must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {

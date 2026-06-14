@@ -39,6 +39,8 @@ function start() {
   let backoff = RECONNECT_MIN_MS;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let reconnectTimer;
+  /** @type {import("../rtc/room.js").Room|null} the live signaling room (rebuilt each reconnect) */
+  let room = null;
 
   function clearLink() {
     if (link) link.close();
@@ -48,7 +50,7 @@ function start() {
   }
 
   function connect() {
-    const room = new Room("src=" + encodeURIComponent(token));
+    room = new Room("src=" + encodeURIComponent(token));
 
     // bind the slot to occupantPeerId by opening a recvonly link and rendering its track.
     function bind(occupantPeerId, ep) {
@@ -107,6 +109,30 @@ function start() {
       backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
     });
   }
+
+  // Relay OBS's on-air/broadcast reflection (D-24) over the signaling room. These
+  // window.obsstudio events fire ONLY inside OBS, at the default permission level (no setup
+  // needed); in a normal browser they never fire, so the occupant's pill stays
+  // status-unavailable. Registered ONCE (not per reconnect) and they send over whatever room
+  // is currently live. We use `active` (obsSourceActiveChanged) and NEVER `visible`
+  // (obsSourceVisibleChanged also fires in OBS *preview* and would false-positive).
+  const relay = (frame) => {
+    if (!room) return;
+    try {
+      room.send(frame);
+    } catch (_) {
+      /* socket not open yet / already closing — a transient OBS event is fine to drop */
+    }
+  };
+  addEventListener("obsSourceActiveChanged", (e) => {
+    // Echo the current slot epoch so the server resolves slot→occupant at signal time and
+    // ignores stale reports (EN-1/EN-3). Skip until a binding has set the epoch.
+    if (occupant && epoch >= 0) {
+      relay({ t: "obs", event: "sourceActive", active: !!(e && e.detail && e.detail.active), epoch });
+    }
+  });
+  addEventListener("obsStreamingStarted", () => relay({ t: "obs", event: "streamingStarted" }));
+  addEventListener("obsStreamingStopped", () => relay({ t: "obs", event: "streamingStopped" }));
 
   connect();
 }

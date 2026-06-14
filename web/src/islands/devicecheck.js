@@ -30,6 +30,11 @@ function DeviceCheck() {
   // pubState reflects the greenroom publishing connection once entered: connecting | live |
   // disconnected — so the guest is never told they're live before the signaling WS is up.
   const [pubState, setPubState] = useState("connecting");
+  // onAir is the three-state on-air SELF pill (D-24), reflected from OBS via the server:
+  // status-unavailable (no OBS signal — the default) | on-air | not-on-air. streaming is the
+  // global "we're live" broadcast reflection. Both are read-only reflections, never asserted.
+  const [onAir, setOnAir] = useState("status-unavailable");
+  const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -106,6 +111,10 @@ function DeviceCheck() {
     const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
     pubRef.current = publisher;
     room.on("signal", (f) => publisher.onSignal(f));
+    // On-air self pill + global "we're live" reflection (D-24): the server forwards the OBS
+    // source's reflection for this guest's slot, and the broadcast-level streaming state.
+    room.on("onair", (f) => setOnAir(f.onAir || "status-unavailable"));
+    room.on("streaming", (f) => setStreaming(!!f.active));
     // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
     room.onIce((servers) => publisher.applyIceServers(servers));
     // Only claim "live" once the signaling WS is actually up; on any disconnect — an abrupt
@@ -141,6 +150,14 @@ function DeviceCheck() {
   }
 
   if (phase === "entered") {
+    // Three-state on-air pill (D-24) — reflected from OBS, never asserted. "status-unavailable"
+    // means no OBS signal at all (e.g. the host isn't running an OBS source for you yet).
+    const onAirLabel =
+      onAir === "on-air"
+        ? "On air"
+        : onAir === "not-on-air"
+          ? "Not on air"
+          : "On-air status unavailable";
     return (
       <div class="dc-entered" data-entered="1" data-pub={pubState}>
         {pubState === "live" ? (
@@ -150,6 +167,17 @@ function DeviceCheck() {
         ) : (
           <p>You're in — connecting your camera to the greenroom…</p>
         )}
+        <p class="dc-onair" data-onair={onAir}>
+          {onAirLabel}
+          {onAir === "status-unavailable" ? (
+            <span class="dc-onair-hint"> — check the actual stream to confirm.</span>
+          ) : null}
+        </p>
+        {streaming ? (
+          <p class="dc-live" data-live="1">
+            The broadcast is live.
+          </p>
+        ) : null}
       </div>
     );
   }

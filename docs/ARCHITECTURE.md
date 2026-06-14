@@ -903,6 +903,13 @@ release/override anything.
 {"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","epoch":8}
 {"t":"slot-unbound","slot":"cam-3","epoch":9}
 
+// On-air reflection (D-24). M2 INTERIM: until the M3 greenroom folds on-air into the roster's
+// `onAir` field, the server delivers the OBS reflection as standalone frames — {t:onair} to the
+// affected slot's occupant (drives its self pill), and a global {t:streaming} broadcast to every
+// participant. Driven by the source page's {t:obs,event:"sourceActive"/"streamingStarted"/...}.
+{"t":"onair","slot":"cam-3","onAir":"on-air"|"not-on-air"|"status-unavailable"}  // → the slot occupant
+{"t":"streaming","active":true}                          // global "we're live" → all participants
+
 // Terminate-reason taxonomy (EN-9) — sent BEFORE close so the client routes correctly
 {"t":"terminate","reason":"reconnect"}                    // TRANSIENT → retry with backoff (keyed by pass_id)
 {"t":"terminate","reason":

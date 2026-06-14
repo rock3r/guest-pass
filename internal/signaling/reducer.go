@@ -34,6 +34,9 @@ type roomState struct {
 	// refused so a connection can't slip into a room that has already sent its terminate
 	// frames and is about to stop.
 	terminating bool
+	// streaming is the OBS broadcast-level "we're live" reflection (D-24), global to the
+	// room (not slot-scoped): any source page may report it via streamingStarted/Stopped.
+	streaming bool
 }
 
 func newRoomState() *roomState {
@@ -173,6 +176,22 @@ func (s *roomState) obsSourceActive(sid SlotID, active bool, epoch int) []outbou
 		return nil
 	}
 	return []outbound{{to: st.occupant, frame: Frame{T: "onair", Slot: string(sid), OnAir: st.onAir}}}
+}
+
+// obsStreaming reflects OBS's broadcast-level "we're live" state (D-24) to every
+// participant. Unlike per-slot on-air it is GLOBAL and not epoch-scoped — any source page
+// may report it (obsStreamingStarted/Stopped). OBS source virtual peers don't receive it
+// (they are minimal, EN-13); only greenroom participants (host/co-host/guest) do.
+func (s *roomState) obsStreaming(active bool) []outbound {
+	s.streaming = active
+	var out []outbound
+	for pid, p := range s.peers {
+		if !isParticipant(p.role) {
+			continue
+		}
+		out = append(out, outbound{to: pid, frame: Frame{T: "streaming", Active: active}})
+	}
+	return out
 }
 
 // relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
