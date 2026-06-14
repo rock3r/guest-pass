@@ -93,8 +93,8 @@ func (rd *renderer) signin(w http.ResponseWriter, r *http.Request) {
 	rd.render(w, r, "signin.html", pageData{Title: "Host sign-in"})
 }
 
-// greenroom renders the host's thin monitor page (host-authenticated upstream): it mounts
-// the host-monitor island, which consumes each guest's camera over P2P (PR-7).
+// greenroom renders the host's monitoring page (host-authenticated upstream): it mounts the
+// greenroom grid island, which consumes each guest's camera over P2P (PR-9).
 func (rd *renderer) greenroom(w http.ResponseWriter, r *http.Request) {
 	rd.render(w, r, "greenroom.html", pageData{Title: "Greenroom"})
 }

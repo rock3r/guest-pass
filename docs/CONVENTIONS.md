@@ -417,7 +417,7 @@ internal/
 web/
   src/rtc/            PeerLink (consume), Publisher (publish), Room (signaling WS + ICE
                       config from the join-ack + {t:ice-refresh}), getStats sampling
-  src/islands/        device-check(+publish), host-monitor, guest-session, greenroom (APP entry)
+  src/islands/        device-check(+publish), greenroom grid, guest-session (APP entry)
   src/obs/            cam + screen source pages                (OBS esbuild entry — no fonts)
   src/styles/         design tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored Preact (MIT, committed)

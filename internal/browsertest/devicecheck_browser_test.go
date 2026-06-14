@@ -219,9 +219,9 @@ func TestDeviceCheck_EntryFailureReleasesCamera(t *testing.T) {
 	})
 }
 
-// T-7 / AC-6: a guest publishes its camera and a host-monitor tile renders it over P2P, and
-// an ICE restart (the Reconnect control) keeps the media flowing. Two real Chrome tabs in one
-// browser exchange media over loopback with fake devices.
+// T-7 / AC-6: a guest publishes its camera and a greenroom tile renders it over P2P, and an
+// ICE restart (the per-tile Reconnect control) keeps the media flowing. Two real Chrome tabs in
+// one browser exchange media over loopback with fake devices.
 func TestPeerLink_GuestPublishesToHostMonitor(t *testing.T) {
 	s := seedDeviceCheck(t)
 
@@ -249,8 +249,8 @@ func TestPeerLink_GuestPublishesToHostMonitor(t *testing.T) {
 		t.Fatalf("guest publish flow: %v", err)
 	}
 
-	// Host: authenticate via the session cookie, open the greenroom → the host-monitor
-	// consumes the guest's camera over P2P and the tile shows live (fake-device) frames.
+	// Host: authenticate via the session cookie, open the greenroom → the grid consumes the
+	// guest's camera over P2P and the tile shows live (fake-device) frames.
 	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
@@ -258,17 +258,17 @@ func TestPeerLink_GuestPublishesToHostMonitor(t *testing.T) {
 		network.Enable(),
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
-		chromedp.WaitVisible(`.hm-tile`, chromedp.ByQuery),
-		chromedp.Poll(`!!document.querySelector('.hm-tile') && document.querySelector('.hm-tile').videoWidth > 0`,
+		chromedp.WaitVisible(`.gr-video`, chromedp.ByQuery),
+		chromedp.Poll(`!!document.querySelector('.gr-video') && document.querySelector('.gr-video').videoWidth > 0`,
 			nil, chromedp.WithPollingTimeout(60*time.Second)),
 	); err != nil {
-		t.Fatalf("host monitor did not render the guest over P2P: %v", err)
+		t.Fatalf("greenroom grid did not render the guest over P2P: %v", err)
 	}
 
-	// ICE restart: the Reconnect control re-offers with an ICE restart; media keeps flowing.
+	// ICE restart: the per-tile Reconnect control re-offers with an ICE restart; media keeps flowing.
 	if err := chromedp.Run(hostCtx,
-		chromedp.Click(`.hm-reconnect`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelector('.hm-tile') && document.querySelector('.hm-tile').videoWidth > 0`,
+		chromedp.Click(`.gr-reconnect`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.gr-video') && document.querySelector('.gr-video').videoWidth > 0`,
 			nil, chromedp.WithPollingTimeout(30*time.Second)),
 	); err != nil {
 		t.Fatalf("media did not survive an ICE restart: %v", err)

@@ -1,7 +1,7 @@
 /**
  * PeerLink is the CONSUMING side of one P2P connection: a recvonly RTCPeerConnection to a
  * single remote publisher (a guest), with trickle ICE relayed over the Room's signaling
- * channel. It is used by the host-monitor tile and the OBS source page. The ICE config
+ * channel. It is used by the greenroom grid tiles and the OBS source page. The ICE config
  * (STUN, and a TURN entry with an ephemeral credential when configured) comes from the
  * Room's join-ack (AD-14/EN-4); the publishing side is in publisher.js.
  */

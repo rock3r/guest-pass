@@ -187,7 +187,7 @@ Per-guest encoder budget (one camera → N distinct encodes):
 
 ```
 encoders = program (OBS slot)
-         + host-monitor
+         + host grid tile
          + (N-1) backstage thumbnails   ← the amplifier (everyone-sees-everyone, D-10)
          [+ screenshare, when live sharer]
 ```
@@ -464,7 +464,7 @@ internal/
 web/
   src/rtc/            PeerLink (consume), Publisher (publish), Room (signaling WS + ICE
                       config from the join-ack + {t:ice-refresh}), getStats sampling
-  src/islands/        device-check(+publish), host-monitor, guest-session, greenroom (app entry)
+  src/islands/        device-check(+publish), greenroom grid, guest-session (app entry)
   src/obs/            cam + screen source pages (separate minimal entry — no fonts, EN-13)
   src/styles/         tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored MIT (D-32)   ·   fonts/  OFL woff2 ×3 (EN-17)

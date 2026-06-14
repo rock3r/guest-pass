@@ -1,0 +1,95 @@
+/* Greenroom grid — functional-first styling (D-B). Pixel-fidelity to the v2 prototype is a
+   deferred polish pass (DEF-2); this is clean, on-brand layout using the design tokens. */
+
+.greenroom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.gr-empty {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+.gr-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.gr-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.gr-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gr-name {
+  font-weight: 600;
+  margin-right: auto;
+}
+
+/* Three-state on-air pill (D-24). */
+.gr-pill {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+}
+.gr-pill[data-onair="on-air"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.gr-pill[data-onair="not-on-air"] {
+  background: transparent;
+}
+.gr-pill[data-onair="status-unavailable"] {
+  opacity: 0.6;
+}
+
+/* Signal bars — a simple meter (driven by entry.signal once degradation lands, PR-13). */
+.gr-signal {
+  width: 18px;
+  height: 12px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  opacity: 0.4;
+}
+.gr-signal[data-signal="3"],
+.gr-signal[data-signal="4"],
+.gr-signal[data-signal="5"] {
+  opacity: 1;
+}
+
+/* Force-lock notice (D-13), always shown when a lock is active, separate from the pill. */
+.gr-lock {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8a1f1f;
+}
+
+.gr-hand {
+  font-size: 0.8rem;
+}
+
+.gr-reconnect {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+}

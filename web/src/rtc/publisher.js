@@ -1,6 +1,6 @@
 /**
  * Publisher is the PUBLISHING side: it holds the guest's local camera stream and answers
- * each consumer's offer by adding its tracks, so the host-monitor tile and OBS source pages
+ * each consumer's offer by adding its tracks, so the greenroom grid tiles and OBS source pages
  * can render the guest over P2P. One RTCPeerConnection per consumer (keyed by the
  * consumer's peer id). It answers ICE-restart re-offers transparently — addTrack is
  * idempotent — so a recovered consumer keeps receiving the same camera.

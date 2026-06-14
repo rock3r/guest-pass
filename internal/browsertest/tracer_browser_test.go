@@ -76,7 +76,7 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		t.Fatalf("obs source page did not load: %v", err)
 	}
 
-	// Host greenroom: the host-monitor consumes a guest over P2P (proves the host path), and
+	// Host greenroom: the greenroom grid consumes guests over P2P (proves the host path), and
 	// its socket carries our slot rebinds — a second host /ws would be evicted as a duplicate
 	// identity, so the rebind must ride the greenroom tab's own connection (recorder-injected).
 	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
@@ -91,10 +91,10 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		network.Enable(),
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
-		chromedp.WaitVisible(`.hm-tile`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelector('.hm-tile').videoWidth > 0`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+		chromedp.WaitVisible(`.gr-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.gr-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(60*time.Second)),
 	); err != nil {
-		t.Fatalf("host monitor did not render a guest over P2P: %v", err)
+		t.Fatalf("greenroom grid did not render a guest over P2P: %v", err)
 	}
 
 	rebind := func(occupant string) {
@@ -152,15 +152,15 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		t.Fatalf("OBS source page reloaded across the rebind — AC-8 requires re-route with NO reload")
 	}
 
-	// The host-monitor tile keeps rendering across the rebind (the rebind re-routes only the
-	// OBS source, never the host-monitor).
+	// A greenroom grid tile keeps rendering across the rebind (the rebind re-routes only the
+	// OBS source, never the host grid).
 	var hmLive bool
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(
-		`(() => { const v = document.querySelector('.hm-tile'); return !!v && v.videoWidth > 0; })()`, &hmLive,
+		`(() => { const v = document.querySelector('.gr-video'); return !!v && v.videoWidth > 0; })()`, &hmLive,
 	)); err != nil {
-		t.Fatalf("host monitor check: %v", err)
+		t.Fatalf("host grid check: %v", err)
 	}
 	if !hmLive {
-		t.Fatalf("host monitor tile stopped rendering across the rebind")
+		t.Fatalf("a host grid tile stopped rendering across the rebind")
 	}
 }
