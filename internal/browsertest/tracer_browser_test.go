@@ -104,13 +104,16 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		}
 	}
 
-	// Bind cam-1 → guest A; the OBS source renders A. Capture A's received stream id.
+	// Bind cam-1 → guest A; the OBS source renders A. Capture A's received stream id, and stamp
+	// the OBS document so a later check can prove the page was never reloaded. The stamp is set
+	// with a one-shot Evaluate (NOT re-injected on navigation), so any reload wipes it.
 	rebind(s.passID)
 	var idA string
 	if err := chromedp.Run(obsCtx,
 		chromedp.Poll(`!!document.querySelector('#obs-video') && document.querySelector('#obs-video').videoWidth > 0`,
 			nil, chromedp.WithPollingTimeout(60*time.Second)),
 		chromedp.Evaluate(`document.querySelector('#obs-video').srcObject.id`, &idA),
+		chromedp.Evaluate(`(window.__gpObsLoadMark = "m1")`, nil),
 	); err != nil {
 		t.Fatalf("obs source did not render guest A: %v", err)
 	}
@@ -118,9 +121,9 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		t.Fatalf("guest A stream id empty — cannot prove a re-route")
 	}
 
-	// Reassign cam-1 → guest B LIVE. The OBS source re-routes to B's DISTINCT stream with no
-	// page reload (slot-rebind/epoch). The synthetic frames are identical across guests, so
-	// the received MediaStream id is the witness that the occupant actually changed.
+	// Reassign cam-1 → guest B LIVE. The OBS source re-routes to B's DISTINCT stream (slot-rebind
+	// /epoch). The synthetic frames are identical across guests, so the received MediaStream id is
+	// the witness that the occupant actually changed.
 	rebind(s.passIDB)
 	rerouted := fmt.Sprintf(`(() => {
 		const v = document.querySelector('#obs-video');
@@ -130,6 +133,17 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 		chromedp.Poll(rerouted, nil, chromedp.WithPollingTimeout(60*time.Second)),
 	); err != nil {
 		t.Fatalf("OBS source did not re-route to guest B after a live slot-rebind (no OBS edit): %v", err)
+	}
+
+	// AC-8: the re-route happens with NO page reload / no OBS edit. The document we stamped is
+	// still the live one — a reload (e.g. handling slot-rebind via location.reload()) would have
+	// wiped the one-shot stamp, even though the reloaded page would also reconnect and render B.
+	var sameDoc bool
+	if err := chromedp.Run(obsCtx, chromedp.Evaluate(`window.__gpObsLoadMark === "m1"`, &sameDoc)); err != nil {
+		t.Fatalf("read OBS document stamp: %v", err)
+	}
+	if !sameDoc {
+		t.Fatalf("OBS source page reloaded across the rebind — AC-8 requires re-route with NO reload")
 	}
 
 	// The host-monitor tile keeps rendering across the rebind (the rebind re-routes only the
