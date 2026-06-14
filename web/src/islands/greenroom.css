@@ -93,3 +93,25 @@
   background: var(--paper);
   cursor: pointer;
 }
+
+/* Per-tile moderation controls (D-13/D-15). */
+.gr-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gr-controls button {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.gr-release {
+  background: var(--accent);
+  color: var(--accent-ink);
+}

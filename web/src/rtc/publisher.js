@@ -21,6 +21,25 @@ export class Publisher {
   }
 
   /**
+   * setModalityEnabled enables/disables the local outbound track for a modality, so a
+   * suppression force stops it AT SOURCE (D-13/RF-8): a force-muted/-hidden guest's track stops
+   * sending in the mesh and into any OBS source. mic → audio, cam → video; share has no track in
+   * the camera stream (M3 screenshare is moderation-only). track.enabled is reversible (a release
+   * re-enables it), unlike track.stop().
+   * @param {"mic"|"cam"|"share"} modality
+   * @param {boolean} enabled
+   */
+  setModalityEnabled(modality, enabled) {
+    const tracks =
+      modality === "mic"
+        ? this.stream.getAudioTracks()
+        : modality === "cam"
+          ? this.stream.getVideoTracks()
+          : [];
+    for (const t of tracks) t.enabled = enabled;
+  }
+
+  /**
    * applyIceServers updates every live consumer connection with a refreshed ICE config
    * (e.g. a rotated TURN credential, EN-4), so existing connections keep relay access.
    * @param {RTCIceServer[]} servers
