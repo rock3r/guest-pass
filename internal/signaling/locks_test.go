@@ -208,6 +208,36 @@ func TestStateLegitChangeAlongsideViolationRebroadcasts(t *testing.T) {
 	}
 }
 
+// AC-3 (reconnect invariant): a reconnect (eviction → rejoin with the same id) must NOT clear
+// a suppression lock — otherwise a force-muted target could self-release just by reconnecting.
+// The lock + its suppressed presence carry across the rejoin.
+func TestRejoinPreservesLock(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.applyState("g1", nil, bptr(true), nil, nil)
+	s.force("host", "g1", "mic") // g1 force-muted
+
+	out := s.join("g1", "guest", "") // g1 reconnects (same id)
+	if !s.peers["g1"].locked("mic") {
+		t.Fatalf("a reconnect must not clear the suppression lock (would be a self-release)")
+	}
+	if s.peers["g1"].mic {
+		t.Fatalf("a reconnecting force-muted peer must stay suppressed")
+	}
+	// Its fresh roster still shows the mic lock.
+	if e, ok := rosterEntryFor(out, "g1", "g1"); !ok {
+		t.Fatalf("the reconnecting peer should get a roster")
+	} else if _, ok := lockInEntry(e, "mic"); !ok {
+		t.Fatalf("the reconnect roster must still carry the mic lock, got %+v", e.Locks)
+	}
+	// And it still cannot self-unmute after reconnecting.
+	s.applyState("g1", nil, bptr(true), nil, nil)
+	if s.peers["g1"].mic {
+		t.Fatalf("a reconnected force-muted peer must still not self-unmute")
+	}
+}
+
 // T-3: releasing a non-existent lock is a no-op, and a guest (below any floor) cannot release.
 func TestReleaseNoLockOrUnauthorized(t *testing.T) {
 	s := newRoomState()

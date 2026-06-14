@@ -95,6 +95,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 	p := &peerInfo{id: id, role: role, name: name}
 	if prev != nil {
 		p.cam, p.mic, p.screen, p.handRaised = prev.cam, prev.mic, prev.screen, prev.handRaised
+		// A reconnect must NOT clear suppression locks — otherwise a force-muted target could
+		// self-release simply by reconnecting (defeats D-13/EN-7). Carry them across the rejoin.
+		// (Full-disconnect + restart survival via the pass_locks table is PR-4.)
+		p.locks = prev.locks
 	}
 	s.peers[id] = p
 	var out []outbound
