@@ -2,6 +2,7 @@ package signaling
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -175,5 +176,29 @@ func TestRoomReappliesLocksOnRespawn(t *testing.T) {
 	rejected := recvFrameOfType(t, g1Out, "roster")
 	if e := entryInFrame(rejected, "g1"); e == nil || e.Mic {
 		t.Fatalf("a restart-restored force-muted guest must not self-unmute, got %+v", e)
+	}
+}
+
+// AD-22 (degrade-safe): a LoadLocks failure on spawn is logged and the room still starts and
+// serves — moderation is re-appliable, an un-startable room is not. (No lock is applied, since
+// the load failed.)
+func TestRoomSurvivesLockLoadError(t *testing.T) {
+	fs := newFakeLockStore()
+	fs.loadErr = errors.New("db unavailable")
+	r := newRoom("h", fs, discardLogger())
+	go r.run()
+	defer r.Close()
+
+	g1Out := make(chan Frame, 32)
+	if !r.Join("g1", "guest", "", "", g1Out) {
+		t.Fatal("a room must still admit joins after a lock-load error")
+	}
+	roster := recvFrameOfType(t, g1Out, "roster")
+	e := entryInFrame(roster, "g1")
+	if e == nil {
+		t.Fatalf("the room must serve a roster after a lock-load error, got %+v", roster)
+	}
+	if len(e.Locks) != 0 {
+		t.Fatalf("a failed load must apply no locks, got %+v", e.Locks)
 	}
 }
