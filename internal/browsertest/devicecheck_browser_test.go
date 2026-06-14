@@ -101,7 +101,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	}
 	handler, err := web.NewRouter(web.RouterConfig{
 		SourceURL: "https://github.com/rock3r/guest-pass/tree/test",
-		Hub:       signaling.NewHub(),
+		Hub:       signaling.NewHub(nil, nil),
 		Auth:      auth.NewAuthenticator(ring, st, false),
 		Store:     st,
 		Hasher:    hasher,

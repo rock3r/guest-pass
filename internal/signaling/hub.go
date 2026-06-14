@@ -1,6 +1,9 @@
 package signaling
 
-import "sync"
+import (
+	"log/slog"
+	"sync"
+)
 
 // Hub is the supervisor above the room actors (AD-2a): it owns the room registry,
 // spawns/reaps room goroutines, and routes connections. It never reaches into a
@@ -11,9 +14,17 @@ type Hub struct {
 	mu     sync.Mutex
 	rooms  map[string]*Room
 	closed bool // set by Shutdown; once true, Room never creates a new room
+	// locks backs suppression-lock persistence (AD-22); nil disables it (pure tests). log is
+	// the room logger. Both are handed to every room the hub spawns.
+	locks LockPersistence
+	log   *slog.Logger
 }
 
-func NewHub() *Hub { return &Hub{rooms: map[string]*Room{}} }
+// NewHub builds the room supervisor. lockStore persists suppression locks (AD-22); pass nil to
+// disable persistence (the pure transport/reducer tests). log may be nil (rooms default to slog).
+func NewHub(lockStore LockPersistence, log *slog.Logger) *Hub {
+	return &Hub{rooms: map[string]*Room{}, locks: lockStore, log: log}
+}
 
 // Room returns the room for a session, creating and starting it on first use. It returns
 // nil once the hub has been shut down, so a /ws handler that hijacked its connection
@@ -27,7 +38,7 @@ func (h *Hub) Room(session string) *Room {
 	}
 	r := h.rooms[session]
 	if r == nil {
-		r = newRoom(session)
+		r = newRoom(session, h.locks, h.log)
 		go r.run()
 		h.rooms[session] = r
 	}

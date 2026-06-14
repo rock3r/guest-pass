@@ -51,7 +51,7 @@ func TestBuildHandler_Wiring(t *testing.T) {
 		TURNURL:            "turns:turn.example.org:5349",
 		MailMode:           config.MailModeLog,
 	}
-	h, err := buildHandler(cfg, st, signaling.NewHub(), web.NewRateLimiter(1000, 1000), web.NewRateLimiter(1000, 1000), nil)
+	h, err := buildHandler(cfg, st, signaling.NewHub(nil, nil), web.NewRateLimiter(1000, 1000), web.NewRateLimiter(1000, 1000), nil)
 	if err != nil {
 		t.Fatalf("buildHandler: %v", err)
 	}

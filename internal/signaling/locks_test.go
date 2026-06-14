@@ -49,11 +49,11 @@ func TestHigherRankForceRaisesFloor(t *testing.T) {
 	s.join("g1", "guest", "")
 
 	s.force("co", "g1", "mic") // cohost-floor lock owned by co
-	if lk := s.peers["g1"].locks["mic"]; lk == nil || lk.floor != rankCohost || lk.applier != "co" {
+	if lk := s.lockOn("g1", "mic"); lk == nil || lk.floor != rankCohost || lk.applier != "co" {
 		t.Fatalf("cohost force should set a cohost-floor lock owned by co, got %+v", lk)
 	}
 	s.force("host", "g1", "mic") // host raises
-	if lk := s.peers["g1"].locks["mic"]; lk == nil || lk.floor != rankHost || lk.applier != "host" {
+	if lk := s.lockOn("g1", "mic"); lk == nil || lk.floor != rankHost || lk.applier != "host" {
 		t.Fatalf("a higher-rank force must raise the floor + owner, got %+v", lk)
 	}
 }
@@ -68,7 +68,7 @@ func TestLowerOrEqualForceIsNoOp(t *testing.T) {
 	if out := s.force("co", "g1", "mic"); out != nil {
 		t.Fatalf("a lower-rank force on a locked modality must be a no-op, got %+v", out)
 	}
-	if lk := s.peers["g1"].locks["mic"]; lk.floor != rankHost || lk.applier != "host" {
+	if lk := s.lockOn("g1", "mic"); lk.floor != rankHost || lk.applier != "host" {
 		t.Fatalf("the host lock must be unchanged after a lower-rank force, got %+v", lk)
 	}
 
@@ -80,7 +80,7 @@ func TestLowerOrEqualForceIsNoOp(t *testing.T) {
 	if out := s2.force("co2", "g1", "mic"); out != nil {
 		t.Fatalf("an equal-rank force on a locked modality must be a no-op, got %+v", out)
 	}
-	if lk := s2.peers["g1"].locks["mic"]; lk.applier != "co" {
+	if lk := s2.lockOn("g1", "mic"); lk.applier != "co" {
 		t.Fatalf("an equal-rank force must not steal ownership, got %+v", lk)
 	}
 }
@@ -96,16 +96,16 @@ func TestForceRequiresStrictlyAbove(t *testing.T) {
 	s.join("g1", "guest", "")
 	s.join("g2", "guest", "")
 
-	if out := s.force("co", "host", "mic"); out != nil || s.peers["host"].locked("mic") {
+	if out := s.force("co", "host", "mic"); out != nil || s.locked("host", "mic") {
 		t.Fatalf("a co-host must not force the host (immune)")
 	}
-	if out := s.force("co", "co2", "mic"); out != nil || s.peers["co2"].locked("mic") {
+	if out := s.force("co", "co2", "mic"); out != nil || s.locked("co2", "mic") {
 		t.Fatalf("a co-host must not force an equal-rank co-host")
 	}
-	if out := s.force("g1", "g2", "mic"); out != nil || s.peers["g2"].locked("mic") {
+	if out := s.force("g1", "g2", "mic"); out != nil || s.locked("g2", "mic") {
 		t.Fatalf("a guest must not be able to force")
 	}
-	if out := s.force("host", "co", "cam"); out == nil || !s.peers["co"].locked("cam") {
+	if out := s.force("host", "co", "cam"); out == nil || !s.locked("co", "cam") {
 		t.Fatalf("the host must be able to force a co-host")
 	}
 }
@@ -120,7 +120,7 @@ func TestTargetCannotSelfReleaseOrSelfEnable(t *testing.T) {
 	s.applyState("g1", nil, bptr(true), nil, nil)
 	s.force("host", "g1", "mic")
 
-	if out := s.release("g1", "g1", "mic"); out != nil || !s.peers["g1"].locked("mic") {
+	if out := s.release("g1", "g1", "mic"); out != nil || !s.locked("g1", "mic") {
 		t.Fatalf("the target must not be able to self-release, got %+v", out)
 	}
 
@@ -147,25 +147,25 @@ func TestReleaseAuthorityAndDemotionSafe(t *testing.T) {
 	s.join("g1", "guest", "")
 
 	s.force("co", "g1", "mic")
-	if out := s.release("co", "g1", "mic"); out == nil || s.peers["g1"].locked("mic") {
+	if out := s.release("co", "g1", "mic"); out == nil || s.locked("g1", "mic") {
 		t.Fatalf("the applier (co) should be able to release its own lock")
 	}
 
 	s.force("co", "g1", "cam") // cohost-floor lock
-	if out := s.release("host", "g1", "cam"); out == nil || s.peers["g1"].locked("cam") {
+	if out := s.release("host", "g1", "cam"); out == nil || s.locked("g1", "cam") {
 		t.Fatalf("the host must always be able to release")
 	}
 
 	// Demotion-safe: the floor persists, the now-guest ex-applier can't release, the host can.
 	s.force("co", "g1", "share")
 	s.peers["co"].role = "guest" // simulate a demotion (PR-5 path); floor must be unchanged
-	if lk := s.peers["g1"].locks["share"]; lk == nil || lk.floor != rankCohost {
+	if lk := s.lockOn("g1", "share"); lk == nil || lk.floor != rankCohost {
 		t.Fatalf("the lock floor must persist across a demotion (not auto-released), got %+v", lk)
 	}
-	if out := s.release("co", "g1", "share"); out != nil || !s.peers["g1"].locked("share") {
+	if out := s.release("co", "g1", "share"); out != nil || !s.locked("g1", "share") {
 		t.Fatalf("a demoted applier (now below the floor) must NOT release, got %+v", out)
 	}
-	if out := s.release("host", "g1", "share"); out == nil || s.peers["g1"].locked("share") {
+	if out := s.release("host", "g1", "share"); out == nil || s.locked("g1", "share") {
 		t.Fatalf("the host must still release a demoted applier's lock, got %+v", out)
 	}
 }
@@ -179,7 +179,7 @@ func TestEqualRankPeerCanRelease(t *testing.T) {
 	s.join("g1", "guest", "")
 	s.force("co", "g1", "mic") // cohost-floor lock owned by co
 
-	if out := s.release("co2", "g1", "mic"); out == nil || s.peers["g1"].locked("mic") {
+	if out := s.release("co2", "g1", "mic"); out == nil || s.locked("g1", "mic") {
 		t.Fatalf("an equal-rank co-host peer should be able to release a cohost-floor lock, got %+v", out)
 	}
 }
@@ -219,7 +219,7 @@ func TestRejoinPreservesLock(t *testing.T) {
 	s.force("host", "g1", "mic") // g1 force-muted
 
 	out := s.join("g1", "guest", "") // g1 reconnects (same id)
-	if !s.peers["g1"].locked("mic") {
+	if !s.locked("g1", "mic") {
 		t.Fatalf("a reconnect must not clear the suppression lock (would be a self-release)")
 	}
 	if s.peers["g1"].mic {
@@ -249,7 +249,7 @@ func TestReleaseNoLockOrUnauthorized(t *testing.T) {
 		t.Fatalf("releasing a non-existent lock must be a no-op, got %+v", out)
 	}
 	s.force("host", "g1", "mic")
-	if out := s.release("g2", "g1", "mic"); out != nil || !s.peers["g1"].locked("mic") {
+	if out := s.release("g2", "g1", "mic"); out != nil || !s.locked("g1", "mic") {
 		t.Fatalf("a guest must not release a host-floor lock, got %+v", out)
 	}
 }
@@ -271,7 +271,7 @@ func TestForcesArePerModality(t *testing.T) {
 	if !p.mic {
 		t.Fatalf("an un-forced modality (mic) must stay as the guest set it")
 	}
-	if !p.locked("cam") || !p.locked("share") || p.locked("mic") {
-		t.Fatalf("only cam + share must be locked, got locks=%v", p.locks)
+	if !s.locked("g1", "cam") || !s.locked("g1", "share") || s.locked("g1", "mic") {
+		t.Fatalf("only cam + share must be locked, got locks=%v", s.locks["g1"])
 	}
 }

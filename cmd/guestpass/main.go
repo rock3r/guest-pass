@@ -60,7 +60,9 @@ func serve(addr string) error {
 		return fmt.Errorf("opening store: %w", err)
 	}
 
-	hub := signaling.NewHub()
+	// The hub persists suppression locks through the store (AD-22), so a force-muted guest stays
+	// muted across a restart; rooms default a nil logger to slog.Default().
+	hub := signaling.NewHub(web.NewLockPersistence(st), nil)
 	limiter := web.NewRateLimiter(5, 20)    // ~5 req/s/IP sustained, burst 20, on /auth routes
 	wsLimiter := web.NewRateLimiter(10, 40) // /ws reconnect throttle: lenient so OBS sources + tabs reattach
 	var wsInflight sync.WaitGroup           // live /ws handlers, so the drain can wait for terminate flush

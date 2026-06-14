@@ -1,6 +1,8 @@
 package signaling
 
 import (
+	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -21,24 +23,38 @@ type peerConn struct {
 type roomCmd func(*roomState, map[PeerID]*peerConn)
 
 // Room is a single live session's actor: one goroutine owns roomState and the conn
-// table; every mutation arrives as a roomCmd. No locks on room state.
+// table; every mutation arrives as a roomCmd. No locks on room state. A nil lockStore
+// disables suppression-lock persistence (AD-22) — used by the pure transport tests.
 type Room struct {
-	id   string
-	cmds chan roomCmd
-	done chan struct{}
+	id    string
+	cmds  chan roomCmd
+	done  chan struct{}
+	locks LockPersistence
+	log   *slog.Logger
 }
 
-func newRoom(id string) *Room {
-	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{})}
+func newRoom(id string, locks LockPersistence, log *slog.Logger) *Room {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log}
 }
 
 // levelsTick is the audio-meter coalescing cadence (AD-13): every participant's last-reported
 // level batches into one {t:levels} frame at ~6–7 Hz instead of riding the roster (no N² spam).
 const levelsTick = 150 * time.Millisecond
 
+// lockIOTimeout bounds a single suppression-lock read/write so a wedged disk can't stall the
+// room goroutine indefinitely (AD-22 persistence is control-plane, not the per-frame hot path).
+const lockIOTimeout = 5 * time.Second
+
 func (r *Room) run() {
 	state := newRoomState()
 	conns := map[PeerID]*peerConn{}
+	// Seed persisted suppression locks BEFORE the cmd loop, so they are in place before any peer
+	// can Join — a force-muted guest reconnecting after a restart is locked from its first frame
+	// (AD-22). This runs on the room goroutine; nobody is connected yet, so it blocks no one.
+	r.loadLocks(state)
 	// The audio-meter tick runs on THIS goroutine (race-free access to state + conns); it stays
 	// quiet in an idle room (buildLevels returns nil), so an always-running ticker is cheap.
 	ticker := time.NewTicker(levelsTick)
@@ -52,6 +68,48 @@ func (r *Room) run() {
 		case <-r.done:
 			return
 		}
+	}
+}
+
+// loadLocks re-applies this session's persisted suppression locks on spawn (AD-22). A load
+// failure is logged and the room continues unmuted rather than refusing to start — moderation
+// is re-appliable, an un-startable room is not.
+func (r *Room) loadLocks(state *roomState) {
+	if r.locks == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockIOTimeout)
+	defer cancel()
+	locks, err := r.locks.LoadLocks(ctx, r.id)
+	if err != nil {
+		r.log.Error("loading suppression locks on room spawn", "session", r.id, "err", err)
+		return
+	}
+	state.seedLocks(toSeeded(locks))
+}
+
+// persistLock writes one suppression-lock change through (AD-22), synchronously on the room
+// goroutine. Moderation is a rare control-plane action and a local SQLite write is sub-ms, so
+// this never blocks the per-frame hot path meaningfully; a write error is logged, not fatal
+// (the in-memory lock stays authoritative for the live session — only restart survival degrades).
+func (r *Room) persistLock(save bool, target PeerID, modality string, lk *lockState) {
+	if r.locks == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockIOTimeout)
+	defer cancel()
+	var err error
+	if save {
+		applier := string(lk.applier)
+		if lk.applier == "host" {
+			applier = "" // the host has no pass → NULL applier_pass_id
+		}
+		err = r.locks.SaveLock(ctx, PersistedLock{Target: string(target), Modality: modality, ApplierRankFloor: rankName(lk.floor), Applier: applier})
+	} else {
+		err = r.locks.DeleteLock(ctx, string(target), modality)
+	}
+	if err != nil {
+		r.log.Error("persisting suppression lock", "save", save, "target", target, "modality", modality, "err", err)
 	}
 }
 
@@ -170,7 +228,13 @@ func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool, level *float64) {
 // guest's or peer's attempt is a no-op. Modality is mic | cam | share.
 func (r *Room) Force(actor, target PeerID, modality string) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		before := st.lockOn(target, modality)
 		deliver(conns, st.force(actor, target, modality))
+		// Persist only a genuine change (a newly applied or raised lock is a NEW *lockState, so
+		// the pointer differs); a no-op or rejected force writes nothing (AD-22).
+		if after := st.lockOn(target, modality); after != nil && after != before {
+			r.persistLock(true, target, modality, after)
+		}
 	})
 }
 
@@ -178,7 +242,13 @@ func (r *Room) Force(actor, target PeerID, modality string) {
 // self-release; authority is the actor's current rank ≥ the lock floor (the host always can).
 func (r *Room) Release(actor, target PeerID, modality string) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		had := st.locked(target, modality)
 		deliver(conns, st.release(actor, target, modality))
+		// Delete the row only when a lock was actually released (an unauthorized release leaves
+		// it in place; a release of an absent lock writes nothing) (AD-22).
+		if had && !st.locked(target, modality) {
+			r.persistLock(false, target, modality, nil)
+		}
 	})
 }
 
