@@ -533,8 +533,8 @@ func TestAPI_PassLandingRevokedIsGone(t *testing.T) {
 	}
 }
 
-// The greenroom monitor page is host-authenticated (EN-6): an unauthenticated request is
-// rejected, and a signed-in host gets the page with the host-monitor island root.
+// The greenroom page is host-authenticated (EN-6): an unauthenticated request is rejected, and
+// a signed-in host gets the page with the greenroom grid island root.
 func TestGreenroom_RequiresHostAuth(t *testing.T) {
 	a := newAPIHarness(t)
 	if rec := a.req(t, http.MethodGet, "/greenroom", "", nil); rec.Code != http.StatusUnauthorized {
@@ -545,8 +545,8 @@ func TestGreenroom_RequiresHostAuth(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /greenroom as host = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `id="host-monitor"`) {
-		t.Error("greenroom page is missing the host-monitor island root")
+	if !strings.Contains(rec.Body.String(), `id="greenroom"`) {
+		t.Error("greenroom page is missing the greenroom grid island root")
 	}
 }
 
