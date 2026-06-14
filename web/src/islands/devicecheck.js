@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
-import { Room } from "../rtc/room.js";
 import { Publisher } from "../rtc/publisher.js";
+import { ReconnectingSession, TERMINAL_REASONS } from "../rtc/session.js";
 import { GuestSession } from "./guest-session.js";
 
 /**
@@ -29,8 +29,12 @@ function DeviceCheck() {
   /** @type {["idle"|"requesting"|"preview"|"entering"|"entered"|"error", Function]} */
   const [phase, setPhase] = useState("idle");
   // pubState reflects the greenroom publishing connection once entered: connecting | live |
-  // disconnected — so the guest is never told they're live before the signaling WS is up.
+  // reconnecting — so the guest is never told they're live before the signaling WS is up, and a
+  // dropped socket surfaces the reconnecting overlay while the session auto-retries (AC-13).
   const [pubState, setPubState] = useState("connecting");
+  // terminated holds a TERMINAL {t:terminate} reason (kicked/expired/revoked/…) once the server
+  // ends this session for good (EN-9); it routes to the matching error screen and stops retrying.
+  const [terminated, setTerminated] = useState("");
   // onAir is the three-state on-air SELF pill (D-24), reflected from OBS via the server:
   // status-unavailable (no OBS signal — the default) | on-air | not-on-air. streaming is the
   // global "we're live" broadcast reflection. Both are read-only reflections, never asserted.
@@ -60,8 +64,8 @@ function DeviceCheck() {
   // requesting guards against re-entrant startCheck calls (e.g. a rapid double-click) so at
   // most one getUserMedia is ever in flight — two concurrent ones would leak a stream.
   const requestingRef = useRef(false);
-  /** @type {{current: import("../rtc/room.js").Room|null}} */
-  const roomRef = useRef(null);
+  /** @type {{current: import("../rtc/session.js").ReconnectingSession|null}} */
+  const sessionRef = useRef(null);
   /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
   const pubRef = useRef(null);
 
@@ -104,74 +108,82 @@ function DeviceCheck() {
     }
   }, [phase]);
 
-  // Tear down on unmount: stop publishing, close the signaling WS, release the camera, and
-  // mark cancelled so a still-pending getUserMedia releases its stream when it resolves.
+  // Tear down on unmount: stop the reconnecting session (which closes the publisher + WS and
+  // halts retries), release the camera, and mark cancelled so a still-pending getUserMedia
+  // releases its stream when it resolves.
   useEffect(
     () => () => {
       cancelledRef.current = true;
-      if (pubRef.current) pubRef.current.close();
-      if (roomRef.current) roomRef.current.close();
+      if (sessionRef.current) sessionRef.current.close();
       stopStream();
     },
     [],
   );
 
-  // startPublishing keeps the already-running preview stream and publishes it to the
-  // greenroom over the guest's pass WS, so consumers (host monitor, OBS source) can render
-  // the guest over P2P. The server only relays the opaque SDP/ICE (D-23).
+  // startPublishing keeps the already-running preview stream and publishes it to the greenroom over
+  // the guest's pass WS, so consumers (host monitor, OBS source) render the guest over P2P. The
+  // server only relays the opaque SDP/ICE (D-23). It runs inside a ReconnectingSession (AC-13): a
+  // dropped socket auto-retries (pubState → "reconnecting"), and a TERMINAL {t:terminate} routes to
+  // the matching error screen. setup() re-wires a fresh Publisher + handlers on each (re)connection.
   function startPublishing() {
-    const room = new Room(`pass=${encodeURIComponent(passTokenFromPath())}`);
-    roomRef.current = room;
-    const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
-    pubRef.current = publisher;
-    room.on("signal", (f) => publisher.onSignal(f));
-    // On-air self pill + global "we're live" reflection (D-24): the per-guest on-air is now
-    // folded into the roster (PR-1 retired the interim {t:onair} frame) — read it from this
-    // client's OWN entry, located via the roster's `self` marker. The broadcast-level streaming
-    // state stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
-    room.on("roster", (f) => {
-      setPeers(f.peers || []); // drives chat sender names + (later) backstage thumbnails
-      if (f.self) setSelfId(f.self);
-      const me = (f.peers || []).find((p) => p.self || p.id === f.self);
-      if (!me) return;
-      setOnAir(me.onAir || "status-unavailable");
-      setHandRaised(!!me.handRaised); // server-authoritative raise-hand state (incl. host dismiss)
-      // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
-      // released one). The server also rejects any self-state that re-enables a locked modality,
-      // so this is cooperative source-side enforcement, not the authority (EN-7).
-      const locked = (me.locks || []).map((l) => l.kind);
-      for (const m of ["mic", "cam", "share"]) {
-        publisher.setModalityEnabled(m, !locked.includes(m));
-      }
-      setLockedMods(locked);
-    });
-    // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The server
-    // broadcasts to every participant INCLUDING the sender, so the guest's own messages arrive
-    // here too — the panel renders only what the server relays, never an optimistic echo, and the
-    // chat is never persisted or logged (the purity is the server's tested invariant, PR-6).
-    room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
-    // Keep the peer-name cache fresh between full roster broadcasts: a peer joining AFTER this
-    // guest arrives is announced as a {t:peer-joined} delta (existing peers don't get a fresh
-    // roster), so without this a later-joiner's chat would render as a raw peer id until some
-    // unrelated roster rebroadcast. Mirrors the greenroom's peer-joined/peer-left handling.
-    room.on("peer-joined", (f) => {
-      if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
-    });
-    room.on("peer-left", (f) => setPeers((prev) => prev.filter((p) => p.id !== f.peerId)));
-    room.on("streaming", (f) => setStreaming(!!f.active));
-    // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
-    room.onIce((servers) => publisher.applyIceServers(servers));
-    // Only claim "live" once the signaling WS is actually up; on any disconnect — an abrupt
-    // socket close or a server {t:terminate} that closes it — stop publishing (drop the dead
-    // peer connections) and surface a reconnect state.
-    room.ready.then(() => setPubState("live")).catch(() => setPubState("disconnected"));
-    room.onClose(() => {
-      publisher.close();
-      setPubState("disconnected");
-      // The signaling link is gone, so this client no longer has a live OBS reflection: degrade
-      // the on-air pill and the global indicator rather than keep asserting their last values (D-24).
-      setOnAir("status-unavailable");
-      setStreaming(false);
+    sessionRef.current = new ReconnectingSession({
+      query: `pass=${encodeURIComponent(passTokenFromPath())}`,
+      setup: (room) => {
+        const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
+        pubRef.current = publisher;
+        room.on("signal", (f) => publisher.onSignal(f));
+        // On-air self pill + global "we're live" reflection (D-24): the per-guest on-air is folded
+        // into the roster (PR-1 retired the interim {t:onair} frame) — read it from this client's
+        // OWN entry, located via the roster's `self` marker. The broadcast-level streaming state
+        // stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
+        room.on("roster", (f) => {
+          setPeers(f.peers || []); // drives chat sender names + (later) backstage thumbnails
+          if (f.self) setSelfId(f.self);
+          const me = (f.peers || []).find((p) => p.self || p.id === f.self);
+          if (!me) return;
+          setOnAir(me.onAir || "status-unavailable");
+          setHandRaised(!!me.handRaised); // server-authoritative raise-hand state (incl. host dismiss)
+          // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
+          // released one). The server also rejects any self-state that re-enables a locked modality,
+          // so this is cooperative source-side enforcement, not the authority (EN-7).
+          const locked = (me.locks || []).map((l) => l.kind);
+          for (const m of ["mic", "cam", "share"]) {
+            publisher.setModalityEnabled(m, !locked.includes(m));
+          }
+          setLockedMods(locked);
+        });
+        // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The
+        // server broadcasts to every participant INCLUDING the sender, so the guest's own messages
+        // arrive here too — the panel renders only what the server relays, never an optimistic echo,
+        // and the chat is never persisted or logged (the purity is the server's tested invariant).
+        room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
+        // Keep the peer-name cache fresh between full roster broadcasts: a peer joining AFTER this
+        // guest arrives is announced as a {t:peer-joined} delta (existing peers don't get a fresh
+        // roster), so without this a later-joiner's chat would render as a raw peer id until some
+        // unrelated roster rebroadcast. Mirrors the greenroom's peer-joined/peer-left handling.
+        room.on("peer-joined", (f) => {
+          if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
+        });
+        room.on("peer-left", (f) => setPeers((prev) => prev.filter((p) => p.id !== f.peerId)));
+        room.on("streaming", (f) => setStreaming(!!f.active));
+        // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
+        room.onIce((servers) => publisher.applyIceServers(servers));
+      },
+      teardown: () => {
+        // The link dropped (or we're closing): stop publishing (drop the dead peer connections)
+        // and degrade the reflected on-air + "we're live" state rather than keep asserting their
+        // last values (D-24). A successful reconnect re-arms them from the fresh roster + replay.
+        if (pubRef.current) pubRef.current.close();
+        setOnAir("status-unavailable");
+        setStreaming(false);
+      },
+      onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
+      onTerminal: (reason) => {
+        // The session is over for good — release the camera/mic so the device light goes off behind
+        // the error screen (the session won't reconnect, so nothing re-publishes this stream).
+        stopStream();
+        setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
+      },
     });
   }
 
@@ -204,10 +216,25 @@ function DeviceCheck() {
   // socket is still CONNECTING, so a click before room.ready resolves must be a no-op (the
   // GuestSession also disables the controls until live; this is the defense-in-depth backstop).
   function sendChat(text) {
-    if (roomRef.current && pubState === "live") roomRef.current.send({ t: "chat", text });
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "chat", text });
   }
   function toggleHand() {
-    if (roomRef.current && pubState === "live") roomRef.current.send({ t: "hand", raised: !handRaised });
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "hand", raised: !handRaised });
+  }
+
+  // A TERMINAL terminate (EN-9) ends the session for good — route to the matching error screen and
+  // never reconnect. Checked before the phase screens so it wins over the in-session view.
+  if (terminated) {
+    const copy = TERMINAL_REASONS[terminated] || {
+      title: "Your session ended",
+      body: "This session is no longer active. Ask the host for a new link.",
+    };
+    return (
+      <div class="gs-terminal" data-terminal={terminated}>
+        <h2 class="gs-terminal-title">{copy.title}</h2>
+        <p class="gs-terminal-body">{copy.body}</p>
+      </div>
+    );
   }
 
   if (phase === "entered") {

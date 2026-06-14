@@ -152,12 +152,22 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 	if err := chromedp.Run(guestCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
 		t.Fatalf("force-close guest socket: %v", err)
 	}
-	if err := chromedp.Run(guestCtx,
-		chromedp.WaitVisible(`[data-entered="1"][data-pub="disconnected"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`.dc-onair[data-onair="status-unavailable"]`, chromedp.ByQuery),
-		chromedp.WaitNotPresent(`.dc-live`, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("a dropped guest socket must reset the reflected on-air + live state (D-24): %v", err)
+	// A dropped socket now surfaces the reconnecting state and auto-retries (PR-12/AC-13). While the
+	// link is down, the reflected on-air + "we're live" state must reset rather than assert stale
+	// values (D-24); both re-arm from the fresh roster + streaming replay once it reconnects. Assert
+	// the three reset conditions hold TOGETHER during the reconnecting gap (one poll, so the post-
+	// reconnect re-arm can't make it racy).
+	if err := chromedp.Run(guestCtx, chromedp.Poll(
+		`(() => {
+			const root = document.querySelector('[data-entered="1"]');
+			if (!root || root.dataset.pub !== 'reconnecting') return false;
+			const pill = document.querySelector('.dc-onair');
+			if (!pill || pill.dataset.onair !== 'status-unavailable') return false;
+			return !document.querySelector('.dc-live');
+		})()`,
+		nil, chromedp.WithPollingTimeout(15*time.Second),
+	)); err != nil {
+		t.Fatalf("a dropped guest socket must reset the reflected on-air + live state while reconnecting (D-24): %v", err)
 	}
 }
 
