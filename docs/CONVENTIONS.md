@@ -244,7 +244,7 @@ a known root element.
 |---|---|---|
 | Marketing / comparison / parody, sign-in, guest pass page, dashboard / calendar / invites / sources tabs, error & state screens | Go `html/template` | none |
 | Admin console | `html/template` | minimal (poll/refresh only) |
-| Device check, guest session, greenroom | server page + **Preact island** | island |
+| Device check (+ guest session — its in-session phase, same page/connection/camera), greenroom | server page + **Preact island** | island |
 | OBS source page (cam + screen) | minimal standalone HTML | **separate** minimal entry (EN-13) |
 
 Server-side authz (EN-6/EN-8) is the guard; the frontend never touches the DB or
