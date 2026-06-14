@@ -94,12 +94,9 @@ func (s *roomState) leave(id PeerID) []outbound {
 			st.source = ""
 			// The OBS reflection for this slot is gone — its on-air state is now UNKNOWN, not
 			// whatever it last was (D-24: never assert on-air with no live signal behind it).
-			// Tell the occupant to degrade to status-unavailable. Streaming is room-global and
-			// not tied to any one source, so it is NOT reset here.
-			if st.onAir != OnAirUnknown {
-				st.onAir = OnAirUnknown
-				out = append(out, onairUnavailable(sid, st.occupant)...)
-			}
+			// Degrade the occupant's pill. Streaming is room-global and not tied to any one
+			// source, so it is NOT reset here.
+			out = append(out, s.degradeOnAir(sid, st, st.occupant)...)
 		}
 		if st.occupant == id {
 			out = append(out, s.unbindSlot(sid)...)
@@ -127,21 +124,31 @@ func (s *roomState) leave(id PeerID) []outbound {
 func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	st := s.slot(sid)
 	st.source = source
-	var out []outbound
-	if st.onAir != OnAirUnknown {
-		st.onAir = OnAirUnknown
-		out = append(out, onairUnavailable(sid, st.occupant)...)
-	}
+	out := s.degradeOnAir(sid, st, st.occupant)
 	return append(out, outbound{to: source, frame: s.bindingFrame(sid, st)})
 }
 
-// onairUnavailable degrades a peer's on-air self pill to status-unavailable (D-24: with no
-// live OBS signal the state is UNKNOWN, never a stale assertion). Empty peer → no frame.
-func onairUnavailable(sid SlotID, peer PeerID) []outbound {
-	if peer == "" {
+// degradeOnAir resets a slot's on-air to UNKNOWN and returns the frames degrading the given
+// peers' self pills to status-unavailable — but ONLY if the slot was asserting a real state
+// (on-air/not-on-air). A slot already UNKNOWN needs no notification, so a fresh bind stays
+// quiet: this degrades a STALE assertion, it does not spam status-unavailable (D-24). Empty
+// and duplicate peers are skipped, so the incoming and a displaced occupant can both be
+// passed even when they are the same id.
+func (s *roomState) degradeOnAir(sid SlotID, st *slotState, peers ...PeerID) []outbound {
+	if st.onAir == OnAirUnknown {
 		return nil
 	}
-	return []outbound{{to: peer, frame: Frame{T: "onair", Slot: string(sid), OnAir: OnAirUnknown}}}
+	st.onAir = OnAirUnknown
+	seen := map[PeerID]bool{}
+	var out []outbound
+	for _, p := range peers {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, outbound{to: p, frame: Frame{T: "onair", Slot: string(sid), OnAir: OnAirUnknown}})
+	}
+	return out
 }
 
 // epochPtr returns a pointer to a copy of e, so a slot frame carries its epoch (incl. 0,
@@ -163,16 +170,14 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 		return nil // ignore a rebind to an unknown/departed peer (don't advance epoch)
 	}
 	st := s.slot(sid)
-	prev := st.occupant
+	// If the slot was asserting a real on-air it is now stale (epoch bumps, the source
+	// renegotiates): degrade BOTH the incoming occupant AND any displaced one — including the
+	// case where they are the SAME id (a host re-applying the slot to bump the epoch) — so
+	// neither keeps showing the prior pill (EN-3/D-24). A fresh bind stays quiet.
+	out := s.degradeOnAir(sid, st, st.occupant, occupant)
 	st.epoch++
 	st.occupant = occupant
 	st.onAir = OnAirUnknown
-	var out []outbound
-	// The displaced occupant is no longer sourced here — degrade its pill (D-24), else it
-	// keeps asserting the prior on-air after the slot moved to someone else.
-	if prev != "" && prev != occupant {
-		out = append(out, onairUnavailable(sid, prev)...)
-	}
 	if st.source != "" {
 		out = append(out, outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}})
 	}
@@ -183,13 +188,13 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 // broadcast (EN-3) and tell the source to fall back to a placeholder.
 func (s *roomState) unbindSlot(sid SlotID) []outbound {
 	st := s.slot(sid)
-	prev := st.occupant
+	// The unbound occupant is no longer sourced — degrade its pill if the slot was asserting a
+	// real on-air (D-24). Harmless if it is also leaving the room (the frame to a since-removed
+	// conn is dropped).
+	out := s.degradeOnAir(sid, st, st.occupant)
 	st.epoch++
 	st.occupant = ""
 	st.onAir = OnAirUnknown
-	// The unbound occupant is no longer sourced — degrade its pill (D-24). Harmless if it is
-	// also leaving the room (the frame to a since-removed conn is dropped).
-	out := onairUnavailable(sid, prev)
 	if st.source != "" {
 		out = append(out, outbound{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}})
 	}

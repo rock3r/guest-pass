@@ -169,21 +169,32 @@ func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	if st.epoch != 2 || st.occupant != "" || st.onAir != OnAirUnknown {
 		t.Fatalf("unbind state = %+v", st)
 	}
-	// The source is told to placeholder, and the displaced occupant's pill degrades (D-24).
-	var sawUnbound, sawOccupantReset bool
+	// The slot was never on-air (no transition), so the occupant's pill was already
+	// status-unavailable — unbind just tells the source to placeholder, no on-air degrade.
+	if len(out) != 1 || out[0].frame.T != "slot-unbound" || epochVal(out[0].frame) != 2 {
+		t.Fatalf("unbind outbound = %+v, want one slot-unbound(epoch 2)", out)
+	}
+}
+
+// D-24: unbinding a slot that WAS on-air degrades the occupant's pill to status-unavailable
+// (it is no longer sourced), alongside the slot-unbound to the source.
+func TestUnbindDegradesOnAirOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // g1 on-air
+
+	out := s.unbindSlot("cam-1")
+	var degraded bool
 	for _, o := range out {
-		if o.to == "src" && o.frame.T == "slot-unbound" && epochVal(o.frame) == 2 {
-			sawUnbound = true
-		}
 		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			sawOccupantReset = true
+			degraded = true
 		}
 	}
-	if !sawUnbound {
-		t.Fatalf("unbind must tell the source to placeholder (slot-unbound, epoch 2), got %+v", out)
-	}
-	if !sawOccupantReset {
-		t.Fatalf("unbind must degrade the displaced occupant's pill to status-unavailable (D-24), got %+v", out)
+	if !degraded {
+		t.Fatalf("unbinding an on-air slot must degrade the occupant's pill (D-24), got %+v", out)
 	}
 }
 
@@ -206,12 +217,38 @@ func TestRebindDegradesDisplacedOccupant(t *testing.T) {
 		if o.to == "a" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
 			aReset = true
 		}
-		if o.to == "b" {
-			t.Fatalf("the new occupant must not be told on-air on a bare rebind, got %+v", o.frame)
+		// The incoming occupant b may be degraded to status-unavailable (the slot is now
+		// UNKNOWN), but must NEVER inherit the prior occupant's on-air (EN-3).
+		if o.to == "b" && o.frame.T == "onair" && o.frame.OnAir != OnAirUnknown {
+			t.Fatalf("the new occupant must not inherit a stale on-air, got %+v", o.frame)
 		}
 	}
 	if !aReset {
 		t.Fatalf("displaced occupant a must be degraded to status-unavailable (D-24), got %+v", out)
+	}
+}
+
+// D-24: re-applying a slot to the SAME occupant (a host bumping the epoch to renegotiate)
+// still degrades that occupant — the slot's on-air is stale at the new epoch until a fresh
+// transition, so the guest must not keep showing the prior pill.
+func TestRebindSameOccupantStillDegrades(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // g1 on-air
+
+	out := s.rebindSlot("cam-1", "g1") // re-apply to the same occupant
+
+	var degraded bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			degraded = true
+		}
+	}
+	if !degraded {
+		t.Fatalf("re-applying a slot to the same on-air occupant must degrade its pill (D-24), got %+v", out)
 	}
 }
 
