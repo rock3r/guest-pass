@@ -45,12 +45,18 @@ func TestTracer_LiveSlotRebindReroutesSource(t *testing.T) {
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
 	defer cancelAlloc()
 
-	// All tabs share ONE browser so loopback P2P works; a shared deadline bounds the run.
+	// Each peer runs as its OWN headless-Chrome instance, NOT as tabs in one browser. Two
+	// guests both capturing the synthetic camera in a single browser contend on the one fake
+	// device and the second publisher never goes live; giving each peer its own browser gives
+	// it its own fake device. They connect as real P2P peers over loopback (127.0.0.1 host
+	// candidates) — which also mirrors distinct machines more faithfully than co-located tabs.
+	// Deriving every context from rootCtx (each created before its first Run gets its own
+	// browser from the shared allocator) also gives them ONE shared deadline for the run.
 	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
 	defer cancelRoot()
 	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 240*time.Second)
 	defer cancelDeadline()
-	guestACtx := rootCtx // tab 1 (starts the browser)
+	guestACtx := rootCtx
 	guestBCtx, cancelB := chromedp.NewContext(rootCtx)
 	defer cancelB()
 	obsCtx, cancelOBS := chromedp.NewContext(rootCtx)
