@@ -177,6 +177,12 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if !id.isSource() {
 			room.Chat(id.peer, f.Text)
 		}
+	case "hand":
+		// Hand-raise (the "bring me in" nudge). A participant controls its own hand; a host may
+		// dismiss another's by addressing a peerId (lower-only). Authority is server-side (EN-7).
+		if !id.isSource() {
+			room.SetHand(id.peer, signaling.PeerID(f.PeerID), f.Raised)
+		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
 		// Delivered through the room so the send runs on the room goroutine and can't race

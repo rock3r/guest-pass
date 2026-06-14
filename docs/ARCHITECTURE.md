@@ -821,7 +821,9 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
                                                           // self-presence, throttled. Rejected per-modality
                                                           // if a suppression lock is active (EN-7)
 {"t":"chat","text":"…"}                                   // relayed to room, NEVER stored (EN-20)
-{"t":"hand","raised":true}                                // soft "bring me in" nudge
+{"t":"hand","raised":true}                                // soft "bring me in" nudge (raise/lower own)
+{"t":"hand","peerId":"<id>","raised":false}               // host dismisses another's raised hand (lower-only)
+                                                          // → roster `handRaised`; auto-cleared on leave + on promote to co-host
 {"t":"screen-start"}   {"t":"screen-stop"}                // sharer enters/leaves the preview pool (D-21, RF-15)
 {"t":"stats","turn":true,"rttMs":48,                      // periodic — feeds signal bars, admin TURN-%,
         "qualityLimitationReason":"cpu"}                  // and the degradation ladder (D-33)
