@@ -36,8 +36,16 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 	obsCtx, cancelOBS := chromedp.NewContext(guestCtx)
 	defer cancelOBS()
 
+	// The WS recorder (on both the guest and OBS tabs) lets us force-close a tab's signaling
+	// socket later to prove the on-air pill degrades when its reflection source disappears.
+	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
+		return err
+	})
+
 	// Guest enters the greenroom; the on-air self pill defaults to status-unavailable.
 	if err := chromedp.Run(guestCtx,
+		injectRecorder,
 		chromedp.Navigate(s.base+"/p/"+s.rawToken),
 		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
 		chromedp.Click(`.dc-start`, chromedp.ByQuery),
@@ -49,12 +57,7 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 		t.Fatalf("guest enter + default on-air pill: %v", err)
 	}
 
-	// OBS source page subscribes to cam-1. The WS recorder lets us force-close its socket later
-	// to prove the on-air pill degrades when the OBS reflection disappears.
-	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
-		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
-		return err
-	})
+	// OBS source page subscribes to cam-1.
 	if err := chromedp.Run(obsCtx,
 		injectRecorder,
 		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
@@ -128,5 +131,32 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 		chromedp.WaitVisible(`.dc-onair[data-onair="status-unavailable"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("pill did not degrade to status-unavailable when the OBS source disconnected: %v", err)
+	}
+
+	// Client-side degrade (D-24): the GUEST's own signaling socket dropping means it can no
+	// longer receive OBS reflections — the on-air pill and the global "we're live" indicator
+	// must reset, not keep asserting their last values. Re-arm both (the OBS source reconnected
+	// after the previous step), then drop the guest's socket.
+	if err := chromedp.Run(obsCtx,
+		chromedp.Poll(`document.querySelector('#obs-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("OBS source did not auto-reconnect before the client-disconnect check: %v", err)
+	}
+	fireObsActive(true)
+	if err := chromedp.Run(guestCtx,
+		chromedp.WaitVisible(`.dc-onair[data-onair="on-air"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-live[data-live="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("could not re-arm on-air + live before the client-disconnect check: %v", err)
+	}
+	if err := chromedp.Run(guestCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close guest socket: %v", err)
+	}
+	if err := chromedp.Run(guestCtx,
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="disconnected"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-onair[data-onair="status-unavailable"]`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.dc-live`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("a dropped guest socket must reset the reflected on-air + live state (D-24): %v", err)
 	}
 }

@@ -124,6 +124,10 @@ function DeviceCheck() {
     room.onClose(() => {
       publisher.close();
       setPubState("disconnected");
+      // The signaling link is gone, so this client no longer has a live OBS reflection: degrade
+      // the on-air pill and the global indicator rather than keep asserting their last values (D-24).
+      setOnAir("status-unavailable");
+      setStreaming(false);
     });
   }
 
