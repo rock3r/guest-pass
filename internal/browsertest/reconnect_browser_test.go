@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/rock3r/guest-pass/internal/signaling"
+	"github.com/rock3r/guest-pass/internal/store"
 )
 
 // T-12 / AC-13 (transient): a dropped signaling socket shows the reconnecting overlay and retries.
@@ -69,6 +70,19 @@ func TestTerminate_GuestKickedRoutesToErrorScreen(t *testing.T) {
 	s := seedDeviceCheck(t)
 	ctx := enterGuestSession(t, s.base, s.rawToken, "A")
 
+	// Grab the live self-view camera track before the kick so we can prove it is released when the
+	// terminal screen takes over (the session won't reconnect, so nothing re-publishes the stream).
+	var trackState string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`(() => { window.__camTrack = document.querySelector('.gs-selfview').srcObject.getVideoTracks()[0]; return window.__camTrack.readyState; })()`,
+		&trackState,
+	)); err != nil {
+		t.Fatalf("capture self-view track: %v", err)
+	}
+	if trackState != "live" {
+		t.Fatalf("self-view camera track = %q before the kick, want live", trackState)
+	}
+
 	hostWS := dialHostWS(t, s)
 	defer hostWS.Close(websocket.StatusNormalClosure, "")
 	writeFrame(t, hostWS, signaling.Frame{T: "kick", PeerID: s.passID})
@@ -81,5 +95,60 @@ func TestTerminate_GuestKickedRoutesToErrorScreen(t *testing.T) {
 	// A terminal terminate must NOT reconnect: the in-session view is gone and stays gone.
 	if err := chromedp.Run(ctx, chromedp.WaitNotPresent(`[data-entered]`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("a kicked guest must not reconnect: %v", err)
+	}
+	// …and it must release the camera/mic behind the terminal screen (no device light left on).
+	if err := chromedp.Run(ctx, chromedp.Poll(
+		`window.__camTrack && window.__camTrack.readyState === "ended"`,
+		nil, chromedp.WithPollingTimeout(10*time.Second),
+	)); err != nil {
+		t.Fatalf("a terminal screen must release the camera: %v", err)
+	}
+}
+
+// T-12 / AC-13 + RF-22: when reconnection can't succeed because the pass was revoked/expired while
+// the socket was down, the /ws upgrade is rejected with a plain HTTP 403 — no {t:terminate} frame —
+// so the client must NOT retry forever. After a capped number of failed reconnects the guest routes
+// to the terminal "unreachable" screen. Here the pass is revoked in the store (no terminate frame),
+// then the live socket is force-closed; every reconnect attempt fails the upgrade until the cap.
+func TestReconnect_ExhaustionRoutesToTerminal(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	alloc, cancelA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelA()
+	cdpCtx, cancel := chromedp.NewContext(alloc)
+	defer cancel()
+	cdpCtx, cancelT := context.WithTimeout(cdpCtx, 150*time.Second)
+	defer cancelT()
+
+	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
+		return err
+	})
+	if err := chromedp.Run(cdpCtx,
+		injectRecorder,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest enter: %v", err)
+	}
+
+	// Revoke the pass server-side (NO terminate frame), then drop the live socket. Every reconnect
+	// now fails the /ws upgrade with a 403 → after the cap, route to the terminal "unreachable" screen.
+	if err := s.store.SetPassStatus(context.Background(), s.passID, store.PassRevoked); err != nil {
+		t.Fatalf("revoke pass: %v", err)
+	}
+	if err := chromedp.Run(cdpCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close socket: %v", err)
+	}
+	if err := chromedp.Run(cdpCtx,
+		chromedp.WaitVisible(`[data-pub="reconnecting"]`, chromedp.ByQuery),     // it tries first…
+		chromedp.WaitVisible(`[data-terminal="unreachable"]`, chromedp.ByQuery), // …then gives up (RF-22)
+	); err != nil {
+		t.Fatalf("exhausted reconnects did not route to the terminal screen (RF-22): %v", err)
 	}
 }

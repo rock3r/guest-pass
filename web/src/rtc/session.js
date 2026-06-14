@@ -9,10 +9,19 @@ import { Room } from "./room.js";
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 
+// After this many CONSECUTIVE reconnect attempts that never reach a live socket, give up and route
+// to the terminal "unreachable" screen (RF-22). A revoked/expired/rotated pass is rejected at the
+// /ws upgrade with a plain HTTP 403 — the browser exposes that only as a close with NO terminate
+// frame — so without a cap the guest would sit on the reconnecting overlay forever. The cap (with
+// backoff) still tolerates a server restart of up to ~25s before giving up; a successful open resets.
+const MAX_FAILED_OPENS = 6;
+
 /**
- * TERMINAL_REASONS maps each TERMINAL {t:terminate} reason (EN-9) to its guest-facing error-screen
- * copy. A terminal reason routes to the matching screen and STOPS — no reconnect. Any other close
- * (a bare socket drop, or the TRANSIENT reason "reconnect") is recoverable and retries with backoff.
+ * TERMINAL_REASONS maps each TERMINAL terminate reason to its guest-facing error-screen copy. The
+ * five EN-9 reasons arrive as a {t:terminate,reason} frame; "unreachable" is the client-derived
+ * terminal when reconnection is exhausted (RF-22 — e.g. a pass revoked while the socket was down,
+ * which fails the upgrade with no frame). A terminal reason routes to the matching screen and STOPS;
+ * any other close (a bare drop, or the TRANSIENT reason "reconnect") is recoverable and retries.
  * @type {Record<string,{title:string, body:string}>}
  */
 export const TERMINAL_REASONS = {
@@ -21,6 +30,7 @@ export const TERMINAL_REASONS = {
   revoked: { title: "Your pass was revoked", body: "This guest pass is no longer valid. Ask the host for a new link." },
   "session-ended": { title: "The stream has ended", body: "The host ended this session." },
   "token-rotated": { title: "This link was replaced", body: "Ask the host for a fresh link." },
+  unreachable: { title: "Couldn't reconnect", body: "We couldn't reconnect you to the greenroom. The session may have ended, or your pass is no longer valid — ask the host for a new link." },
 };
 
 /**
@@ -67,6 +77,9 @@ export class ReconnectingSession {
     this._room = null;
     /** @type {string|null} the last {t:terminate} reason seen before a close */
     this._reason = null;
+    // Consecutive reconnect attempts that never reached a live socket; reset on a clean open. Caps
+    // retries so a permanently-rejected pass (HTTP 403 at upgrade, no frame) routes terminal (RF-22).
+    this._failedOpens = 0;
     this._connect();
   }
 
@@ -83,6 +96,7 @@ export class ReconnectingSession {
   _connect() {
     if (this._stopped) return;
     this._reason = null;
+    let opened = false; // did THIS attempt reach a live socket? (drives the failed-open cap)
     const room = new Room(this._query);
     this._room = room;
     // The server sends {t:terminate,reason} BEFORE closing, so the handler captures the reason
@@ -93,7 +107,9 @@ export class ReconnectingSession {
     this._setup(room);
     room.ready
       .then(() => {
+        opened = true;
         this._backoff = RECONNECT_MIN_MS; // a clean connection resets the backoff
+        this._failedOpens = 0; // …and the failed-open cap
         this._onState("live");
       })
       .catch(() => {
@@ -103,7 +119,13 @@ export class ReconnectingSession {
       if (this._stopped) return;
       this._teardown();
       if (isTerminal(this._reason)) {
-        this._onTerminal(/** @type {string} */ (this._reason)); // terminal — no reconnect
+        this._onTerminal(/** @type {string} */ (this._reason)); // terminal frame — no reconnect
+        return;
+      }
+      // A socket that never opened is a failed handshake (e.g. a 403 for a pass revoked/expired while
+      // down — no terminate frame). Cap consecutive failures so the guest doesn't retry forever (RF-22).
+      if (!opened && ++this._failedOpens >= MAX_FAILED_OPENS) {
+        this._onTerminal("unreachable");
         return;
       }
       this._onState("reconnecting");

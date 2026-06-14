@@ -178,7 +178,12 @@ function DeviceCheck() {
         setStreaming(false);
       },
       onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
-      onTerminal: (reason) => setTerminated(reason), // kicked/expired/revoked/… → error screen
+      onTerminal: (reason) => {
+        // The session is over for good — release the camera/mic so the device light goes off behind
+        // the error screen (the session won't reconnect, so nothing re-publishes this stream).
+        stopStream();
+        setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
+      },
     });
   }
 
