@@ -23,13 +23,16 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 // devSeed is a running real router (with the signaling hub) over a store seeded with one
-// active host, a stream, and a sent guest pass, plus the credentials the browser tabs need.
+// active host, a stream, a sent guest pass, and one cam slot, plus the credentials the
+// browser tabs need.
 type devSeed struct {
 	store      *store.Store
 	base       string // server base URL
 	rawToken   string // guest's raw magic-link token (/p/{rawToken})
 	passID     string
 	hostCookie string // host session JWT for the gp_session cookie (/greenroom + host /ws)
+	srcToken   string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
+	slotLabel  string // the cam slot's signaling label ("cam-1")
 }
 
 func seedDeviceCheck(t *testing.T) *devSeed {
@@ -66,6 +69,18 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("CreatePass: %v", err)
 	}
 
+	// A cam-1 slot with its own source token: the OBS source page authenticates the /ws it
+	// opens with this token (EN-15), resolving to slot "cam-1" server-side.
+	srcRaw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint src: %v", err)
+	}
+	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
+		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw),
+	}); err != nil {
+		t.Fatalf("CreateSlot: %v", err)
+	}
+
 	ring, err := auth.NewKeyRing("devcheck-browser-session-secret-cccccccc")
 	if err != nil {
 		t.Fatalf("key ring: %v", err)
@@ -87,7 +102,10 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	if err != nil {
 		t.Fatalf("issue host session: %v", err)
 	}
-	return &devSeed{store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID, hostCookie: sess}
+	return &devSeed{
+		store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID,
+		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1",
+	}
 }
 
 // T-6/AC-5+AC-6: the device-check renders a live preview, a bare GET never marks opened

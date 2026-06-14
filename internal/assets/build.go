@@ -26,7 +26,7 @@ import (
 
 // manifestBundles are the entry bundles whose Subresource Integrity hashes templates
 // inject (CONVENTIONS §3.5). Chunks/sourcemaps are not referenced directly by HTML.
-var manifestBundles = []string{"app.css", "app.js", "obs.js"}
+var manifestBundles = []string{"app.css", "app.js", "obs.css", "obs.js"}
 
 // vendoredPreact maps the bare Preact specifiers to the exact committed files.
 var vendoredPreact = map[string]string{
@@ -68,11 +68,11 @@ func BuildOptions(root, outDir string) api.BuildOptions {
 				})
 			},
 		}},
-		// The app island bundle. The separate, font-free OBS source-page entry (EN-13) is
-		// added with the real source page in PR-8; the SPIKE-2 scaffolds it superseded were
-		// removed once PR-1 retired their query-param identity.
+		// Two DELIBERATELY separate bundles (AD-7, EN-13): the app island bundle, and the
+		// font-free OBS source-page bundle (obs.js + its transparent obs.css).
 		EntryPoints: []string{
 			"web/src/islands/app.js",
+			"web/src/obs/obs.js",
 		},
 		Outdir:           outDir,
 		Bundle:           true,

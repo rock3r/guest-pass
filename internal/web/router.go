@@ -46,7 +46,7 @@ type RouterConfig struct {
 // assets, and the (rate-limited) auth routes.
 func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	manifest := loadManifest(cfg.StaticDir)
-	rd, err := newRenderer(cfg.SourceURL, manifest["app.css"], manifest["app.js"], cfg.DevLogin != nil)
+	rd, err := newRenderer(cfg.SourceURL, manifest, cfg.DevLogin != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -58,21 +58,26 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
 
-	// The host-only greenroom monitor page. Its island connects to /ws, so it is gated on the
-	// same dependencies as /ws (below) — there's no point serving the page where signaling
-	// can't run. Host-authenticated (EN-6) so only a signed-in, active host reaches it.
-	greenroomReady := cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil
-	if greenroomReady {
+	// The signaling-backed pages (greenroom, OBS source) and /ws all need the authenticator,
+	// store, token hasher, and hub. Without them (a minimal landing-only config) none of
+	// these are registered — there's no point serving a page where signaling can't run.
+	wsReady := cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil
+
+	if wsReady {
+		// Host-only greenroom monitor page (host-authenticated, EN-6).
 		r.Group(func(gr chi.Router) {
 			gr.Use(cfg.Auth.RequireHost)
 			gr.Get("/greenroom", rd.greenroom)
 		})
+		// Chromeless OBS cam source page. PUBLIC: the slot source token in the URL
+		// authenticates the /ws?src= the page opens, not the page itself (EN-15). The {slot}
+		// segment is an opaque label; the token resolves the slot server-side.
+		r.Get("/s/{slot}", func(w http.ResponseWriter, r *http.Request) {
+			rd.sourcePage(w, r, chi.URLParam(r, "slot"))
+		})
 	}
 
-	// The signaling WebSocket authenticates by credential against the live DB, so it
-	// needs the authenticator, store, and token hasher. Without them (a minimal
-	// landing-only config) /ws is not registered.
-	if cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil {
+	if wsReady {
 		resolver := &wsResolver{auth: cfg.Auth, hasher: cfg.Hasher, store: cfg.Store}
 		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, cfg.Logger)
 		r.Group(func(wr chi.Router) {

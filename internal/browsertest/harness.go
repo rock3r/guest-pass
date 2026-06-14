@@ -99,6 +99,11 @@ func fakeMediaAllocOpts() []chromedp.ExecAllocatorOption {
 		chromedp.NoSandbox,
 		chromedp.Flag("use-fake-device-for-media-stream", true),
 		chromedp.Flag("use-fake-ui-for-media-stream", true),
+		// Allow UNMUTED media to autoplay with no user gesture. The OBS cam source plays the
+		// guest's audio (D-41: mic rides the cam source into OBS), so its <video> is not muted
+		// and would otherwise be autoplay-blocked headless. This mirrors OBS-CEF, which launches
+		// its browser sources with autoplay allowed. Harmless to the muted preview/monitor tabs.
+		chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
 	)
 	if p := os.Getenv("CHROME_PATH"); p != "" {
 		opts = append(opts, chromedp.ExecPath(p))
