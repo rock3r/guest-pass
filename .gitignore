@@ -3,6 +3,9 @@
 .cal-industries/
 .worktrees/
 .claude/worktrees/
+# Manual-smoke working dir (scripts/smoke.sh): generated dev secrets, fresh DB, tunnel/server
+# logs, dev binaries — never committed (the env file holds JWT_SECRET/TOKEN_SECRET).
+.smoke/
 
 # Go
 /guestpass
