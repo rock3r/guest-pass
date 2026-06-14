@@ -39,7 +39,8 @@ func (s *roomState) entryFor(p *peerInfo) RosterEntry {
 		e.Cam, e.Mic, e.Screen = p.cam, p.mic, p.screen
 		e.HandRaised = p.handRaised
 		e.OnAir = s.onAirFor(p.id)
-		e.Locks = s.locksOf(p.id) // live-visible suppression locks (D-13/EN-7), with applierRank
+		e.Locks = s.locksOf(p.id)                                     // live-visible suppression locks (D-13/EN-7), with applierRank
+		e.Signal, e.RttMs, e.Degraded = p.signal, p.rttMs, p.degraded // degradation health (AD-21)
 	}
 	return e
 }
@@ -68,6 +69,10 @@ func (s *roomState) onAirFor(id PeerID) string {
 // rosterFor builds the roster projection a recipient should see, marking the recipient's own
 // entry with Self so a client can locate itself (e.g. the guest self on-air pill). Entries are
 // sorted by id so the projection is deterministic (map iteration is randomized).
+//
+// Degradation transparency is host-only (AC-15): the HOST sees every tile's signal/rttMs/degraded,
+// but a non-host (guest/co-host) sees only its OWN — so other peers' degradation health is stripped
+// from a non-host recipient's projection (the data never reaches a guest, not just hidden in the UI).
 func (s *roomState) rosterFor(recipientID PeerID, recipientRole string) []RosterEntry {
 	entries := make([]RosterEntry, 0, len(s.peers))
 	for id, p := range s.peers {
@@ -77,6 +82,8 @@ func (s *roomState) rosterFor(recipientID PeerID, recipientRole string) []Roster
 		e := s.entryFor(p)
 		if id == recipientID {
 			e.Self = true
+		} else if recipientRole != "host" {
+			e.Signal, e.RttMs, e.Degraded = 0, 0, nil // AC-15: a guest sees only its own health
 		}
 		entries = append(entries, e)
 	}
