@@ -216,18 +216,18 @@ func run() error {
 	wsURL := strings.Replace(strings.TrimRight(cfg.BaseURL, "/"), "http", "ws", 1) + "/ws"
 
 	in := bufio.NewScanner(os.Stdin)
-	fmt.Print("Press Enter to bind every cam slot -> its participant (do this AFTER guests have entered; Ctrl-C to quit): ")
+	fmt.Print("\nReady to bind. NOTE: binding connects briefly as the host (peer \"host\"), so it EVICTS an" +
+		"\nopen greenroom page (one connection per identity, EN-16) — bind BEFORE opening the greenroom,\n" +
+		"or refresh the greenroom after re-binding. (The grid renders guests without binding; binding\n" +
+		"only drives the OBS source + on-air pill.)\nPress Enter to bind every cam slot -> its participant (after guests have entered; Ctrl-C to quit): ")
 	for in.Scan() {
-		bound := 0
-		for _, p := range parts {
-			if err := sendRebind(ctx, wsURL, session, p.camLabel, p.passID); err != nil {
-				fmt.Printf("  %s -> %s: rebind failed: %v\n", p.camLabel, p.name, err)
-				continue
-			}
-			bound++
+		sent, err := bindAll(ctx, wsURL, session, parts)
+		if err != nil {
+			fmt.Printf("  bind failed: %v\n", err)
+		} else {
+			fmt.Printf("  sent %d rebind request(s) over one host connection — only participants who have ENTERED actually bind (re-press Enter for any that hadn't). Bring a bound OBS source on-program to light its on-air pill.\n", sent)
 		}
-		fmt.Printf("  sent %d rebind request(s) — only participants who have ENTERED actually bind (re-press Enter for any that hadn't). Bring a bound OBS source on-program to light its on-air pill.\n", bound)
-		fmt.Print("Press Enter to re-send the rebinds (e.g. for guests who hadn't connected yet), Ctrl-C to quit: ")
+		fmt.Print("Press Enter to re-bind (e.g. for guests who hadn't connected yet; refresh the greenroom after), Ctrl-C to quit: ")
 	}
 	return nil
 }
@@ -258,13 +258,16 @@ func printDashboard(localBase, base, streamID string, parts []participant, scree
 Quick start:
   1. Open each Guest link on a device/tab, allow camera/mic, click "Enter the greenroom"
      (wait for "your camera is live in the greenroom"). Phones: scan the QR codes below.
-  2. On THIS machine open the Host sign-in (loopback), then the Greenroom — every guest tile
-     should render.
-  3. Press Enter HERE to bind the cam slots, then add an OBS source URL as a Browser Source
-     (1280x720) and bring it on-program to light that guest's on-air pill.
-  4. Work the checklist in docs/SMOKE.md (multi-guest grid, on-air, degradation, and the
-     RF-8 force checks: a force-mute/-no-cam must go silent/black on the OBS source AND on
-     other participants' tiles, even for a guest who keeps sending).
+  2. Press Enter HERE to bind the cam slots to the guests. Do this BEFORE opening the greenroom —
+     the bind connects as the host and would kick an open greenroom page offline.
+  3. On THIS machine open the Host sign-in (loopback), then the Greenroom — every guest tile
+     renders (the grid shows guests even without binding; binding drives the OBS source + on-air
+     pill). Force/release from the greenroom tiles uses the page's own socket (no eviction).
+  4. Add a bound OBS source URL as a Browser Source (1280x720); bring it on-program to light the
+     on-air pill.
+  5. Work the checklist in docs/SMOKE.md (multi-guest grid, on-air, degradation, and the RF-8 force
+     checks: a force-mute/-no-cam must go silent/black on the OBS source AND on other participants'
+     tiles, even for a guest who keeps sending).
 
 `)
 }
@@ -332,23 +335,30 @@ func planCamSlots(ctx context.Context, st *store.Store, hostID string, need int,
 	return free[:need], nil
 }
 
-// sendRebind opens a short-lived host /ws connection and sends one {t:rebind} for the slot. The
-// binding is held in room state by the still-connected guest + OBS source, so the host connection
-// can close immediately afterward (a host leaving does not unbind a slot).
-func sendRebind(ctx context.Context, wsURL, session, slot, passID string) error {
-	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+// bindAll opens ONE short-lived host /ws connection and sends a {t:rebind} for every participant's
+// cam slot, then closes. One connection (not one per slot) keeps the host-identity eviction to a
+// single hit per Enter. The bindings are held in room state by the still-connected guests + OBS
+// sources, so the host connection can close immediately afterward (a host leaving does not unbind a
+// slot). A rebind whose occupant has not entered yet is a server-side no-op — re-press Enter once
+// they connect. Returns how many rebind frames were written.
+func bindAll(ctx context.Context, wsURL, session string, parts []participant) (int, error) {
+	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cookie := (&http.Cookie{Name: auth.SessionCookie, Value: session}).String()
 	c, _, err := websocket.Dial(dctx, wsURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{"Cookie": {cookie}},
 	})
 	if err != nil {
-		return fmt.Errorf("dial host /ws: %w", err)
+		return 0, fmt.Errorf("dial host /ws: %w", err)
 	}
 	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
-	if err := wsjson.Write(dctx, c, signaling.Frame{T: "rebind", Slot: slot, OccupantPeerID: passID}); err != nil {
-		return err
+	sent := 0
+	for _, p := range parts {
+		if err := wsjson.Write(dctx, c, signaling.Frame{T: "rebind", Slot: p.camLabel, OccupantPeerID: p.passID}); err != nil {
+			return sent, fmt.Errorf("rebind %s: %w", p.camLabel, err)
+		}
+		sent++
 	}
-	time.Sleep(300 * time.Millisecond) // let the room apply the rebind before the socket closes
-	return nil
+	time.Sleep(300 * time.Millisecond) // let the room apply the rebinds before the socket closes
+	return sent, nil
 }

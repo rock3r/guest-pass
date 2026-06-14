@@ -72,10 +72,16 @@ plus the **screenshare** source URL.
 1. **Guests join.** Open each guest link on a device/tab (scan the QR on phones), allow camera/mic,
    click **Enter the greenroom**, wait for "your camera is live in the greenroom". The co-host link
    joins as a co-host. Spread guests across machines/networks for the NAT checks.
-2. **Host watches.** On **this machine**, open the loopback **sign-in** link, then the **greenroom**
-   (the host needs no camera, so loopback is fine — and keeps `/auth/dev` off the tunnel).
-3. **Bind for OBS.** Press **Enter** in the `smoke.sh` terminal to bind every cam slot to its
-   participant. Add one or more **OBS source URLs** as Browser Sources (1280×720).
+2. **Bind for OBS.** Press **Enter** in the `smoke.sh` terminal to bind every cam slot to its
+   participant. **Do this before opening the greenroom** (next step): the bind connects briefly as
+   the host (peer `host`), and one-connection-per-identity (EN-16) means it would kick an open
+   greenroom page offline. For a guest who joins *after* you've opened the greenroom, press Enter to
+   re-bind, then **refresh the greenroom**.
+3. **Host watches.** On **this machine**, open the loopback **sign-in** link, then the **greenroom**
+   (loopback keeps `/auth/dev` off the tunnel; the host needs no camera). Every guest tile renders —
+   the grid shows guests **without** binding; binding only drives the OBS source + the on-air pill.
+   Force/release from the greenroom tiles uses the page's own socket, so it does **not** evict it.
+4. **OBS.** Add one or more bound **OBS source URLs** as Browser Sources (1280×720).
 
 ---
 
