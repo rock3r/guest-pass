@@ -123,6 +123,14 @@ func (s *roomState) leave(id PeerID) []outbound {
 // the occupant's pill, so a refreshed source never strands a stale on-air (D-24).
 func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	st := s.slot(sid)
+	// A source replacing a still-registered one is an eviction reattach (the page reloaded and
+	// Room.Join swapped the conn WITHOUT running leave), so the evicted socket may have an
+	// in-flight sourceActive carrying the current epoch. Bump the epoch so those stale reports
+	// are rejected by the epoch gate (EN-3) — the same mechanism that invalidates a prior
+	// occupant's reports on rebind. A first attach (no prior source) has nothing to invalidate.
+	if st.source != "" {
+		st.epoch++
+	}
 	st.source = source
 	out := s.degradeOnAir(sid, st, st.occupant)
 	return append(out, outbound{to: source, frame: s.bindingFrame(sid, st)})

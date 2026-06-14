@@ -283,6 +283,33 @@ func TestSourceReattachResetsStaleOnAir(t *testing.T) {
 	}
 }
 
+// D-24/EN-3: a source reattach (eviction reload — Room.Join swaps the conn without running
+// leave) bumps the epoch, so an in-flight sourceActive from the EVICTED connection — carrying
+// the old epoch — is rejected and can't re-light a stale pill after the reset.
+func TestReattachBumpsEpochInvalidatingStaleReports(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")         // epoch 1
+	s.obsSourceActive("cam-1", true, 1) // on-air at epoch 1
+	oldEpoch := s.slots["cam-1"].epoch
+
+	s.attachSource("cam-1", "src") // the source page reloads → reattach (same peer id)
+	if s.slots["cam-1"].epoch == oldEpoch {
+		t.Fatalf("a source reattach must bump the epoch to invalidate stale reports, still %d", oldEpoch)
+	}
+
+	// A stale sourceActive from the evicted connection (old epoch) must be ignored, leaving the
+	// pill at the status-unavailable the reattach reset it to.
+	if out := s.obsSourceActive("cam-1", true, oldEpoch); out != nil {
+		t.Fatalf("a stale sourceActive at the old epoch must be ignored after reattach, got %+v", out)
+	}
+	if s.slots["cam-1"].onAir != OnAirUnknown {
+		t.Fatalf("a stale report must NOT re-light the pill after reattach; on-air = %q", s.slots["cam-1"].onAir)
+	}
+}
+
 func TestRelaySignalToKnownPeerOnly(t *testing.T) {
 	s := newRoomState()
 	s.join("a", "guest")
