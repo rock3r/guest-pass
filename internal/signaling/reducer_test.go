@@ -26,6 +26,75 @@ func TestRebindBumpsEpochAndResetsOnAir(t *testing.T) {
 	}
 }
 
+// D-24: a source's streamingStarted/Stopped reflection broadcasts a GLOBAL "we're live"
+// state to every participant (host/co-host/guest) — but never to OBS source virtual peers
+// (EN-13) — and is not epoch-scoped.
+func TestObsStreamingBroadcastsToParticipantsOnly(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host")
+	s.join("g1", "guest")
+	s.join("src-cam-1", "obs") // a source page — must NOT receive the streaming broadcast
+
+	out := s.obsStreaming(true)
+	if !s.streaming {
+		t.Fatalf("obsStreaming(true) must set the room streaming state")
+	}
+	got := map[PeerID]bool{}
+	for _, o := range out {
+		if o.frame.T != "streaming" || !o.frame.Active {
+			t.Fatalf("unexpected outbound %+v, want {t:streaming, active:true}", o.frame)
+		}
+		got[o.to] = true
+	}
+	if !got["host"] || !got["g1"] {
+		t.Fatalf("host and g1 must receive the streaming broadcast, got %v", got)
+	}
+	if got["src-cam-1"] {
+		t.Fatalf("OBS source pages must NOT receive the streaming broadcast (EN-13), got %v", got)
+	}
+
+	// streamingStopped flips the global state back and carries active=false.
+	out = s.obsStreaming(false)
+	if s.streaming {
+		t.Fatalf("obsStreaming(false) must clear the room streaming state")
+	}
+	for _, o := range out {
+		if o.frame.Active {
+			t.Fatalf("a streamingStopped broadcast must carry active=false, got %+v", o.frame)
+		}
+	}
+}
+
+// D-24: when the OBS source for a slot disconnects, its on-air reflection is gone — the slot
+// must degrade to status-unavailable and tell the occupant, never leave it asserting a stale
+// on-air with no live OBS signal behind it ("never assert when unknown").
+func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")         // epoch 1, occupant g1
+	s.obsSourceActive("cam-1", true, 1) // slot reflects on-air
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("precondition: slot should be on-air, got %q", s.slots["cam-1"].onAir)
+	}
+
+	out := s.leave("src") // the OBS source disconnects
+
+	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
+		t.Fatalf("on-air must degrade to %s when the source leaves, got %q", OnAirUnknown, st.onAir)
+	}
+	var told bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			told = true
+		}
+	}
+	if !told {
+		t.Fatalf("occupant g1 must be told {t:onair, status-unavailable} on source leave, got %+v", out)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous
 // epoch must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
@@ -100,8 +169,190 @@ func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	if st.epoch != 2 || st.occupant != "" || st.onAir != OnAirUnknown {
 		t.Fatalf("unbind state = %+v", st)
 	}
+	// The slot was never on-air (no transition), so the occupant's pill was already
+	// status-unavailable — unbind just tells the source to placeholder, no on-air degrade.
 	if len(out) != 1 || out[0].frame.T != "slot-unbound" || epochVal(out[0].frame) != 2 {
-		t.Fatalf("unbind outbound = %+v", out)
+		t.Fatalf("unbind outbound = %+v, want one slot-unbound(epoch 2)", out)
+	}
+}
+
+// D-24: unbinding a slot that WAS on-air degrades the occupant's pill to status-unavailable
+// (it is no longer sourced), alongside the slot-unbound to the source.
+func TestUnbindDegradesOnAirOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // g1 on-air
+
+	out := s.unbindSlot("cam-1")
+	var degraded bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			degraded = true
+		}
+	}
+	if !degraded {
+		t.Fatalf("unbinding an on-air slot must degrade the occupant's pill (D-24), got %+v", out)
+	}
+}
+
+// D-24: reassigning a slot from occupant A to B must degrade A's pill — A is no longer
+// sourced here, so it can't keep asserting the on-air it last had (later sourceActive frames
+// go to B). The new occupant B's pill stays at its default until a fresh transition.
+func TestRebindDegradesDisplacedOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest")
+	s.join("b", "guest")
+	s.rebindSlot("cam-1", "a")
+	s.obsSourceActive("cam-1", true, 1) // a is on-air
+
+	out := s.rebindSlot("cam-1", "b") // reassign the slot to b
+
+	var aReset bool
+	for _, o := range out {
+		if o.to == "a" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			aReset = true
+		}
+		// The incoming occupant b may be degraded to status-unavailable (the slot is now
+		// UNKNOWN), but must NEVER inherit the prior occupant's on-air (EN-3).
+		if o.to == "b" && o.frame.T == "onair" && o.frame.OnAir != OnAirUnknown {
+			t.Fatalf("the new occupant must not inherit a stale on-air, got %+v", o.frame)
+		}
+	}
+	if !aReset {
+		t.Fatalf("displaced occupant a must be degraded to status-unavailable (D-24), got %+v", out)
+	}
+}
+
+// D-24: re-applying a slot to the SAME occupant (a host bumping the epoch to renegotiate)
+// still degrades that occupant — the slot's on-air is stale at the new epoch until a fresh
+// transition, so the guest must not keep showing the prior pill.
+func TestRebindSameOccupantStillDegrades(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // g1 on-air
+
+	out := s.rebindSlot("cam-1", "g1") // re-apply to the same occupant
+
+	var degraded bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			degraded = true
+		}
+	}
+	if !degraded {
+		t.Fatalf("re-applying a slot to the same on-air occupant must degrade its pill (D-24), got %+v", out)
+	}
+}
+
+// D-24: a source reconnect/reload that re-attaches (Room.Join evicts the old conn WITHOUT
+// running leave) must reset a stale on-air and degrade the occupant — the refreshed source
+// has reported no transition yet, so the state is UNKNOWN.
+func TestSourceReattachResetsStaleOnAir(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // slot is on-air
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("precondition: slot should be on-air")
+	}
+
+	// The source page refreshes: the replacement connection re-attaches to the same slot.
+	out := s.attachSource("cam-1", "src")
+
+	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
+		t.Fatalf("a re-attaching source must reset stale on-air to %s, got %q", OnAirUnknown, st.onAir)
+	}
+	var occReset bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			occReset = true
+		}
+	}
+	if !occReset {
+		t.Fatalf("a re-attaching source must degrade the occupant's pill (D-24), got %+v", out)
+	}
+}
+
+// D-24: a participant joining/rejoining mid-stream is replayed the room's current OBS
+// reflections — the global "we're live" state, and the on-air of any slot it already occupies
+// (an eviction-rejoin keeps its binding) — so it doesn't sit at the defaults until OBS next
+// toggles. OBS source virtual peers don't receive these (EN-13).
+func TestJoinReplaysCurrentObsState(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // slot on-air
+	s.obsStreaming(true)                // broadcast live
+
+	// A new participant joining mid-stream is told the broadcast is live.
+	out := s.join("h", "host")
+	var hStreaming bool
+	for _, o := range out {
+		if o.to == "h" && o.frame.T == "streaming" && o.frame.Active {
+			hStreaming = true
+		}
+	}
+	if !hStreaming {
+		t.Fatalf("a participant joining mid-stream must be replayed the live state, got %+v", out)
+	}
+
+	// An OBS source page joining is NOT replayed participant reflections (EN-13).
+	out = s.join("src2", "obs")
+	for _, o := range out {
+		if o.frame.T == "streaming" || o.frame.T == "onair" {
+			t.Fatalf("OBS source pages must not receive on-air/streaming replays, got %+v", o.frame)
+		}
+	}
+
+	// The occupant rejoining (eviction keeps its binding) is replayed its slot's on-air.
+	out = s.join("g1", "guest")
+	var g1OnAir bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirYes {
+			g1OnAir = true
+		}
+	}
+	if !g1OnAir {
+		t.Fatalf("a rejoining occupant must be replayed its slot's on-air, got %+v", out)
+	}
+}
+
+// D-24/EN-3: a source reattach (eviction reload — Room.Join swaps the conn without running
+// leave) bumps the epoch, so an in-flight sourceActive from the EVICTED connection — carrying
+// the old epoch — is rejected and can't re-light a stale pill after the reset.
+func TestReattachBumpsEpochInvalidatingStaleReports(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")         // epoch 1
+	s.obsSourceActive("cam-1", true, 1) // on-air at epoch 1
+	oldEpoch := s.slots["cam-1"].epoch
+
+	s.attachSource("cam-1", "src") // the source page reloads → reattach (same peer id)
+	if s.slots["cam-1"].epoch == oldEpoch {
+		t.Fatalf("a source reattach must bump the epoch to invalidate stale reports, still %d", oldEpoch)
+	}
+
+	// A stale sourceActive from the evicted connection (old epoch) must be ignored, leaving the
+	// pill at the status-unavailable the reattach reset it to.
+	if out := s.obsSourceActive("cam-1", true, oldEpoch); out != nil {
+		t.Fatalf("a stale sourceActive at the old epoch must be ignored after reattach, got %+v", out)
+	}
+	if s.slots["cam-1"].onAir != OnAirUnknown {
+		t.Fatalf("a stale report must NOT re-light the pill after reattach; on-air = %q", s.slots["cam-1"].onAir)
 	}
 }
 

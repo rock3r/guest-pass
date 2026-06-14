@@ -172,6 +172,14 @@ func (r *Room) ObsActive(slot SlotID, active bool, epoch int) {
 	})
 }
 
+// ObsStreaming reflects OBS's broadcast-level "we're live" state (D-24) to the room. Global,
+// not slot-scoped, so it carries no epoch.
+func (r *Room) ObsStreaming(active bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.obsStreaming(active))
+	})
+}
+
 // terminateBudget bounds how long Terminate waits PER PEER to enqueue a terminate frame
 // into a backed-up out queue during a drain.
 const terminateBudget = 2 * time.Second

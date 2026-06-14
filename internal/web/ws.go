@@ -160,10 +160,21 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 			room.Unbind(signaling.SlotID(f.Slot))
 		}
 	case "obs":
-		if id.isSource() && f.Event == "sourceActive" && f.Epoch != nil {
+		// On-air/broadcast reflection (D-24) comes from OBS source pages only (EN-7).
+		if !id.isSource() {
+			return
+		}
+		switch f.Event {
+		case "sourceActive":
 			// Epoch echoed by the source; the room ignores stale epochs (EN-3). A
 			// sourceActive without an epoch can't be resolved to a slot, so it is ignored.
-			room.ObsActive(id.slot, f.Active, *f.Epoch)
+			if f.Epoch != nil {
+				room.ObsActive(id.slot, f.Active, *f.Epoch)
+			}
+		case "streamingStarted":
+			room.ObsStreaming(true)
+		case "streamingStopped":
+			room.ObsStreaming(false)
 		}
 	}
 }

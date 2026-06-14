@@ -39,6 +39,8 @@ function start() {
   let backoff = RECONNECT_MIN_MS;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let reconnectTimer;
+  /** @type {import("../rtc/room.js").Room|null} the live signaling room (rebuilt each reconnect) */
+  let room = null;
 
   function clearLink() {
     if (link) link.close();
@@ -48,7 +50,7 @@ function start() {
   }
 
   function connect() {
-    const room = new Room("src=" + encodeURIComponent(token));
+    room = new Room("src=" + encodeURIComponent(token));
 
     // bind the slot to occupantPeerId by opening a recvonly link and rendering its track.
     function bind(occupantPeerId, ep) {
@@ -92,9 +94,14 @@ function start() {
       if (link && f.from === occupant) link.onSignal(f);
     });
 
-    // A clean connection resets the backoff so the NEXT drop retries fast again.
+    // A clean connection resets the backoff so the NEXT drop retries fast again, and
+    // re-asserts the last known OBS streaming state: streaming is global and the server does
+    // NOT clear it on a source drop, so a streamingStarted/Stopped transition that fired while
+    // this socket was reconnecting (room.send throws on a CONNECTING/CLOSED socket) would
+    // otherwise leave a stale "live" banner until OBS next toggles (D-24).
     room.ready.then(() => {
       backoff = RECONNECT_MIN_MS;
+      reassertStreaming();
     }).catch(() => {
       /* the onclose handler drives the reconnect; nothing to do here */
     });
@@ -107,6 +114,45 @@ function start() {
       backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
     });
   }
+
+  // Relay OBS's on-air/broadcast reflection (D-24) over the signaling room. These
+  // window.obsstudio events fire ONLY inside OBS, at the default permission level (no setup
+  // needed); in a normal browser they never fire, so the occupant's pill stays
+  // status-unavailable. Registered ONCE (not per reconnect) and they send over whatever room
+  // is currently live. We use `active` (obsSourceActiveChanged) and NEVER `visible`
+  // (obsSourceVisibleChanged also fires in OBS *preview* and would false-positive).
+  const relay = (frame) => {
+    if (!room) return;
+    try {
+      room.send(frame);
+    } catch (_) {
+      /* socket not open yet / already closing — a missed streaming transition is re-asserted on
+         reconnect via reassertStreaming; a per-slot sourceActive degrades to unknown safely */
+    }
+  };
+  // lastStreaming is the last OBS "we're live" state this page witnessed (null = none yet), so a
+  // reconnect can re-assert it if the transition was dropped mid-reconnect.
+  let lastStreaming = null;
+  const reassertStreaming = () => {
+    if (lastStreaming !== null) {
+      relay({ t: "obs", event: lastStreaming ? "streamingStarted" : "streamingStopped" });
+    }
+  };
+  addEventListener("obsSourceActiveChanged", (e) => {
+    // Echo the current slot epoch so the server resolves slot→occupant at signal time and
+    // ignores stale reports (EN-1/EN-3). Skip until a binding has set the epoch.
+    if (occupant && epoch >= 0) {
+      relay({ t: "obs", event: "sourceActive", active: !!(e && e.detail && e.detail.active), epoch });
+    }
+  });
+  addEventListener("obsStreamingStarted", () => {
+    lastStreaming = true;
+    relay({ t: "obs", event: "streamingStarted" });
+  });
+  addEventListener("obsStreamingStopped", () => {
+    lastStreaming = false;
+    relay({ t: "obs", event: "streamingStopped" });
+  });
 
   connect();
 }
