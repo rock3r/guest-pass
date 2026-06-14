@@ -170,6 +170,20 @@ func TestReleaseAuthorityAndDemotionSafe(t *testing.T) {
 	}
 }
 
+// T-3: "release by any rank ≥ floor" includes an equal-rank PEER — a co-host may release
+// another co-host's cohost-floor lock; the releaser need not be the applier.
+func TestEqualRankPeerCanRelease(t *testing.T) {
+	s := newRoomState()
+	s.join("co", "cohost", "")
+	s.join("co2", "cohost", "")
+	s.join("g1", "guest", "")
+	s.force("co", "g1", "mic") // cohost-floor lock owned by co
+
+	if out := s.release("co2", "g1", "mic"); out == nil || s.peers["g1"].locked("mic") {
+		t.Fatalf("an equal-rank co-host peer should be able to release a cohost-floor lock, got %+v", out)
+	}
+}
+
 // T-3: a legit change to an UNLOCKED modality alongside a rejected re-enable of a LOCKED one
 // still applies the legit change and re-broadcasts to everyone, lock + suppression intact.
 func TestStateLegitChangeAlongsideViolationRebroadcasts(t *testing.T) {
