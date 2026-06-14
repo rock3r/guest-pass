@@ -6,7 +6,7 @@ import (
 )
 
 func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
-	h := NewHub()
+	h := NewHub(nil, nil)
 	room := h.Room("s1")
 	out := make(chan Frame, 16)
 	// Join is async (posted to the room's cmd channel); the FIFO channel guarantees it
@@ -34,7 +34,7 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 }
 
 func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
-	h := NewHub()
+	h := NewHub(nil, nil)
 	h.Shutdown("reconnect")
 	if r := h.Room("late-arrival"); r != nil {
 		t.Fatal("Room for a new session after Shutdown should be nil")
@@ -44,7 +44,7 @@ func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 // A connection that resolved a room just before it started draining must not be admitted
 // after the terminate broadcast — Join refuses it so it can't strand itself.
 func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
-	r := newRoom("s")
+	r := newRoom("s", nil, nil)
 	go r.run()
 	defer r.Close()
 
@@ -60,7 +60,7 @@ func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
 // can only proceed once a reader appears. The terminate frame is terminal (RF-16) and
 // must NOT be dropped: Terminate must block on the send rather than return immediately.
 func TestRoomTerminate_DoesNotDropTerminate(t *testing.T) {
-	r := newRoom("s")
+	r := newRoom("s", nil, nil)
 	go r.run()
 	defer r.Close()
 

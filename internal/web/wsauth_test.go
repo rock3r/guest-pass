@@ -84,7 +84,7 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 
-	hub := signaling.NewHub()
+	hub := signaling.NewHub(nil, nil)
 	var inflight sync.WaitGroup
 	h, err := NewRouter(RouterConfig{
 		SourceURL:     testSourceURL,

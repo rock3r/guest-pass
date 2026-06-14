@@ -37,7 +37,7 @@ func testRouter(t *testing.T, rl *RateLimiter) http.Handler {
 	oauth := auth.NewGoogleOAuth(auth.GoogleConfig{ClientID: "c", ClientSecret: "s", BaseURL: "https://gp.example"}, authn, stubUpserter{})
 	h, err := NewRouter(RouterConfig{
 		SourceURL:   testSourceURL,
-		Hub:         signaling.NewHub(),
+		Hub:         signaling.NewHub(nil, nil),
 		OAuth:       oauth,
 		Auth:        authn,
 		RateLimiter: rl,

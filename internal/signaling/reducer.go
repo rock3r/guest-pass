@@ -16,9 +16,6 @@ type peerInfo struct {
 	// level is the last reported audio meter (0..1), held in-memory only (EN-11: never
 	// persisted) and coalesced onto the batched {t:levels} tick (AD-13), never the roster.
 	level float64
-	// locks are the active suppression locks on this peer, keyed by modality (mic|cam|share)
-	// — at most one per (target, modality) (D-13/EN-7). Persistence backs these in PR-4.
-	locks map[string]*lockState
 }
 
 // lockState is a suppression lock on one (target, modality): the applier and the rank FLOOR
@@ -27,12 +24,6 @@ type peerInfo struct {
 type lockState struct {
 	applier PeerID
 	floor   int // rank floor: rankCohost or rankHost (a guest can never force)
-}
-
-// locked reports whether a modality (mic|cam|share) is suppression-locked on this peer.
-func (p *peerInfo) locked(modality string) bool {
-	_, ok := p.locks[modality]
-	return ok
 }
 
 type slotState struct {
@@ -66,10 +57,46 @@ type roomState struct {
 	// stays silent in an idle/quiet room (no spam) yet still emits ONE trailing all-zero
 	// frame when the room goes quiet, letting clients settle their meters to 0 (AD-13).
 	levelsActive bool
+	// locks are the active suppression locks, keyed target → modality (mic|cam|share) → lock
+	// (D-13/EN-7). They live at ROOM scope (not on peerInfo) so they survive a target's full
+	// disconnect and re-apply on reconnect; they are seeded from the pass_locks table on room
+	// (re)spawn and persisted on force/release (AD-22), so a force-muted guest stays muted
+	// across a restart.
+	locks map[PeerID]map[string]*lockState
 }
 
 func newRoomState() *roomState {
-	return &roomState{peers: map[PeerID]*peerInfo{}, slots: map[SlotID]*slotState{}}
+	return &roomState{
+		peers: map[PeerID]*peerInfo{},
+		slots: map[SlotID]*slotState{},
+		locks: map[PeerID]map[string]*lockState{},
+	}
+}
+
+// lockOn returns the suppression lock on (target, modality), or nil.
+func (s *roomState) lockOn(target PeerID, modality string) *lockState {
+	return s.locks[target][modality]
+}
+
+// locked reports whether (target, modality) is suppression-locked.
+func (s *roomState) locked(target PeerID, modality string) bool {
+	return s.lockOn(target, modality) != nil
+}
+
+// setLock installs/overwrites the lock on (target, modality).
+func (s *roomState) setLock(target PeerID, modality string, lk *lockState) {
+	if s.locks[target] == nil {
+		s.locks[target] = map[string]*lockState{}
+	}
+	s.locks[target][modality] = lk
+}
+
+// clearLock removes the lock on (target, modality), tidying the empty inner map.
+func (s *roomState) clearLock(target PeerID, modality string) {
+	delete(s.locks[target], modality)
+	if len(s.locks[target]) == 0 {
+		delete(s.locks, target)
+	}
 }
 
 func (s *roomState) slot(id SlotID) *slotState {
@@ -95,11 +122,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 	p := &peerInfo{id: id, role: role, name: name}
 	if prev != nil {
 		p.cam, p.mic, p.screen, p.handRaised = prev.cam, prev.mic, prev.screen, prev.handRaised
-		// A reconnect must NOT clear suppression locks — otherwise a force-muted target could
-		// self-release simply by reconnecting (defeats D-13/EN-7). Carry them across the rejoin.
-		// (Full-disconnect + restart survival via the pass_locks table is PR-4.)
-		p.locks = prev.locks
 	}
+	// Suppression locks live at ROOM scope (s.locks), independent of this peerInfo, so a
+	// reconnect — or a full disconnect + rejoin, or a respawn from the pass_locks table — keeps
+	// the target locked: a force-muted target can never self-release by reconnecting (D-13/EN-7).
 	s.peers[id] = p
 	var out []outbound
 	if isParticipant(role) {
@@ -175,7 +201,7 @@ func (s *roomState) applyState(id PeerID, cam, mic, screen *bool, level *float64
 		if want == nil {
 			return
 		}
-		if *want && p.locked(modality) {
+		if *want && s.locked(id, modality) {
 			violated = true // can't self-enable a force-suppressed modality
 			return
 		}

@@ -84,7 +84,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 
 	h, err := NewRouter(RouterConfig{
 		SourceURL:   testSourceURL,
-		Hub:         signaling.NewHub(),
+		Hub:         signaling.NewHub(nil, nil),
 		Auth:        authn,
 		Store:       st,
 		Hasher:      hasher,

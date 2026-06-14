@@ -93,6 +93,18 @@ type Pass struct {
 	RevokedAt  *int64
 }
 
+// PassLock is a persisted suppression lock (AD-22/D-13): one row per (pass, modality) that
+// re-applies on room (re)spawn, so a force-muted guest stays muted across a restart. The
+// applier_pass_id is NULL when the host applied it (the host has no pass); the rank floor
+// still distinguishes a host- from a cohost-applied lock.
+type PassLock struct {
+	PassID           string
+	Modality         string  // mic | cam | share
+	ApplierRankFloor string  // host | cohost
+	ApplierPassID    *string // NULL = applied by the host (no pass)
+	CreatedAt        int64
+}
+
 // newID returns a random UUIDv4 string. crypto/rand failure is unrecoverable, so it is
 // surfaced as an error rather than silently producing a weak ID.
 func newID() (string, error) {

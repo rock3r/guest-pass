@@ -38,7 +38,7 @@ func recvFrameOfType(t *testing.T, ch chan Frame, want string) Frame {
 // The actor delivers a slot-rebind to the source page's channel when the host
 // rebinds the slot — end to end through the command channel and delivery.
 func TestRoomDeliversSlotRebindToSource(t *testing.T) {
-	r := newRoom("s1")
+	r := newRoom("s1", nil, nil)
 	go r.run()
 	defer r.Close()
 
@@ -62,7 +62,7 @@ func TestRoomDeliversSlotRebindToSource(t *testing.T) {
 // first (closes its out), and the evicted connection's Leave must NOT tear down the
 // connection that supplanted it.
 func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
-	r := newRoom("dup")
+	r := newRoom("dup", nil, nil)
 	go r.run()
 	defer r.Close()
 
@@ -95,7 +95,7 @@ func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
 }
 
 func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
-	r := newRoom("s2")
+	r := newRoom("s2", nil, nil)
 	go r.run()
 	defer r.Close()
 
@@ -115,7 +115,7 @@ func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
 // tick — the ticker fires on the room goroutine and delivers the meter map, proving the wiring
 // (applyState stores level → tick → buildLevels → deliver), not just the pure reducer.
 func TestRoomLevelsTickDelivers(t *testing.T) {
-	r := newRoom("lvl")
+	r := newRoom("lvl", nil, nil)
 	go r.run()
 	defer r.Close()
 
