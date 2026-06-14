@@ -94,9 +94,14 @@ function start() {
       if (link && f.from === occupant) link.onSignal(f);
     });
 
-    // A clean connection resets the backoff so the NEXT drop retries fast again.
+    // A clean connection resets the backoff so the NEXT drop retries fast again, and
+    // re-asserts the last known OBS streaming state: streaming is global and the server does
+    // NOT clear it on a source drop, so a streamingStarted/Stopped transition that fired while
+    // this socket was reconnecting (room.send throws on a CONNECTING/CLOSED socket) would
+    // otherwise leave a stale "live" banner until OBS next toggles (D-24).
     room.ready.then(() => {
       backoff = RECONNECT_MIN_MS;
+      reassertStreaming();
     }).catch(() => {
       /* the onclose handler drives the reconnect; nothing to do here */
     });
@@ -121,7 +126,16 @@ function start() {
     try {
       room.send(frame);
     } catch (_) {
-      /* socket not open yet / already closing — a transient OBS event is fine to drop */
+      /* socket not open yet / already closing — a missed streaming transition is re-asserted on
+         reconnect via reassertStreaming; a per-slot sourceActive degrades to unknown safely */
+    }
+  };
+  // lastStreaming is the last OBS "we're live" state this page witnessed (null = none yet), so a
+  // reconnect can re-assert it if the transition was dropped mid-reconnect.
+  let lastStreaming = null;
+  const reassertStreaming = () => {
+    if (lastStreaming !== null) {
+      relay({ t: "obs", event: lastStreaming ? "streamingStarted" : "streamingStopped" });
     }
   };
   addEventListener("obsSourceActiveChanged", (e) => {
@@ -131,8 +145,14 @@ function start() {
       relay({ t: "obs", event: "sourceActive", active: !!(e && e.detail && e.detail.active), epoch });
     }
   });
-  addEventListener("obsStreamingStarted", () => relay({ t: "obs", event: "streamingStarted" }));
-  addEventListener("obsStreamingStopped", () => relay({ t: "obs", event: "streamingStopped" }));
+  addEventListener("obsStreamingStarted", () => {
+    lastStreaming = true;
+    relay({ t: "obs", event: "streamingStarted" });
+  });
+  addEventListener("obsStreamingStopped", () => {
+    lastStreaming = false;
+    relay({ t: "obs", event: "streamingStopped" });
+  });
 
   connect();
 }

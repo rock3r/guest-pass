@@ -160,3 +160,65 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 		t.Fatalf("a dropped guest socket must reset the reflected on-air + live state (D-24): %v", err)
 	}
 }
+
+// D-24: a streaming transition that fires while the OBS source socket is reconnecting must not
+// be lost. streaming is global and the server doesn't clear it on a source drop, so a dropped
+// transition would otherwise strand a stale/absent live banner. The source re-asserts its last
+// known streaming state on reconnect.
+func TestOnAir_StreamingTransitionSurvivesSourceReconnect(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	guestCtx, cancelGuest := chromedp.NewContext(allocCtx)
+	defer cancelGuest()
+	guestCtx, cancelT := context.WithTimeout(guestCtx, 150*time.Second)
+	defer cancelT()
+	obsCtx, cancelOBS := chromedp.NewContext(guestCtx)
+	defer cancelOBS()
+
+	// Guest enters — no live banner yet (no streaming reported).
+	if err := chromedp.Run(guestCtx,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.dc-live`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest enter: %v", err)
+	}
+
+	// OBS source connects (a streaming reflection needs no slot binding — it's global).
+	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
+		return err
+	})
+	if err := chromedp.Run(obsCtx,
+		injectRecorder,
+		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
+		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
+		chromedp.Poll(`window.__gpSockets.some((w) => w.readyState === 1)`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("obs source connect: %v", err)
+	}
+
+	// Drop the source socket, then fire streamingStarted DURING the reconnect window — the send
+	// is lost, but the page re-asserts the state once it reconnects.
+	if err := chromedp.Run(obsCtx,
+		chromedp.Evaluate(`window.__gpCloseLastWS()`, nil),
+		chromedp.Evaluate(`window.dispatchEvent(new CustomEvent("obsStreamingStarted"))`, nil),
+	); err != nil {
+		t.Fatalf("drop + fire streamingStarted: %v", err)
+	}
+
+	// The guest's live banner appears only because the source re-asserted the dropped transition
+	// after reconnecting.
+	if err := chromedp.Run(guestCtx,
+		chromedp.WaitVisible(`.dc-live[data-live="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("a streaming transition dropped during a source reconnect was not re-asserted: %v", err)
+	}
+}
