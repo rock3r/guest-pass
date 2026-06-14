@@ -9,6 +9,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 
 	"github.com/rock3r/guest-pass/internal/auth"
@@ -83,6 +84,75 @@ func TestDegradation_PlanLadderUnit(t *testing.T) {
 				state:{cpuLevel:1,bw:{},recoverStreak:0,lastReason:"cpu"}});
 			return r.actions.length===0 && r.state.recoverStreak===1 && r.degraded && r.degraded.dir==="lowering";
 		})()`)
+	})
+}
+
+// T-14 (race): the host "bump quality now" override must cancel an in-flight sample. recoverNow()
+// can land while an async sample() is suspended at `await getStats()`; when that pass resumes it must
+// NOT re-apply its (now-stale, pre-recovery) shedding plan or emit a stale {t:stats} that undoes the
+// override (Bugbot: "recover-now races in-flight sample"). Driven deterministically through a gated
+// getStats — no timers, no timing race: we start a sample, hold it mid-pass, fire recoverNow, then
+// release the read and assert the resuming pass made no shedding/report.
+func TestDegradation_RecoverNowCancelsInFlightSample(t *testing.T) {
+	s := seedDeviceCheck(t)
+	Chrome(t, 60*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.Poll(`typeof (window.__gpDeg && window.__gpDeg.DegradationController) === "function"`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("DegradationController seam not exposed: %v", err)
+		}
+		var res struct {
+			ActiveAfter bool   `json:"activeAfter"`
+			ReportCount int    `json:"reportCount"`
+			LastReport  string `json:"lastReport"`
+		}
+		js := `(async () => {
+			const DC = window.__gpDeg.DegradationController;
+			let release;
+			const gate = new Promise((r) => { release = r; });
+			let active = true; // the sender's encoder-on flag, toggled by setParameters
+			const sender = {
+				getStats: async () => {
+					await gate; // suspend the in-flight sample HERE, mid-pass
+					return new Map([
+						["o", { type: "outbound-rtp", qualityLimitationReason: "cpu" }],
+						["r", { type: "remote-inbound-rtp", roundTripTime: 0.05, fractionLost: 0 }],
+					]);
+				},
+				getParameters: () => ({ encodings: [{ active }] }),
+				setParameters: async (p) => { active = p.encodings[0].active; },
+			};
+			const reports = [];
+			const ctrl = new DC({
+				getTargets: () => [{ key: "mesh:a", priority: 1, sender }],
+				report: (r) => reports.push(r),
+			});
+			const p = ctrl.sample();   // starts; suspends inside getStats at await gate
+			ctrl.recoverNow();         // host override lands mid-sample: re-enable + reset + report null
+			release();                 // now let the in-flight getStats resolve with cpu pressure
+			await p;                   // the in-flight sample finishes
+			const last = reports.length ? reports[reports.length - 1].degraded : null;
+			return {
+				activeAfter: active,
+				reportCount: reports.length,
+				lastReport: reports.length ? (last ? last.dir + ":" + last.reason : "null") : "NONE",
+			};
+		})()`
+		if err := chromedp.Run(cctx, chromedp.Evaluate(js, &res,
+			func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) },
+		)); err != nil {
+			t.Fatalf("race repro eval: %v", err)
+		}
+		// recoverNow re-enabled the sender; the resuming stale sample must NOT re-shed it.
+		if !res.ActiveAfter {
+			t.Fatalf("recover-now was undone: the in-flight sample re-shed the sender after the override (active=false)")
+		}
+		// Only recoverNow's degraded:null report should land — the stale pass must not report.
+		if res.ReportCount != 1 || res.LastReport != "null" {
+			t.Fatalf("the stale in-flight sample reported after recover-now: reportCount=%d lastReport=%q (want 1 / %q)", res.ReportCount, res.LastReport, "null")
+		}
 	})
 }
 

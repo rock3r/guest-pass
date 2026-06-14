@@ -187,6 +187,12 @@ export class DegradationController {
    * the next sample simply re-degrades; the immediate sample() re-reports current health.
    */
   recoverNow() {
+    // Invalidate any sample() currently suspended mid-pass (it captured the prior epoch at its start):
+    // when it resumes after `await getStats()` it must NOT re-apply its now-stale shedding plan — built
+    // from pre-recovery stats against the ladder this override is about to reset — nor emit a stale
+    // {t:stats} that would undo this recovery (the degrade-fast path racing the host's "bump quality
+    // now"). The resuming pass sees the bumped epoch and abandons itself.
+    this._epoch = (this._epoch || 0) + 1;
     for (const t of this.getTargets()) {
       applyAction(t.sender, { active: true, params: { scaleResolutionDownBy: 1 } });
     }
@@ -217,6 +223,7 @@ export class DegradationController {
   async _sampleOnce() {
     const targets = this.getTargets();
     if (!targets.length) return;
+    const epoch = this._epoch || 0; // captured before the awaits; a recoverNow() mid-pass bumps it
     let rttMs = 0;
     let lossFrac = 0;
     const readings = [];
@@ -234,6 +241,10 @@ export class DegradationController {
         /* a closed/negotiating sender has no stats — skip it this sample */
       }
     }
+    // A host recover-now landed while we were awaiting getStats: this pass's plan + report are stale
+    // (pre-recovery stats, since-reset ladder). Abandon it so we don't re-shed or report over the
+    // override — the next interval tick samples fresh.
+    if ((this._epoch || 0) !== epoch) return;
     const reason = limitationFromStats(readings);
     const plan = planLadder({ reason, senders: targets, state: this.state });
     this.state = plan.state;
@@ -295,9 +306,10 @@ function applyAction(sender, action) {
   });
 }
 
-// Debug/test seam: expose the PURE ladder helpers so a browser test can unit-test the decision
-// logic directly (cpu/bandwidth shedding order, program protection, hysteresis, peer-leave clamp)
-// without real media. Pure functions, no secrets, no behavior.
+// Debug/test seam: expose the PURE ladder helpers (and the controller class, for the recover-now /
+// in-flight-sample race test) so a browser test can drive the decision logic directly (cpu/bandwidth
+// shedding order, program protection, hysteresis, peer-leave clamp, recover-now cancellation) without
+// real media. Pure functions + the constructor; no secrets, no behavior change.
 if (typeof window !== "undefined") {
-  window.__gpDeg = { planLadder, signalFromStats, limitationFromStats };
+  window.__gpDeg = { planLadder, signalFromStats, limitationFromStats, DegradationController };
 }
