@@ -58,6 +58,9 @@ type wsStore interface {
 	GetPassByTokenHash(ctx context.Context, tokenHash string) (*store.Pass, error)
 	GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) (*store.Slot, error)
 	RecordSlotTokenUse(ctx context.Context, slotID, sourceIP string) error
+	// SetPassStatus backs a kick's token invalidation (D-25): revoking the target's pass so a
+	// reconnect is refused at the handshake (passJoinable → false).
+	SetPassStatus(ctx context.Context, id, status string) error
 }
 
 // tokenHasher is the subset of *token.Hasher the resolver uses.
