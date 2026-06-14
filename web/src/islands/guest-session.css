@@ -134,3 +134,14 @@
   color: var(--accent-ink);
   cursor: pointer;
 }
+
+/* Backstage thumbnails (D-10): the other participants over the P2P mesh, reusing the greenroom grid. */
+.gs-thumbs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gs-thumbs-label {
+  margin: 0;
+  font-weight: 600;
+}

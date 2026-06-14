@@ -462,10 +462,13 @@ internal/
   livecheck/          D-29 scraping, SSRF-closed
   jobs/               24h PII purge + idle-session reaper tickers (D-37/D-40)
 web/
-  src/rtc/            PeerLink (consume), Publisher (publish), Room (signaling WS + ICE
-                      config from the join-ack + {t:ice-refresh}), getStats sampling
-  src/islands/        device-check(+publish; renders guest-session in-session), greenroom grid,
-                      guest-session (in-session surface: self-view, chat, raise-hand, on-air, locks)
+  src/rtc/            PeerLink (host/OBS one-way consume), Publisher (publish), MeshPeer +
+                      MeshManager (guest↔guest bidirectional backstage-thumbnail mesh, D-10), Room
+                      (signaling WS + ICE config from the join-ack + {t:ice-refresh}), session
+                      (ReconnectingSession), getStats sampling
+  src/islands/        device-check(+publish + backstage mesh; renders guest-session in-session),
+                      greenroom grid, guest-session (self-view, chat, raise-hand, on-air, locks,
+                      backstage thumbnails), grid-tile (shared tile + moderation controls)
   src/obs/            cam + screen source pages (separate minimal entry — no fonts, EN-13)
   src/styles/         tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored MIT (D-32)   ·   fonts/  OFL woff2 ×3 (EN-17)

@@ -1,18 +1,22 @@
 import "./guest-session.css";
 import { useState, useRef, useEffect } from "preact/hooks";
+import { Tile } from "./grid-tile.js";
 
 /**
  * GuestSession is the guest's in-session surface (AC-12), rendered by the device-check island in
  * its "entered" phase. It deliberately shares the device-check's SINGLE pass-token signaling Room
  * (one connection per identity, EN-16) rather than being a second WS-owning island: device-check
- * owns the connection + the camera and folds the live reflections (on-air, streaming, locks) and
- * the chat/roster down as props, while this component owns the in-session presentation + the chat
- * draft and the raise-hand / send actions.
+ * owns the connection + the camera and folds the live reflections (on-air, streaming, locks), the
+ * chat/roster, and the backstage thumbnails down as props, while this component owns the in-session
+ * presentation + the chat draft and the raise-hand / send actions.
  *
  * It shows the guest's self-view, the three-state on-air SELF pill (D-24), the backstage chat
  * (relayed-but-never-recorded, EN-20 — see the microcopy), a raise-hand control whose state is the
- * server's roster value (not optimistic), and a separate "muted/hidden by host" force-lock notice
- * (D-13). Everyone-backstage thumbnails (the guest↔guest mesh, D-10) are a later PR.
+ * server's roster value (not optimistic), a separate "muted/hidden by host" force-lock notice
+ * (D-13), and the everyone-backstage thumbnails of the other participants over the P2P mesh (D-10).
+ * The thumbnails reuse the shared greenroom tile, so a co-host sees the moderation controls it may
+ * use within rank (AC-11) — a host-only /greenroom isn't reachable with a pass; a guest's are
+ * view-only.
  *
  * The wrapper preserves the device-check entered-view contract (`data-entered` / `data-pub` /
  * `data-locked`, `.dc-onair`, `.dc-live`) that the on-air and moderation browser tests assert.
@@ -44,6 +48,10 @@ function onAirLabel(onAir) {
  *   selfStream: MediaStream|null, peers: any[], selfId: string,
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
+ *   thumbnails: Array<{id:string, entry:any, stream:MediaStream|null}>, viewerRole: string,
+ *   onThumbForce: (id:string, m:string)=>void, onThumbRelease: (id:string, m:string)=>void,
+ *   onThumbRole: (id:string, role:string)=>void, onThumbDismissHand: (id:string)=>void,
+ *   onThumbReconnect: (id:string)=>void,
  * }} props
  * @returns {import("preact").VNode}
  */
@@ -59,6 +67,13 @@ export function GuestSession({
   handRaised,
   onSendChat,
   onToggleHand,
+  thumbnails,
+  viewerRole,
+  onThumbForce,
+  onThumbRelease,
+  onThumbRole,
+  onThumbDismissHand,
+  onThumbReconnect,
 }) {
   const [draft, setDraft] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
@@ -155,6 +170,27 @@ export function GuestSession({
           </button>
         </form>
       </section>
+
+      {(thumbnails || []).length > 0 ? (
+        <section class="gs-thumbs" aria-label="Backstage participants">
+          <p class="gs-thumbs-label">Everyone backstage</p>
+          <div class="greenroom-grid" data-count={thumbnails.length}>
+            {thumbnails.map((t) => (
+              <Tile
+                key={t.id}
+                entry={t.entry}
+                stream={t.stream}
+                viewerRole={viewerRole}
+                onReconnect={() => onThumbReconnect(t.id)}
+                onForce={(m) => onThumbForce(t.id, m)}
+                onRelease={(m) => onThumbRelease(t.id, m)}
+                onRole={(role) => onThumbRole(t.id, role)}
+                onDismissHand={() => onThumbDismissHand(t.id)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

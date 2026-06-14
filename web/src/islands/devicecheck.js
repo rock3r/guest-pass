@@ -2,6 +2,8 @@ import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { Publisher } from "../rtc/publisher.js";
 import { ReconnectingSession, TERMINAL_REASONS } from "../rtc/session.js";
+import { MeshManager, isMeshRole } from "../rtc/mesh.js";
+import { FORCE_FRAME } from "./grid-tile.js";
 import { GuestSession } from "./guest-session.js";
 
 /**
@@ -53,6 +55,12 @@ function DeviceCheck() {
   const [peers, setPeers] = useState(/** @type {any[]} */ ([]));
   const [selfId, setSelfId] = useState("");
   const [handRaised, setHandRaised] = useState(false);
+  // Backstage thumbnails (D-10): every other backstage guest/co-host rendered over a P2P mesh, plus
+  // this client's own rank (viewerRole) so a co-host's thumbnail tiles show the moderation controls
+  // it may use within rank (a guest's are view-only). A co-host moderates from here because the
+  // host-only /greenroom isn't reachable with a pass (AC-11 "a co-host, within rank").
+  const [thumbnails, setThumbnails] = useState(/** @type {Array<{id:string, entry:any, stream:MediaStream|null}>} */ ([]));
+  const [viewerRole, setViewerRole] = useState("guest");
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -68,6 +76,13 @@ function DeviceCheck() {
   const sessionRef = useRef(null);
   /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
   const pubRef = useRef(null);
+  /** @type {{current: import("../rtc/mesh.js").MeshManager|null}} */
+  const meshRef = useRef(null);
+  // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
+  // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
+  /** @type {{current: any[]}} */
+  const peersRef = useRef([]);
+  const selfIdRef = useRef("");
 
   // stopStream releases the camera/mic so the device light goes off. Called before a retry (so we
   // never leak a prior stream), on a FAILED entry, and on unmount. After a SUCCESSFUL entry the
@@ -120,60 +135,107 @@ function DeviceCheck() {
     [],
   );
 
+  // syncThumbnails rebuilds the backstage thumbnail list from the current roster (every other
+  // guest/co-host) and the mesh's received streams, in a stable id order so tiles don't reshuffle.
+  // Read from refs (not state) so it's correct whether called from a handler or the mesh callback.
+  function syncThumbnails() {
+    const streams = meshRef.current ? meshRef.current.streams() : new Map();
+    const tiles = peersRef.current
+      .filter((p) => isMeshRole(p.role) && p.id !== selfIdRef.current)
+      .map((p) => ({ id: p.id, entry: p, stream: streams.get(p.id) || null }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    setThumbnails(tiles);
+  }
+
   // startPublishing keeps the already-running preview stream and publishes it to the greenroom over
   // the guest's pass WS, so consumers (host monitor, OBS source) render the guest over P2P. The
   // server only relays the opaque SDP/ICE (D-23). It runs inside a ReconnectingSession (AC-13): a
   // dropped socket auto-retries (pubState → "reconnecting"), and a TERMINAL {t:terminate} routes to
-  // the matching error screen. setup() re-wires a fresh Publisher + handlers on each (re)connection.
+  // the matching error screen. setup() re-wires a fresh Publisher + mesh + handlers on each (re)connect.
   function startPublishing() {
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
         const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
         pubRef.current = publisher;
-        room.on("signal", (f) => publisher.onSignal(f));
+        // The backstage mesh (D-10): one bidirectional P2P link to each other guest/co-host for the
+        // thumbnails. The Publisher serves the one-way consumers (host monitor, OBS sources).
+        const mesh = new MeshManager(room, () => streamRef.current, syncThumbnails);
+        meshRef.current = mesh;
+        // Route each relayed signal by the sender's roster role: a guest/co-host (not us) is a mesh
+        // peer; the host or an OBS source consumes us over the Publisher. Deterministic-offerer mesh
+        // (lower id offers) means we only ever receive a mesh ANSWER/ICE from a higher-id peer and a
+        // mesh OFFER from a lower-id peer, so a single connection per pair — no ambiguity (D-23).
+        room.on("signal", (f) => {
+          const peer = peersRef.current.find((p) => p.id === f.from);
+          if (peer && isMeshRole(peer.role) && f.from !== selfIdRef.current) mesh.handleSignal(f);
+          else publisher.onSignal(f);
+        });
         // On-air self pill + global "we're live" reflection (D-24): the per-guest on-air is folded
         // into the roster (PR-1 retired the interim {t:onair} frame) — read it from this client's
         // OWN entry, located via the roster's `self` marker. The broadcast-level streaming state
         // stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
         room.on("roster", (f) => {
-          setPeers(f.peers || []); // drives chat sender names + (later) backstage thumbnails
-          if (f.self) setSelfId(f.self);
-          const me = (f.peers || []).find((p) => p.self || p.id === f.self);
-          if (!me) return;
-          setOnAir(me.onAir || "status-unavailable");
-          setHandRaised(!!me.handRaised); // server-authoritative raise-hand state (incl. host dismiss)
-          // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
-          // released one). The server also rejects any self-state that re-enables a locked modality,
-          // so this is cooperative source-side enforcement, not the authority (EN-7).
-          const locked = (me.locks || []).map((l) => l.kind);
-          for (const m of ["mic", "cam", "share"]) {
-            publisher.setModalityEnabled(m, !locked.includes(m));
+          const ps = f.peers || [];
+          peersRef.current = ps;
+          setPeers(ps); // drives chat sender names + the thumbnail roster
+          if (f.self) {
+            selfIdRef.current = f.self;
+            setSelfId(f.self);
           }
-          setLockedMods(locked);
+          const me = ps.find((p) => p.self || p.id === f.self);
+          if (me) {
+            setOnAir(me.onAir || "status-unavailable");
+            setHandRaised(!!me.handRaised); // server-authoritative raise-hand (incl. host dismiss)
+            setViewerRole(me.role); // our own rank → which thumbnail controls we may use (within rank)
+            // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
+            // released one). The server also rejects any self-state that re-enables a locked
+            // modality, so this is cooperative source-side enforcement, not the authority (EN-7).
+            const locked = (me.locks || []).map((l) => l.kind);
+            for (const m of ["mic", "cam", "share"]) {
+              publisher.setModalityEnabled(m, !locked.includes(m));
+            }
+            setLockedMods(locked);
+          }
+          mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
+          syncThumbnails();
         });
         // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The
         // server broadcasts to every participant INCLUDING the sender, so the guest's own messages
         // arrive here too — the panel renders only what the server relays, never an optimistic echo,
         // and the chat is never persisted or logged (the purity is the server's tested invariant).
         room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
-        // Keep the peer-name cache fresh between full roster broadcasts: a peer joining AFTER this
-        // guest arrives is announced as a {t:peer-joined} delta (existing peers don't get a fresh
-        // roster), so without this a later-joiner's chat would render as a raw peer id until some
-        // unrelated roster rebroadcast. Mirrors the greenroom's peer-joined/peer-left handling.
+        // Keep the roster cache fresh between full broadcasts: a peer joining AFTER this guest is
+        // announced as a {t:peer-joined} delta (existing peers don't get a fresh roster). This keeps
+        // chat sender-name resolution AND the thumbnail/mesh set current. Mirrors the greenroom.
         room.on("peer-joined", (f) => {
-          if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
+          if (!f.peer) return;
+          peersRef.current = [...peersRef.current.filter((p) => p.id !== f.peer.id), f.peer];
+          setPeers(peersRef.current);
+          mesh.sync(selfIdRef.current, peersRef.current);
+          syncThumbnails();
         });
-        room.on("peer-left", (f) => setPeers((prev) => prev.filter((p) => p.id !== f.peerId)));
+        room.on("peer-left", (f) => {
+          peersRef.current = peersRef.current.filter((p) => p.id !== f.peerId);
+          setPeers(peersRef.current);
+          mesh.sync(selfIdRef.current, peersRef.current);
+          syncThumbnails();
+        });
         room.on("streaming", (f) => setStreaming(!!f.active));
-        // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
-        room.onIce((servers) => publisher.applyIceServers(servers));
+        // Apply a refreshed ICE config (rotated TURN credential, EN-4) to every live connection.
+        room.onIce((servers) => {
+          publisher.applyIceServers(servers);
+          mesh.applyIceServers(servers);
+        });
       },
       teardown: () => {
-        // The link dropped (or we're closing): stop publishing (drop the dead peer connections)
-        // and degrade the reflected on-air + "we're live" state rather than keep asserting their
-        // last values (D-24). A successful reconnect re-arms them from the fresh roster + replay.
+        // The link dropped (or we're closing): stop publishing + tear down the mesh (drop the dead
+        // peer connections), clear the thumbnails, and degrade the reflected on-air + "we're live"
+        // state rather than assert stale values (D-24). A reconnect re-arms all of it from the
+        // fresh roster + replay.
         if (pubRef.current) pubRef.current.close();
+        if (meshRef.current) meshRef.current.close();
+        setThumbnails([]);
         setOnAir("status-unavailable");
         setStreaming(false);
       },
@@ -222,6 +284,26 @@ function DeviceCheck() {
     if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "hand", raised: !handRaised });
   }
 
+  // Backstage thumbnail moderation: a co-host (viewerRole "cohost") acts on a guest's tile within
+  // rank (AC-11) — the reducer enforces authority (EN-7); these only fire when the socket is live.
+  // promote/demote + hand-dismiss are host-only in the tile controls, so they never originate here
+  // (a host uses /greenroom), but the tile is shared so the callbacks are wired for completeness.
+  function thumbForce(id, m) {
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: FORCE_FRAME[m], peerId: id });
+  }
+  function thumbRelease(id, m) {
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "release", peerId: id, kind: m });
+  }
+  function thumbRole(id, role) {
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "role", peerId: id, role });
+  }
+  function thumbDismissHand(id) {
+    if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "hand", peerId: id, raised: false });
+  }
+  function thumbReconnect(id) {
+    if (meshRef.current) meshRef.current.reconnect(id);
+  }
+
   // A TERMINAL terminate (EN-9) ends the session for good — route to the matching error screen and
   // never reconnect. Checked before the phase screens so it wins over the in-session view.
   if (terminated) {
@@ -252,6 +334,13 @@ function DeviceCheck() {
         handRaised={handRaised}
         onSendChat={sendChat}
         onToggleHand={toggleHand}
+        thumbnails={thumbnails}
+        viewerRole={viewerRole}
+        onThumbForce={thumbForce}
+        onThumbRelease={thumbRelease}
+        onThumbRole={thumbRole}
+        onThumbDismissHand={thumbDismissHand}
+        onThumbReconnect={thumbReconnect}
       />
     );
   }
