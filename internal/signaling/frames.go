@@ -23,6 +23,7 @@ type Frame struct {
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
 	Kind           string          `json:"kind,omitempty"` // {t:release} modality: mic | cam | share (D-13)
+	Role           string          `json:"role,omitempty"` // {t:role} target role: cohost | guest (host-only, D-15)
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
 	// and the local audio meter. These are POINTERS so an ABSENT field means "leave it
 	// unchanged" — a meter-only update ({"t":"state","level":…}) must not clobber presence to
