@@ -65,12 +65,35 @@ func TestApplyStatsIgnoresNonParticipant(t *testing.T) {
 	}
 }
 
-// AC-15: degradation transparency is HOST-only. The host sees every tile's signal/degraded, but a
-// non-host (guest/co-host) sees only its OWN — another guest's health is stripped from its
-// projection (the data never reaches a guest, not merely hidden client-side).
-func TestApplyStatsHostOnlyTransparency(t *testing.T) {
+// T-14 / AC-15: a host "bump quality now" broadcasts {t:recover-quality} to every PARTICIPANT
+// (publisher) so each recovers locally; OBS source virtual peers don't publish and don't receive it.
+func TestRecoverQualityBroadcastsToParticipants(t *testing.T) {
 	s := newRoomState()
 	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.join("co", "cohost", "")
+
+	got := map[PeerID]bool{}
+	for _, o := range s.recoverQuality() {
+		if o.frame.T != "recover-quality" {
+			t.Fatalf("unexpected frame %q in the recover-quality broadcast", o.frame.T)
+		}
+		got[o.to] = true
+	}
+	for _, id := range []PeerID{"host", "g1", "co"} {
+		if !got[id] {
+			t.Fatalf("recover-quality must reach participant %q, got %+v", id, got)
+		}
+	}
+}
+
+// AC-15 (M3 plan default): degradation transparency reaches the HOST and CO-HOST (read-only — only
+// the host has the quality controls), but a plain GUEST sees only its OWN — another guest's health
+// is stripped from a guest's projection (the data never reaches a guest, not merely hidden client-side).
+func TestApplyStatsTransparencyHostAndCohostNotGuest(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("co", "cohost", "")
 	s.join("g1", "guest", "")
 	s.join("g2", "guest", "")
 	out := s.applyStats("g1", 2, 90, &DegradedView{Dir: "lowering", Reason: "cpu"})
@@ -78,10 +101,13 @@ func TestApplyStatsHostOnlyTransparency(t *testing.T) {
 	if sig, deg := statsOf(out, "host", "g1"); sig != 2 || deg == nil {
 		t.Fatalf("the host must see g1's signal+degraded, got sig=%d deg=%+v", sig, deg)
 	}
+	if sig, deg := statsOf(out, "co", "g1"); sig != 2 || deg == nil {
+		t.Fatalf("a co-host must see g1's signal+degraded (read-only transparency), got sig=%d deg=%+v", sig, deg)
+	}
 	if sig, deg := statsOf(out, "g1", "g1"); sig != 2 || deg == nil {
 		t.Fatalf("g1 must see its OWN signal+degraded, got sig=%d deg=%+v", sig, deg)
 	}
 	if sig, deg := statsOf(out, "g2", "g1"); sig != 0 || deg != nil {
-		t.Fatalf("a guest must NOT see another guest's degradation (AC-15), got sig=%d deg=%+v", sig, deg)
+		t.Fatalf("a plain guest must NOT see another guest's degradation (AC-15), got sig=%d deg=%+v", sig, deg)
 	}
 }

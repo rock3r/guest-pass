@@ -141,13 +141,26 @@ function Greenroom() {
   }, []);
 
   return (
-    <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
-      {tiles.length === 0 ? (
-        <p class="gr-empty" data-state={state}>
-          Waiting for guests to join…
-        </p>
-      ) : (
-        tiles.map((t) => (
+    <div class="greenroom" data-state={state}>
+      <div class="gr-toolbar">
+        {/* Host-only "bump quality now" (AD-21/D-34): broadcasts {t:recover-quality} so every
+            publisher recovers immediately, overriding the slow recover hysteresis. */}
+        <button
+          type="button"
+          class="gr-recover"
+          disabled={state !== "live"}
+          onClick={() => roomRef.current?.send({ t: "recover-quality" })}
+        >
+          Bump quality now
+        </button>
+      </div>
+      <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
+        {tiles.length === 0 ? (
+          <p class="gr-empty" data-state={state}>
+            Waiting for guests to join…
+          </p>
+        ) : (
+          tiles.map((t) => (
           <Tile
             key={t.id}
             entry={t.entry}
@@ -163,8 +176,9 @@ function Greenroom() {
             onRole={(role) => roomRef.current?.send({ t: "role", peerId: t.id, role })}
             onDismissHand={() => roomRef.current?.send({ t: "hand", peerId: t.id, raised: false })}
           />
-        ))
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }

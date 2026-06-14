@@ -115,3 +115,27 @@
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Degradation transparency (AD-21/AC-15): per-tile degrading/recovering badge + the host's
+   room-level "bump quality now" control. Functional-first (D-B). */
+.gr-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+.gr-recover {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.gr-degraded {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8a5a1f;
+}
+.gr-degraded[data-degraded^="recovering"] {
+  color: #1f6a3a;
+}

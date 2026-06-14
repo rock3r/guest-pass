@@ -257,6 +257,11 @@ function DeviceCheck() {
           syncThumbnails();
         });
         room.on("streaming", (f) => setStreaming(!!f.active));
+        // Host "bump quality now" (AD-21/D-34): restore our shed senders immediately, overriding the
+        // slow recover hysteresis. If the pressure persists, the next sample re-degrades.
+        room.on("recover-quality", () => {
+          if (degRef.current) degRef.current.recoverNow();
+        });
         // Apply a refreshed ICE config (rotated TURN credential, EN-4) to every live connection.
         room.onIce((servers) => {
           publisher.applyIceServers(servers);

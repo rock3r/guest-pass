@@ -181,6 +181,31 @@ export class DegradationController {
     this._timer = undefined;
   }
 
+  /**
+   * recoverNow restores every shed sender immediately and resets the ladder — the host "bump
+   * quality now" override (D-34), bypassing the slow recover hysteresis. If the pressure persists,
+   * the next sample simply re-degrades; the immediate sample() re-reports current health.
+   */
+  recoverNow() {
+    // Invalidate any sample() currently suspended mid-pass (it captured the prior epoch at its start):
+    // when it resumes after `await getStats()` it must NOT re-apply its now-stale shedding plan — built
+    // from pre-recovery stats against the ladder this override is about to reset — nor emit a stale
+    // {t:stats} that would undo this recovery (the degrade-fast path racing the host's "bump quality
+    // now"). The resuming pass sees the bumped epoch and abandons itself.
+    this._epoch = (this._epoch || 0) + 1;
+    for (const t of this.getTargets()) {
+      applyAction(t.sender, { active: true, params: { scaleResolutionDownBy: 1 } });
+    }
+    this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
+    // Report recovered IMMEDIATELY (don't wait for the next ~2s sample) so the host's badge and the
+    // guest's own degradation clear right away — that's the point of the override. If the pressure
+    // persists, the next sample re-degrades.
+    this.report({ signal: this._lastSignal || 0, rttMs: this._lastRttMs || 0, degraded: null });
+    // Debug/test observability: count "bump quality now" executions (deterministic — natural
+    // recovery never calls this), so a test can prove the host→broadcast→recoverNow wiring fired.
+    if (typeof window !== "undefined") window.__gpRecoverNowCount = (window.__gpRecoverNowCount || 0) + 1;
+  }
+
   /** sample reads getStats across the live senders, plans the ladder, applies it, and reports. */
   async sample() {
     // Re-entrancy guard: getStats() is async, so a slow round could overlap the next interval tick
@@ -198,6 +223,7 @@ export class DegradationController {
   async _sampleOnce() {
     const targets = this.getTargets();
     if (!targets.length) return;
+    const epoch = this._epoch || 0; // captured before the awaits; a recoverNow() mid-pass bumps it
     let rttMs = 0;
     let lossFrac = 0;
     const readings = [];
@@ -215,6 +241,10 @@ export class DegradationController {
         /* a closed/negotiating sender has no stats — skip it this sample */
       }
     }
+    // A host recover-now landed while we were awaiting getStats: this pass's plan + report are stale
+    // (pre-recovery stats, since-reset ladder). Abandon it so we don't re-shed or report over the
+    // override — the next interval tick samples fresh.
+    if ((this._epoch || 0) !== epoch) return;
     const reason = limitationFromStats(readings);
     const plan = planLadder({ reason, senders: targets, state: this.state });
     this.state = plan.state;
@@ -227,7 +257,9 @@ export class DegradationController {
     if (typeof window !== "undefined") {
       window.__gpDegradation = { reason, degraded: plan.degraded, actions: plan.actions, disabled: plan.disabled };
     }
-    this.report({ signal: signalFromStats(rttMs, lossFrac), rttMs, degraded: plan.degraded });
+    this._lastSignal = signalFromStats(rttMs, lossFrac); // remembered so recoverNow can report at once
+    this._lastRttMs = rttMs;
+    this.report({ signal: this._lastSignal, rttMs, degraded: plan.degraded });
   }
 }
 
@@ -274,9 +306,10 @@ function applyAction(sender, action) {
   });
 }
 
-// Debug/test seam: expose the PURE ladder helpers so a browser test can unit-test the decision
-// logic directly (cpu/bandwidth shedding order, program protection, hysteresis, peer-leave clamp)
-// without real media. Pure functions, no secrets, no behavior.
+// Debug/test seam: expose the PURE ladder helpers (and the controller class, for the recover-now /
+// in-flight-sample race test) so a browser test can drive the decision logic directly (cpu/bandwidth
+// shedding order, program protection, hysteresis, peer-leave clamp, recover-now cancellation) without
+// real media. Pure functions + the constructor; no secrets, no behavior change.
 if (typeof window !== "undefined") {
-  window.__gpDeg = { planLadder, signalFromStats, limitationFromStats };
+  window.__gpDeg = { planLadder, signalFromStats, limitationFromStats, DegradationController };
 }

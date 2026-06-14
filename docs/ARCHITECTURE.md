@@ -211,11 +211,15 @@ host configures the priority and sees full transparency, but **no host controls
 another guest's encoders directly**; control over outbound is always local to the
 publisher.
 
-> **PROVISIONAL pending SPIKE-0 (RF-1 / AD-24).** Browsers expose no direct
-> encoder-count control, and lowering a sender's bitrate/scale via `setParameters()`
-> may *not* actually free a hardware (NVENC) encoder session. The model is the only
-> mesh-coherent one, but the *mechanism* — and therefore the ~6 cap — is unproven
-> until the real-hardware encoder probe runs. Treat the numbers as estimates until then.
+> **CONFIRMED by SPIKE-0 (RF-1 / AD-24), wired in M3 (PR-13/14).** The real-hardware encoder
+> probe proved `setParameters({active:false})` frees encodes on Mac, Windows/RTX-3080Ti, and a weak
+> fanless Pixelbook — the mechanism works and weak hardware degrades gracefully (the ~6 cap is
+> hardware-dependent, not a hard limit). M3 wires it: each publisher samples its own `getStats()`,
+> sheds on this ladder with degrade-fast / recover-slow hysteresis, and self-reports `{t:stats}`; the
+> host sees per-tile health + a degrading/recovering badge and can **"bump quality now"**
+> (`{t:recover-quality}`) to override the slow recovery. The program/monitor publish path is never
+> hard-disabled (only thumbnails are); the program is degraded by params (fps before res) as a last
+> resort. (Loopback "bandwidth" `qualityLimitationReason` readings are artifacts and discounted.)
 
 | Priority | Stream | Treatment |
 |---|---|---|
@@ -871,6 +875,8 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 
 // Roles — host only (D-15)
 {"t":"role","peerId":"<id>","role":"cohost"|"guest"}      // promote / demote (live, from the greenroom)
+{"t":"recover-quality"}                                   // "bump quality now" (AD-21/D-34): broadcast to
+                                                          // every publisher to recover immediately, host only
 
 // Screenshare preview-switcher — host only (D-21); the one sanctioned exception to "OBS owns composition"
 {"t":"screen-select","peerId":"<id>"}                     // promote this active backstage share to LIVE

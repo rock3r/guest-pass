@@ -464,6 +464,20 @@ func (s *roomState) obsStreaming(active bool) []outbound {
 	return out
 }
 
+// recoverQuality broadcasts a host "bump quality now" to every participant (AD-21/D-34): each
+// publisher restores its own shed senders immediately, overriding the slow recover hysteresis. It
+// carries no state and touches no media — the actual recovery is per-publisher-local (D-23).
+func (s *roomState) recoverQuality() []outbound {
+	var out []outbound
+	for pid, p := range s.peers {
+		if !isParticipant(p.role) {
+			continue
+		}
+		out = append(out, outbound{to: pid, frame: Frame{T: "recover-quality"}})
+	}
+	return out
+}
+
 // relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
 // The sdp/ice payloads are opaque (json.RawMessage) and relayed byte-for-byte; the server
 // never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice} —

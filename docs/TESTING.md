@@ -129,8 +129,8 @@ slot-rebind re-subscribe, and that an occupant actually renders.
 What it does **not** prove (RF-7), and what covers each instead:
 
 - **Capacity** (the "~6 guests" target) — chromedp cannot prove this; encoder
-  feasibility on real hardware is proven by **SPIKE-0** before M1 (AD-24, and the
-  basis on which AD-21 is still *provisional* — see
+  feasibility on real hardware is proven by **SPIKE-0** before M1 (AD-24, the
+  basis on which SPIKE-0 confirmed AD-21 — now wired in M3, see
   [§5](#5-what-cannot-be-automated)).
 - **Real-network / NAT traversal**, **real OBS-CEF media receive**, and
   **Safari/mobile** — none are exercised by fake-media headless Chrome; all are
@@ -257,9 +257,10 @@ These gates are manual by necessity:
 - **SPIKE-0 — encoder-capacity probe on real hardware, BEFORE M1** (AD-24). A
   throwaway probe spinning up N `RTCPeerConnection`s on **real hardware** is the
   **primary proof of the "~6 guests" capacity** — chromedp/fake-media cannot
-  prove it (RF-7). It is also the gate on which **AD-21 is still PROVISIONAL**:
-  the `setParameters()` "shed an encoder" mechanism is unproven until SPIKE-0
-  demonstrates it. This runs **pre-build** and is **not CI-automatable**.
+  prove it (RF-7). It is also the gate that **confirmed AD-21**: the
+  `setParameters()` "shed an encoder" mechanism was unproven until SPIKE-0
+  demonstrated it (now wired in M3, PR-13/PR-14). This runs **pre-build** and is
+  **not CI-automatable**.
 - **Real OBS-CEF media-receive smoke — gate at SPIKE-2 / M2 step 0** (RF-17 /
   AD-10). Before building on the OBS path, prove an **actual OBS browser source
   (CEF 127) receives and renders media** — not merely that the page renegotiates.
@@ -316,7 +317,7 @@ M1 DoD gate**, not a CI step.
 
 **SPIKE-0** ([§5](#5-what-cannot-be-automated)) sits *before* this picture: it is
 a **pre-build, real-hardware gate** (AD-24) — the capacity proof for "~6 guests"
-and the precondition for promoting AD-21 from provisional. It is **not
+and the gate that confirmed AD-21 (since wired in M3). It is **not
 CI-automatable** (real encoders, real hardware) and gates M1, not any CI job.
 
 ---
