@@ -18,14 +18,23 @@ type Frame struct {
 	Slot           string          `json:"slot,omitempty"`
 	OccupantPeerID string          `json:"occupantPeerId,omitempty"`
 	Epoch          *int            `json:"epoch,omitempty"` // pointer so epoch rides ONLY slot frames; &0 still serializes (EN-3)
-	Event          string          `json:"event,omitempty"`
-	Active         bool            `json:"active,omitempty"`
-	OnAir          string          `json:"onAir,omitempty"`
-	Reason         string          `json:"reason,omitempty"`
-	Kind           string          `json:"kind,omitempty"`   // {t:release} modality: mic | cam | share (D-13)
-	Role           string          `json:"role,omitempty"`   // {t:role} target role: cohost | guest (host-only, D-15)
-	Text           string          `json:"text,omitempty"`   // {t:chat} backstage message — relayed only, NEVER persisted or logged (EN-20)
-	Raised         bool            `json:"raised,omitempty"` // {t:hand} hand-raise state — true = raise (self), false = lower (self) / dismiss (host)
+	// LockKinds carries a {t:"occupant-locks"} projection to an OBS source page: the bound occupant's
+	// active suppression-lock KINDS (mic|cam|share) so the source detaches the locked REMOTE track from
+	// the program output, independent of the (possibly modified) occupant (RF-8 receiver-side). It is
+	// deliberately KINDS-ONLY — never applierPeerId/applierRank — since source pages get no roster
+	// (EN-13) and the slot token is a permanent crown-jewel credential (EN-5): the source needs which
+	// modalities to drop, not who applied them. It rides the slot epoch + occupantPeerId so the source
+	// ignores a straggler for a prior occupant/epoch (EN-3). Moderators read the full LockView (with
+	// applier) from the roster's locks field instead.
+	LockKinds []string `json:"lockKinds,omitempty"`
+	Event     string   `json:"event,omitempty"`
+	Active    bool     `json:"active,omitempty"`
+	OnAir     string   `json:"onAir,omitempty"`
+	Reason    string   `json:"reason,omitempty"`
+	Kind      string   `json:"kind,omitempty"`   // {t:release} modality: mic | cam | share (D-13)
+	Role      string   `json:"role,omitempty"`   // {t:role} target role: cohost | guest (host-only, D-15)
+	Text      string   `json:"text,omitempty"`   // {t:chat} backstage message — relayed only, NEVER persisted or logged (EN-20)
+	Raised    bool     `json:"raised,omitempty"` // {t:hand} hand-raise state — true = raise (self), false = lower (self) / dismiss (host)
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
 	// and the local audio meter. These are POINTERS so an ABSENT field means "leave it
 	// unchanged" — a meter-only update ({"t":"state","level":…}) must not clobber presence to

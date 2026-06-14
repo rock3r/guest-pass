@@ -233,6 +233,13 @@ function DeviceCheck() {
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
+          // RF-8 (receiver-side): detach each OTHER peer's force-suppressed thumbnail track from the
+          // mesh, independent of whether that peer cooperates at source — driven by the roster locks.
+          for (const p of ps) {
+            if (p.id !== selfIdRef.current && isMeshRole(p.role)) {
+              mesh.setLocks(p.id, (p.locks || []).map((l) => l.kind));
+            }
+          }
           syncThumbnails();
         });
         // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The
@@ -248,6 +255,10 @@ function DeviceCheck() {
           peersRef.current = [...peersRef.current.filter((p) => p.id !== f.peer.id), f.peer];
           setPeers(peersRef.current);
           mesh.sync(selfIdRef.current, peersRef.current);
+          // RF-8: a (re)joining peer may already be force-locked (locks ride peer-joined too) — enforce.
+          if (isMeshRole(f.peer.role) && f.peer.id !== selfIdRef.current) {
+            mesh.setLocks(f.peer.id, (f.peer.locks || []).map((l) => l.kind));
+          }
           syncThumbnails();
         });
         room.on("peer-left", (f) => {

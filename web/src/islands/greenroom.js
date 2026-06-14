@@ -63,12 +63,24 @@ function Greenroom() {
       linksRef.current.set(id, link);
       link.pc.ontrack = (e) => {
         streamsRef.current.set(id, e.streams[0]);
+        applyLocks(id); // re-assert any active suppression lock on the freshly-arrived track (RF-8)
         syncTiles();
       };
       link.pc.oniceconnectionstatechange = () => {
         if (link.pc.iceConnectionState === "failed") link.restartIce();
       };
       link.offer();
+    }
+
+    // applyLocks enforces a peer's suppression locks on its live monitor link (RF-8 receiver-side):
+    // detach each locked modality's REMOTE track from this tile (and re-attach a released one),
+    // independent of whether the locked peer cooperates at source. Driven by the roster's entry.locks.
+    function applyLocks(id) {
+      const link = linksRef.current.get(id);
+      const entry = entriesRef.current.get(id);
+      if (!link || !entry) return;
+      const locked = new Set((entry.locks || []).map((l) => l.kind));
+      for (const m of ["mic", "cam", "share"]) link.setRemoteTrackEnabled(m, !locked.has(m));
     }
 
     function dropPeer(id) {
@@ -83,6 +95,7 @@ function Greenroom() {
       if (!entry || !isGuestRole(entry.role)) return; // grid renders guests/co-hosts only
       entriesRef.current.set(entry.id, entry);
       ensureLink(entry.id);
+      applyLocks(entry.id); // a roster / peer-joined update may have changed locks → enforce (RF-8)
     }
 
     room.on("roster", (f) => {

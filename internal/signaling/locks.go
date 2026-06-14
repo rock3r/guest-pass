@@ -84,7 +84,10 @@ func (s *roomState) force(actor, target PeerID, modality string) []outbound {
 	if pres := t.modalityPresence(modality); pres != nil {
 		*pres = false
 	}
-	return s.rebroadcastRoster()
+	// The roster carries the lock to every participant consumer (greenroom + mesh, EN-8); a slot's
+	// OBS source gets no roster (EN-13), so it learns the lock via a dedicated occupant-locks frame
+	// and detaches the locked remote track from the program output (RF-8 receiver-side).
+	return append(s.rebroadcastRoster(), s.sourceLockFrames(target)...)
 }
 
 // release lifts a suppression lock (D-13). The target can NEVER self-release; an actor may
@@ -111,7 +114,9 @@ func (s *roomState) release(actor, target PeerID, modality string) []outbound {
 		return nil // not authorized at the actor's current rank (rank < floor)
 	}
 	s.clearLock(target, modality)
-	return s.rebroadcastRoster()
+	// Re-project to the occupant's OBS source(s) too (RF-8): the source re-enables the released
+	// remote track. The roster re-broadcast covers the greenroom + mesh consumers.
+	return append(s.rebroadcastRoster(), s.sourceLockFrames(target)...)
 }
 
 // setRole promotes/demotes a participant between co-host and guest (D-15). It is HOST-ONLY:
@@ -166,6 +171,25 @@ func (s *roomState) locksOf(target PeerID) []LockView {
 	for _, kind := range lockKinds { // canonical mic→cam→share order: deterministic projection
 		if lock := locks[kind]; lock != nil {
 			out = append(out, LockView{Kind: kind, ApplierPeerID: string(lock.applier), ApplierRank: rankName(lock.floor)})
+		}
+	}
+	return out
+}
+
+// lockKindsOf projects a target's active lock KINDS in canonical order (mic→cam→share), or nil
+// when none. This is the MINIMAL projection sent to an OBS source page (RF-8 receiver-side): the
+// source needs only WHICH modalities to detach, never the applier identity/rank that the roster's
+// LockView carries — source pages get no roster (EN-13) and the slot token is a crown-jewel
+// permanent credential (EN-5), so the source must learn no moderator metadata.
+func (s *roomState) lockKindsOf(target PeerID) []string {
+	locks := s.locks[target]
+	if len(locks) == 0 {
+		return nil
+	}
+	var out []string
+	for _, kind := range lockKinds {
+		if locks[kind] != nil {
+			out = append(out, kind)
 		}
 	}
 	return out

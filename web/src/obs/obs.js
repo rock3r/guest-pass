@@ -32,6 +32,12 @@ function start() {
   let link = null;
   /** @type {string|null} the peer id currently bound to this slot */
   let occupant = null;
+  // The bound occupant's force-suppressed modalities (mic|cam|share), from the server's
+  // {t:occupant-locks} projection (RF-8 receiver-side). An OBS source gets no roster, so this is how
+  // it learns a lock and detaches the matching REMOTE track from the program output — a force really
+  // suppresses the occupant on air, independent of whether the occupant cooperates. Reset on rebind.
+  /** @type {string[]} */
+  let lockedMods = [];
   // The slot epoch we last acted on. A frame from an older epoch is a stale straggler and is
   // ignored (EN-3); the server's epoch is monotonic per slot, so a fresh connection's binding
   // frame is always >= this. Reset on disconnect so the reconnect's binding is always taken.
@@ -46,7 +52,17 @@ function start() {
     if (link) link.close();
     link = null;
     occupant = null;
+    lockedMods = []; // a (re)bind re-projects from the server; never carry a prior occupant's locks
     if (video) video.srcObject = null;
+  }
+
+  // applyOccupantLocks detaches/re-attaches the bound occupant's REMOTE tracks per the current lock
+  // set (RF-8 receiver-side). Re-asserted both when the lock set changes and when a fresh track
+  // arrives (ontrack), so a lock that landed BEFORE media — a pre-existing/seeded lock, or one
+  // re-projected on reconnect — still takes effect on the program output.
+  function applyOccupantLocks() {
+    if (!link) return;
+    for (const m of ["mic", "cam", "share"]) link.setRemoteTrackEnabled(m, !lockedMods.includes(m));
   }
 
   function connect() {
@@ -62,6 +78,7 @@ function start() {
       link = l;
       l.pc.ontrack = (e) => {
         if (video) video.srcObject = e.streams[0];
+        applyOccupantLocks(); // re-assert any active suppression lock on the freshly-arrived track (RF-8)
       };
       l.pc.oniceconnectionstatechange = () => {
         // A dropped path (NAT rebind, network change) self-heals with an ICE restart rather
@@ -90,6 +107,16 @@ function start() {
 
     room.on("slot-rebind", (f) => bind(f.occupantPeerId, f.epoch));
     room.on("slot-unbound", (f) => unbind(f.epoch));
+    // RF-8 (receiver-side): the server projects the bound occupant's force-locked modality KINDS here
+    // (an OBS source gets no roster). Detach the locked REMOTE track from the program output. Gated by
+    // occupant + epoch — the same straggler defence as the slot frames — so a late frame for a prior
+    // occupant/epoch can't mislight the air-critical surface (EN-3).
+    room.on("occupant-locks", (f) => {
+      if (f.occupantPeerId !== occupant) return;
+      if (typeof f.epoch === "number" && f.epoch < epoch) return;
+      lockedMods = f.lockKinds || [];
+      applyOccupantLocks();
+    });
     room.on("signal", (f) => {
       if (link && f.from === occupant) link.onSignal(f);
     });
