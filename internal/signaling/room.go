@@ -221,6 +221,15 @@ func (r *Room) Chat(from PeerID, text string) {
 	})
 }
 
+// SetHand raises/lowers a participant's hand, folded into the roster's handRaised. A participant
+// controls its OWN hand; the host may dismiss (lower) another's. Authority is enforced
+// server-side against current rank (EN-7).
+func (r *Room) SetHand(actor, target PeerID, raised bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setHand(actor, target, raised))
+	})
+}
+
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
 // provided (non-nil) modality updates and, on a real change, every viewer's roster
 // re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber

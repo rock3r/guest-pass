@@ -138,6 +138,9 @@ func (s *roomState) setRole(actor, target PeerID, newRole string) []outbound {
 		return nil // no-op
 	}
 	t.role = newRole
+	// A role change clears any pending hand-raise: promoting a guest to co-host IS "bringing
+	// them in", so the nudge is moot (plan default: auto-cleared on promotion).
+	t.handRaised = false
 	return s.rebroadcastRoster()
 }
 
