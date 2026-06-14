@@ -64,3 +64,24 @@ func TestApplyStatsIgnoresNonParticipant(t *testing.T) {
 		t.Fatalf("stats from a non-participant must be a no-op, got %+v", out)
 	}
 }
+
+// AC-15: degradation transparency is HOST-only. The host sees every tile's signal/degraded, but a
+// non-host (guest/co-host) sees only its OWN — another guest's health is stripped from its
+// projection (the data never reaches a guest, not merely hidden client-side).
+func TestApplyStatsHostOnlyTransparency(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.join("g2", "guest", "")
+	out := s.applyStats("g1", 2, 90, &DegradedView{Dir: "lowering", Reason: "cpu"})
+
+	if sig, deg := statsOf(out, "host", "g1"); sig != 2 || deg == nil {
+		t.Fatalf("the host must see g1's signal+degraded, got sig=%d deg=%+v", sig, deg)
+	}
+	if sig, deg := statsOf(out, "g1", "g1"); sig != 2 || deg == nil {
+		t.Fatalf("g1 must see its OWN signal+degraded, got sig=%d deg=%+v", sig, deg)
+	}
+	if sig, deg := statsOf(out, "g2", "g1"); sig != 0 || deg != nil {
+		t.Fatalf("a guest must NOT see another guest's degradation (AC-15), got sig=%d deg=%+v", sig, deg)
+	}
+}

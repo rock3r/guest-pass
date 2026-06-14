@@ -31,6 +31,61 @@ const statsOverrideJS = `
 })();
 `
 
+// T-13 (unit): the PURE shedding ladder, exercised directly in the browser (no media), via the
+// window.__gpDeg debug seam. Covers cpu shed order + program protection, the peer-leave recovery
+// clamp (the crash repro), bandwidth param stepping, and recover-slow hysteresis.
+func TestDegradation_PlanLadderUnit(t *testing.T) {
+	s := seedDeviceCheck(t)
+	Chrome(t, 60*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.Poll(`typeof (window.__gpDeg && window.__gpDeg.planLadder) === "function"`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("degradation ladder helpers not exposed: %v", err)
+		}
+		check := func(what, expr string) {
+			var ok bool
+			if err := chromedp.Run(cctx, chromedp.Evaluate(expr, &ok)); err != nil || !ok {
+				t.Fatalf("planLadder %s: ok=%v err=%v", what, ok, err)
+			}
+		}
+		// cpu sheds the lowest-priority thumbnail, NEVER the protected program.
+		check("cpu shed + protect", `(() => {
+			const r = window.__gpDeg.planLadder({reason:"cpu",
+				senders:[{key:"mesh:a",priority:1},{key:"pub:h",priority:3,protected:true}],
+				state:{cpuLevel:0,bw:{},recoverStreak:0,lastReason:null}});
+			return r.disabled.indexOf("mesh:a")>=0 && r.disabled.indexOf("pub:h")<0
+				&& r.degraded && r.degraded.dir==="lowering" && r.degraded.reason==="cpu";
+		})()`)
+		// Peer-leave clamp: a shed thumbnail peer left (only the protected sender remains) — the
+		// carried cpuLevel must clamp instead of indexing past the shrunken sheddable list (no throw).
+		check("peer-leave clamp", `(() => {
+			try {
+				const r = window.__gpDeg.planLadder({reason:null,
+					senders:[{key:"pub:h",priority:3,protected:true}],
+					state:{cpuLevel:1,bw:{},recoverStreak:2,lastReason:"cpu"}});
+				return r.degraded===null && r.disabled.length===0;
+			} catch (e) { return false; }
+		})()`)
+		// bandwidth lowers the constrained link's PARAMS (res first), not active:false.
+		check("bandwidth params", `(() => {
+			const r = window.__gpDeg.planLadder({reason:"bandwidth",
+				senders:[{key:"mesh:a",priority:1}],
+				state:{cpuLevel:0,bw:{},recoverStreak:0,lastReason:null}});
+			return r.actions.some((a)=>a.params && a.params.scaleResolutionDownBy>=2)
+				&& r.degraded && r.degraded.reason==="bandwidth";
+		})()`)
+		// recover-slow hysteresis: one clean sample after shedding does NOT recover yet.
+		check("hysteresis hold", `(() => {
+			const r = window.__gpDeg.planLadder({reason:null,
+				senders:[{key:"mesh:a",priority:1}],
+				state:{cpuLevel:1,bw:{},recoverStreak:0,lastReason:"cpu"}});
+			return r.actions.length===0 && r.state.recoverStreak===1 && r.degraded && r.degraded.dir==="lowering";
+		})()`)
+	})
+}
+
 // T-13 / AC-14: per-publisher degradation. A guest meshes with another (so it has a sender to
 // shed), then a forced cpu limitation makes its DegradationController shed the lowest-priority
 // (backstage-thumbnail) sender via setParameters and self-report {t:stats,degraded:lowering/cpu};

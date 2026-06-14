@@ -74,7 +74,6 @@ export function limitationFromStats(senderReadings) {
  * @returns {{state:any, actions:Array<{key:string, active?:boolean, params?:object}>, degraded:{dir:string,reason:string}|null}}
  */
 export function planLadder({ reason, senders, state }) {
-  const cpuLevel = state.cpuLevel || 0;
   const bw = { ...(state.bw || {}) };
   let recoverStreak = state.recoverStreak || 0;
   let lastReason = state.lastReason || null;
@@ -86,6 +85,10 @@ export function planLadder({ reason, senders, state }) {
   // resort" (DESIGN ladder) — for M3 the host warning is the degraded badge; we shed thumbnails and,
   // once they're exhausted, report the pressure without cutting the program.
   const sheddable = byShedOrder.filter((s) => !s.protected);
+  // Clamp the carried shed level to the senders that still exist: a shed thumbnail peer can leave
+  // before recovery, shrinking `sheddable`, and an unclamped index would read undefined and throw
+  // (breaking the sampler). Clamping treats the departed sender as already recovered.
+  const cpuLevel = Math.min(state.cpuLevel || 0, sheddable.length);
 
   let newCpuLevel = cpuLevel;
   let dir = null;
@@ -180,6 +183,19 @@ export class DegradationController {
 
   /** sample reads getStats across the live senders, plans the ladder, applies it, and reports. */
   async sample() {
+    // Re-entrancy guard: getStats() is async, so a slow round could overlap the next interval tick
+    // and two passes would race this.state (conflicting actions / lost recovery streak). Skip a tick
+    // if the prior sample is still in flight.
+    if (this._sampling) return;
+    this._sampling = true;
+    try {
+      await this._sampleOnce();
+    } finally {
+      this._sampling = false;
+    }
+  }
+
+  async _sampleOnce() {
     const targets = this.getTargets();
     if (!targets.length) return;
     let rttMs = 0;
@@ -256,4 +272,11 @@ function applyAction(sender, action) {
   return sender.setParameters(p).catch(() => {
     /* setParameters can reject on a renegotiating sender; the next sample retries */
   });
+}
+
+// Debug/test seam: expose the PURE ladder helpers so a browser test can unit-test the decision
+// logic directly (cpu/bandwidth shedding order, program protection, hysteresis, peer-leave clamp)
+// without real media. Pure functions, no secrets, no behavior.
+if (typeof window !== "undefined") {
+  window.__gpDeg = { planLadder, signalFromStats, limitationFromStats };
 }
