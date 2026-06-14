@@ -163,6 +163,13 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if !id.isSource() && isLockModality(f.Kind) {
 			room.Release(id.peer, signaling.PeerID(f.PeerID), f.Kind)
 		}
+	case "role":
+		// Promote/demote co-host↔guest (D-15) — HOST-ONLY. The reducer also enforces host
+		// authority + target-strictly-below against current rank (demotion-safe), so this gate is
+		// convenience; the server stays the sole authority (EN-7).
+		if id.role == "host" {
+			room.SetRole(id.peer, signaling.PeerID(f.PeerID), f.Role)
+		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
 		// Delivered through the room so the send runs on the room goroutine and can't race

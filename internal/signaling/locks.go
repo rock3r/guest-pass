@@ -98,14 +98,46 @@ func (s *roomState) release(actor, target PeerID, modality string) []outbound {
 	if a == nil {
 		return nil
 	}
+	if actor == target {
+		// The TARGET can never self-release — even after a promotion lifts its rank to/above the
+		// lock floor (D-13/EN-7). This explicit guard keeps the invariant promotion-safe.
+		return nil
+	}
 	lock := s.lockOn(target, modality)
 	if lock == nil {
 		return nil // nothing locked
 	}
 	if rankOf(a.role) < lock.floor {
-		return nil // not authorized at the actor's current rank (target included: rank < floor)
+		return nil // not authorized at the actor's current rank (rank < floor)
 	}
 	s.clearLock(target, modality)
+	return s.rebroadcastRoster()
+}
+
+// setRole promotes/demotes a participant between co-host and guest (D-15). It is HOST-ONLY:
+// only the host may change roles, and only of someone STRICTLY below it (the host is immune;
+// there is one host per room). Authority is evaluated against CURRENT rank, so a co-host's
+// suppression locks re-evaluate safely — a demoted ex-co-host keeps its applied locks' floors
+// (not auto-released, plan default) but can no longer release them, while the host always can.
+// Returns the roster re-broadcast on a real change.
+func (s *roomState) setRole(actor, target PeerID, newRole string) []outbound {
+	a, t := s.peers[actor], s.peers[target]
+	if a == nil || t == nil {
+		return nil
+	}
+	if rankOf(a.role) != rankHost {
+		return nil // host-only (D-15): a co-host cannot promote/demote
+	}
+	if newRole != "cohost" && newRole != "guest" {
+		return nil // only the two assignable participant roles
+	}
+	if rankOf(t.role) >= rankHost {
+		return nil // can't change a host (target must be strictly below; one host per room)
+	}
+	if t.role == newRole {
+		return nil // no-op
+	}
+	t.role = newRole
 	return s.rebroadcastRoster()
 }
 

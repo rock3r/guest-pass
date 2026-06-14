@@ -252,6 +252,16 @@ func (r *Room) Release(actor, target PeerID, modality string) {
 	})
 }
 
+// SetRole promotes/demotes a participant between co-host and guest (D-15). Authority (host-only,
+// target strictly below) is enforced server-side against current rank; a non-host actor or an
+// invalid role is a no-op. A demoted ex-co-host's suppression locks re-evaluate safely (it keeps
+// the floors but loses release rights; the host always can release).
+func (r *Room) SetRole(actor, target PeerID, newRole string) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setRole(actor, target, newRole))
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection
