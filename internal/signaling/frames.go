@@ -23,20 +23,22 @@ type Frame struct {
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
-	// and the local audio meter. These are POINTERS so an ABSENT modality means "leave it
-	// unchanged" — a documented meter-only update ({"t":"state","level":…}) must not clobber
-	// presence to false (a plain bool would unmarshal absent → false). Level rides the room
-	// in-memory only and is coalesced onto a separate batched tick (AD-13), never in the roster.
-	Cam        *bool         `json:"cam,omitempty"`
-	Mic        *bool         `json:"mic,omitempty"`
-	Screen     *bool         `json:"screen,omitempty"`
-	Level      float64       `json:"level,omitempty"`
-	Peers      []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
-	Peer       *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID     string        `json:"peerId,omitempty"` // the departed peer in a peer-left frame
-	Recipient  string        `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
-	ICEServers []ICEServer   `json:"iceServers,omitempty"`
-	TTLSec     int           `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
+	// and the local audio meter. These are POINTERS so an ABSENT field means "leave it
+	// unchanged" — a meter-only update ({"t":"state","level":…}) must not clobber presence to
+	// false, and a presence-only update must not zero the meter (a plain value would unmarshal
+	// absent → zero). Level is held in-memory only and coalesced onto the {t:levels} tick
+	// (AD-13), never echoed in the roster (EN-11: no per-frame persistence).
+	Cam        *bool              `json:"cam,omitempty"`
+	Mic        *bool              `json:"mic,omitempty"`
+	Screen     *bool              `json:"screen,omitempty"`
+	Level      *float64           `json:"level,omitempty"`
+	Levels     map[string]float64 `json:"levels,omitempty"` // {t:levels} batched meter tick: peerId → level (AD-13)
+	Peers      []RosterEntry      `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer       *RosterEntry       `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID     string             `json:"peerId,omitempty"` // the departed peer in a peer-left frame
+	Recipient  string             `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
+	ICEServers []ICEServer        `json:"iceServers,omitempty"`
+	TTLSec     int                `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
 }
 
 // ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the

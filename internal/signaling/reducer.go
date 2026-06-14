@@ -13,6 +13,9 @@ type peerInfo struct {
 	// folded into the roster; handRaised is the soft "bring me in" nudge (PR-7).
 	cam, mic, screen bool
 	handRaised       bool
+	// level is the last reported audio meter (0..1), held in-memory only (EN-11: never
+	// persisted) and coalesced onto the batched {t:levels} tick (AD-13), never the roster.
+	level float64
 }
 
 type slotState struct {
@@ -42,6 +45,10 @@ type roomState struct {
 	// streaming is the OBS broadcast-level "we're live" reflection (D-24), global to the
 	// room (not slot-scoped): any source page may report it via streamingStarted/Stopped.
 	streaming bool
+	// levelsActive tracks whether the previous {t:levels} tick carried sound, so the tick
+	// stays silent in an idle/quiet room (no spam) yet still emits ONE trailing all-zero
+	// frame when the room goes quiet, letting clients settle their meters to 0 (AD-13).
+	levelsActive bool
 }
 
 func newRoomState() *roomState {
@@ -123,16 +130,20 @@ func (s *roomState) rebroadcastRoster() []outbound {
 }
 
 // applyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
-// PROVIDED (non-nil) modality updates, and a real change re-broadcasts the roster so every
-// viewer's tile reflects it. An absent modality is left unchanged, so a documented meter-only
-// update ({t:state,level}) does NOT clobber presence to off — and a no-op update emits
-// nothing, avoiding roster churn. A non-participant (OBS source) has no presence and is
-// ignored. The live audio meter is NOT stored here — it is coalesced onto the {t:levels} tick
-// (AD-13, PR-2). Lock enforcement against a suppressed modality lands in PR-3.
-func (s *roomState) applyState(id PeerID, cam, mic, screen *bool) []outbound {
+// PROVIDED (non-nil) modality updates, and a presence change re-broadcasts the roster so every
+// viewer's tile reflects it. An absent modality is left unchanged, so a meter-only update
+// ({t:state,level}) does NOT clobber presence to off — and a presence-less update emits
+// nothing, avoiding roster churn. The audio meter is stored in-memory only (EN-11) and rides
+// the batched {t:levels} tick (AD-13), NEVER the roster, so a level change alone never
+// re-broadcasts. A non-participant (OBS source) has no presence and is ignored. Lock
+// enforcement against a suppressed modality lands in PR-3.
+func (s *roomState) applyState(id PeerID, cam, mic, screen *bool, level *float64) []outbound {
 	p := s.peers[id]
 	if p == nil || !isParticipant(p.role) {
 		return nil
+	}
+	if level != nil {
+		p.level = *level // in-memory only; coalesced onto the {t:levels} tick, not the roster
 	}
 	changed := false
 	if cam != nil && p.cam != *cam {
@@ -148,6 +159,37 @@ func (s *roomState) applyState(id PeerID, cam, mic, screen *bool) []outbound {
 		return nil
 	}
 	return s.rebroadcastRoster()
+}
+
+// buildLevels coalesces every participant's last-reported audio meter into ONE batched
+// {t:levels} frame per participant (AD-13) — never N² roster spam at the cap, never the
+// roster, never persisted (EN-11). It is silent in a quiet room: it emits while any
+// participant has sound, plus ONE trailing all-zero frame when the room falls silent (so
+// clients settle their meters), then nothing until sound returns. OBS source virtual peers
+// have no meter and neither send nor receive it (EN-13).
+func (s *roomState) buildLevels() []outbound {
+	levels := map[string]float64{}
+	anyActive := false
+	for id, p := range s.peers {
+		if !isParticipant(p.role) {
+			continue
+		}
+		levels[string(id)] = p.level
+		if p.level > 0 {
+			anyActive = true
+		}
+	}
+	if !anyActive && !s.levelsActive {
+		return nil // quiet room, already settled — no idle spam
+	}
+	s.levelsActive = anyActive
+	var out []outbound
+	for id, p := range s.peers {
+		if isParticipant(p.role) {
+			out = append(out, outbound{to: id, frame: Frame{T: "levels", Levels: levels}})
+		}
+	}
+	return out
 }
 
 // leave removes a peer, detaches it from any slot it sourced or occupied, and tells the

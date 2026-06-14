@@ -32,13 +32,23 @@ func newRoom(id string) *Room {
 	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{})}
 }
 
+// levelsTick is the audio-meter coalescing cadence (AD-13): every participant's last-reported
+// level batches into one {t:levels} frame at ~6–7 Hz instead of riding the roster (no N² spam).
+const levelsTick = 150 * time.Millisecond
+
 func (r *Room) run() {
 	state := newRoomState()
 	conns := map[PeerID]*peerConn{}
+	// The audio-meter tick runs on THIS goroutine (race-free access to state + conns); it stays
+	// quiet in an idle room (buildLevels returns nil), so an always-running ticker is cheap.
+	ticker := time.NewTicker(levelsTick)
+	defer ticker.Stop()
 	for {
 		select {
 		case cmd := <-r.cmds:
 			cmd(state, conns)
+		case <-ticker.C:
+			deliver(conns, state.buildLevels())
 		case <-r.done:
 			return
 		}
@@ -147,10 +157,11 @@ func (r *Room) Signal(from PeerID, f Frame) {
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
 // provided (non-nil) modality updates and, on a real change, every viewer's roster
 // re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber
-// presence). The live audio meter rides a separate batched tick (AD-13), so it is not here.
-func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool) {
+// presence). The audio meter, if provided, is stored in-memory only and rides the batched
+// {t:levels} tick (AD-13), never the roster — so a level-only update never re-broadcasts.
+func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool, level *float64) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
-		deliver(conns, st.applyState(id, cam, mic, screen))
+		deliver(conns, st.applyState(id, cam, mic, screen, level))
 	})
 }
 
