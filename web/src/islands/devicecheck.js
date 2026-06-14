@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { Room } from "../rtc/room.js";
 import { Publisher } from "../rtc/publisher.js";
+import { GuestSession } from "./guest-session.js";
 
 /**
  * passTokenFromPath extracts the magic-link token from the current /p/{token} URL. The
@@ -37,8 +38,17 @@ function DeviceCheck() {
   const [streaming, setStreaming] = useState(false);
   // lockedMods are this guest's currently force-suppressed modalities (mic|cam|share), read from
   // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
-  // (RF-8); the visible "muted/hidden by host" notice copy is the guest-session's (PR-11).
+  // (RF-8); the guest-session renders the visible "muted/hidden by host" notice from these.
   const [lockedMods, setLockedMods] = useState(/** @type {string[]} */ ([]));
+  // Backstage chat + roster state for the in-session guest-session view (AC-12). messages are
+  // rendered ONLY from relayed {t:chat} frames and held in memory — never persisted or echoed
+  // optimistically (EN-20), so a message appearing proves it round-tripped the server relay.
+  // peers/selfId resolve chat sender names; handRaised is the server's roster value (raise-hand is
+  // server-authoritative, not optimistic — a host dismiss lowers it the same way, PR-7/D-15).
+  const [messages, setMessages] = useState(/** @type {Array<{from:string,text:string}>} */ ([]));
+  const [peers, setPeers] = useState(/** @type {any[]} */ ([]));
+  const [selfId, setSelfId] = useState("");
+  const [handRaised, setHandRaised] = useState(false);
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -55,9 +65,9 @@ function DeviceCheck() {
   /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
   const pubRef = useRef(null);
 
-  // stopStream releases the camera/mic so the device light goes off. Called before a retry
-  // (so we never leak a prior stream), after a successful entry (the greenroom re-acquires
-  // its own media in PR-7), and on unmount.
+  // stopStream releases the camera/mic so the device light goes off. Called before a retry (so we
+  // never leak a prior stream), on a FAILED entry, and on unmount. After a SUCCESSFUL entry the
+  // stream is KEPT — it is published to the greenroom AND shown as the guest's self-view (AC-12).
   function stopStream() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -120,9 +130,12 @@ function DeviceCheck() {
     // client's OWN entry, located via the roster's `self` marker. The broadcast-level streaming
     // state stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
     room.on("roster", (f) => {
+      setPeers(f.peers || []); // drives chat sender names + (later) backstage thumbnails
+      if (f.self) setSelfId(f.self);
       const me = (f.peers || []).find((p) => p.self || p.id === f.self);
       if (!me) return;
       setOnAir(me.onAir || "status-unavailable");
+      setHandRaised(!!me.handRaised); // server-authoritative raise-hand state (incl. host dismiss)
       // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
       // released one). The server also rejects any self-state that re-enables a locked modality,
       // so this is cooperative source-side enforcement, not the authority (EN-7).
@@ -132,6 +145,11 @@ function DeviceCheck() {
       }
       setLockedMods(locked);
     });
+    // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The server
+    // broadcasts to every participant INCLUDING the sender, so the guest's own messages arrive
+    // here too — the panel renders only what the server relays, never an optimistic echo, and the
+    // chat is never persisted or logged (the purity is the server's tested invariant, PR-6).
+    room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
     room.on("streaming", (f) => setStreaming(!!f.active));
     // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
     room.onIce((servers) => publisher.applyIceServers(servers));
@@ -171,36 +189,32 @@ function DeviceCheck() {
     }
   }
 
+  // sendChat relays a backstage message over the live signaling room; it is rendered only when
+  // the server relays it back (EN-20 — never an optimistic local echo). toggleHand flips the
+  // server-authoritative raise-hand state via {t:hand} (the roster reflection drives the button).
+  function sendChat(text) {
+    if (roomRef.current) roomRef.current.send({ t: "chat", text });
+  }
+  function toggleHand() {
+    if (roomRef.current) roomRef.current.send({ t: "hand", raised: !handRaised });
+  }
+
   if (phase === "entered") {
-    // Three-state on-air pill (D-24) — reflected from OBS, never asserted. "status-unavailable"
-    // means no OBS signal at all (e.g. the host isn't running an OBS source for you yet).
-    const onAirLabel =
-      onAir === "on-air"
-        ? "On air"
-        : onAir === "not-on-air"
-          ? "Not on air"
-          : "On-air status unavailable";
+    // The in-session guest-session surface (AC-12), sharing this island's single pass-token Room.
     return (
-      <div class="dc-entered" data-entered="1" data-pub={pubState} data-locked={lockedMods.join(",")}>
-        {pubState === "live" ? (
-          <p>You're in — your camera is live in the greenroom.</p>
-        ) : pubState === "disconnected" ? (
-          <p>You're in, but the greenroom connection dropped. Refresh the page to rejoin.</p>
-        ) : (
-          <p>You're in — connecting your camera to the greenroom…</p>
-        )}
-        <p class="dc-onair" data-onair={onAir}>
-          {onAirLabel}
-          {onAir === "status-unavailable" ? (
-            <span class="dc-onair-hint"> — check the actual stream to confirm.</span>
-          ) : null}
-        </p>
-        {streaming ? (
-          <p class="dc-live" data-live="1">
-            The broadcast is live.
-          </p>
-        ) : null}
-      </div>
+      <GuestSession
+        pubState={pubState}
+        onAir={onAir}
+        streaming={streaming}
+        lockedMods={lockedMods}
+        selfStream={streamRef.current}
+        peers={peers}
+        selfId={selfId}
+        messages={messages}
+        handRaised={handRaised}
+        onSendChat={sendChat}
+        onToggleHand={toggleHand}
+      />
     );
   }
   if (phase === "error") {

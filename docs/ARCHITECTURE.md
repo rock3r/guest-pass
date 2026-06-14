@@ -464,7 +464,8 @@ internal/
 web/
   src/rtc/            PeerLink (consume), Publisher (publish), Room (signaling WS + ICE
                       config from the join-ack + {t:ice-refresh}), getStats sampling
-  src/islands/        device-check(+publish), greenroom grid, guest-session (app entry)
+  src/islands/        device-check(+publish; renders guest-session in-session), greenroom grid,
+                      guest-session (in-session surface: self-view, chat, raise-hand, on-air, locks)
   src/obs/            cam + screen source pages (separate minimal entry — no fonts, EN-13)
   src/styles/         tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored MIT (D-32)   ·   fonts/  OFL woff2 ×3 (EN-17)
@@ -1045,8 +1046,8 @@ navigation, islands mount per-page against a known root element.
 | Host dashboard / calendar / invites / sources tabs | Go `html/template` | none |
 | Admin console | Go `html/template` | minimal (poll/refresh) |
 | Error / state screens | Go `html/template` | none (except `reconnecting`) |
-| **Device check** | server page + island | Preact island |
-| **Guest session** | server page + island | Preact island |
+| **Device check** | `/p/{token}` server page + island | Preact island |
+| **Guest session** | in-session phase of the device-check island (same page, signaling connection, and captured camera) | Preact island |
 | **Greenroom** (host + co-host + guest) | server page + island | Preact island |
 | **OBS source page** (cam + screen) | minimal standalone HTML | **separate** minimal entry (EN-13) |
 

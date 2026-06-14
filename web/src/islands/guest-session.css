@@ -1,0 +1,112 @@
+/* Guest-session in-session surface — functional-first styling (D-B). Pixel-fidelity to the v2
+   prototype is a deferred polish pass (DEF-2); this is clean, on-brand layout via the tokens. */
+
+.gs-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.gs-stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.gs-selfview {
+  width: min(100%, 360px);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.gs-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  flex: 1;
+}
+
+/* The separate "muted/hidden by host" force-lock notice (D-13), always shown when a lock is active. */
+.gs-lock {
+  margin: 0;
+  font-weight: 600;
+  color: #8a1f1f;
+}
+
+.gs-hand {
+  align-self: flex-start;
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.gs-hand[data-raised="1"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.gs-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+/* EN-20 trust microcopy: backstage chat is relayed but never recorded. */
+.gs-chat-note {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.gs-chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.gs-chat-msg {
+  font-size: 0.9rem;
+}
+
+.gs-chat-from {
+  font-weight: 600;
+}
+
+.gs-chat-form {
+  display: flex;
+  gap: 8px;
+}
+
+.gs-chat-input {
+  flex: 1;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.gs-chat-send {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
