@@ -31,6 +31,7 @@ const wsTestTokenSecret = "ws-test-token-secret-cccccccccccccccc"
 type wsHarness struct {
 	srv     *httptest.Server
 	store   *store.Store
+	dbPath  string // the SQLite file, so a test can open a raw read pool (e.g. the chat store-spy)
 	ring    *auth.KeyRing
 	hasher  *token.Hasher
 	hub     *signaling.Hub
@@ -84,7 +85,9 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 
-	hub := signaling.NewHub(nil, nil)
+	// Route the room logger into the same captured buffer, so a chat-purity test (EN-20) can
+	// assert the message text never appears in ANY log line — handler or room.
+	hub := signaling.NewHub(nil, logger)
 	var inflight sync.WaitGroup
 	h, err := NewRouter(RouterConfig{
 		SourceURL:     testSourceURL,
@@ -104,7 +107,7 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &wsHarness{srv: srv, store: st, ring: ring, hasher: hasher, hub: hub, logs: logs, limiter: o.limiter, ice: o.ice}
+	return &wsHarness{srv: srv, store: st, dbPath: path, ring: ring, hasher: hasher, hub: hub, logs: logs, limiter: o.limiter, ice: o.ice}
 }
 
 func (h *wsHarness) seedHost(t *testing.T, sub string, status string) (*store.Host, *http.Cookie) {

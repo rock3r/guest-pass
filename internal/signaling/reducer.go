@@ -442,3 +442,23 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	}
 	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
 }
+
+// relayChat broadcasts a backstage chat message to every greenroom PARTICIPANT, including the
+// sender (a server-authoritative thread), stamped with the sender's id from auth (EN-7 — the
+// client's own `from` is ignored). OBS source virtual peers are minimal and never receive chat
+// (EN-13). This is a PURE relay: it builds outbound frames and returns them — it touches no
+// store and no log, so the EN-20 guarantee (backstage chat is never persisted, `text` is never
+// logged) holds by construction. Only the sender (a participant) may chat; an empty sender or a
+// non-participant is dropped.
+func (s *roomState) relayChat(from PeerID, text string) []outbound {
+	if p := s.peers[from]; p == nil || !isParticipant(p.role) {
+		return nil
+	}
+	var out []outbound
+	for pid, p := range s.peers {
+		if isParticipant(p.role) {
+			out = append(out, outbound{to: pid, frame: Frame{T: "chat", From: string(from), Text: text}})
+		}
+	}
+	return out
+}

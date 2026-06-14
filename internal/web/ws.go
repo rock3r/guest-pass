@@ -170,6 +170,13 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if id.role == "host" {
 			room.SetRole(id.peer, signaling.PeerID(f.PeerID), f.Role)
 		}
+	case "chat":
+		// Backstage chat (EN-20): relayed to participants only, from-stamped. The text is NEVER
+		// persisted or logged — do NOT add any log line here referencing f.Text. OBS sources have
+		// no chat (EN-13); the reducer also drops a chat from a non-participant.
+		if !id.isSource() {
+			room.Chat(id.peer, f.Text)
+		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
 		// Delivered through the room so the send runs on the room goroutine and can't race
