@@ -32,7 +32,7 @@ import (
 // refused, so the tunnel can reach neither a host/admin capability nor a slot source credential.
 func allowedOverTunnel(p string) bool {
 	switch {
-	case p == "/ws": // signaling WebSocket — guests (?pass=) and OBS sources (?src=) only; host uses loopback
+	case p == "/ws": // signaling WebSocket — over the tunnel this carries guest signaling (?pass=); the host + OBS use it on loopback
 		return true
 	case p == "/healthz":
 		return true
