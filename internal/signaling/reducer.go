@@ -92,6 +92,16 @@ func (s *roomState) leave(id PeerID) []outbound {
 	for sid, st := range s.slots {
 		if st.source == id {
 			st.source = ""
+			// The OBS reflection for this slot is gone — its on-air state is now UNKNOWN, not
+			// whatever it last was (D-24: never assert on-air with no live signal behind it).
+			// Tell the occupant to degrade to status-unavailable. Streaming is room-global and
+			// not tied to any one source, so it is NOT reset here.
+			if st.onAir != OnAirUnknown {
+				st.onAir = OnAirUnknown
+				if st.occupant != "" {
+					out = append(out, outbound{to: st.occupant, frame: Frame{T: "onair", Slot: string(sid), OnAir: OnAirUnknown}})
+				}
+			}
 		}
 		if st.occupant == id {
 			out = append(out, s.unbindSlot(sid)...)

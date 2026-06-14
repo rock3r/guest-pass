@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/coder/websocket"
 
@@ -48,8 +49,14 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 		t.Fatalf("guest enter + default on-air pill: %v", err)
 	}
 
-	// OBS source page subscribes to cam-1.
+	// OBS source page subscribes to cam-1. The WS recorder lets us force-close its socket later
+	// to prove the on-air pill degrades when the OBS reflection disappears.
+	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
+		return err
+	})
 	if err := chromedp.Run(obsCtx,
+		injectRecorder,
 		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
 		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
 	); err != nil {
@@ -102,5 +109,24 @@ func TestOnAir_ThreeStateReflection(t *testing.T) {
 		chromedp.WaitVisible(`.dc-live[data-live="1"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("global 'we're live' indicator did not appear: %v", err)
+	}
+
+	// Re-arm on-air, then drop the OBS source's signaling socket: with no live OBS reflection
+	// the pill must degrade to status-unavailable (D-24: never assert on-air when unknown),
+	// not keep showing a stale on-air. (The source auto-reconnects but stays unknown until a
+	// fresh transition.)
+	fireObsActive(true)
+	if err := chromedp.Run(guestCtx,
+		chromedp.WaitVisible(`.dc-onair[data-onair="on-air"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("pill did not re-arm to on-air: %v", err)
+	}
+	if err := chromedp.Run(obsCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close obs socket: %v", err)
+	}
+	if err := chromedp.Run(guestCtx,
+		chromedp.WaitVisible(`.dc-onair[data-onair="status-unavailable"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("pill did not degrade to status-unavailable when the OBS source disconnected: %v", err)
 	}
 }

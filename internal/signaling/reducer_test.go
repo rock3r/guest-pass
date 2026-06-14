@@ -65,6 +65,36 @@ func TestObsStreamingBroadcastsToParticipantsOnly(t *testing.T) {
 	}
 }
 
+// D-24: when the OBS source for a slot disconnects, its on-air reflection is gone — the slot
+// must degrade to status-unavailable and tell the occupant, never leave it asserting a stale
+// on-air with no live OBS signal behind it ("never assert when unknown").
+func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")         // epoch 1, occupant g1
+	s.obsSourceActive("cam-1", true, 1) // slot reflects on-air
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("precondition: slot should be on-air, got %q", s.slots["cam-1"].onAir)
+	}
+
+	out := s.leave("src") // the OBS source disconnects
+
+	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
+		t.Fatalf("on-air must degrade to %s when the source leaves, got %q", OnAirUnknown, st.onAir)
+	}
+	var told bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			told = true
+		}
+	}
+	if !told {
+		t.Fatalf("occupant g1 must be told {t:onair, status-unavailable} on source leave, got %+v", out)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous
 // epoch must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
