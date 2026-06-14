@@ -35,6 +35,10 @@ function DeviceCheck() {
   // global "we're live" broadcast reflection. Both are read-only reflections, never asserted.
   const [onAir, setOnAir] = useState("status-unavailable");
   const [streaming, setStreaming] = useState(false);
+  // lockedMods are this guest's currently force-suppressed modalities (mic|cam|share), read from
+  // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
+  // (RF-8); the visible "muted/hidden by host" notice copy is the guest-session's (PR-11).
+  const [lockedMods, setLockedMods] = useState(/** @type {string[]} */ ([]));
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -117,7 +121,16 @@ function DeviceCheck() {
     // state stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
     room.on("roster", (f) => {
       const me = (f.peers || []).find((p) => p.self || p.id === f.self);
-      if (me) setOnAir(me.onAir || "status-unavailable");
+      if (!me) return;
+      setOnAir(me.onAir || "status-unavailable");
+      // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
+      // released one). The server also rejects any self-state that re-enables a locked modality,
+      // so this is cooperative source-side enforcement, not the authority (EN-7).
+      const locked = (me.locks || []).map((l) => l.kind);
+      for (const m of ["mic", "cam", "share"]) {
+        publisher.setModalityEnabled(m, !locked.includes(m));
+      }
+      setLockedMods(locked);
     });
     room.on("streaming", (f) => setStreaming(!!f.active));
     // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
@@ -168,7 +181,7 @@ function DeviceCheck() {
           ? "Not on air"
           : "On-air status unavailable";
     return (
-      <div class="dc-entered" data-entered="1" data-pub={pubState}>
+      <div class="dc-entered" data-entered="1" data-pub={pubState} data-locked={lockedMods.join(",")}>
         {pubState === "live" ? (
           <p>You're in — your camera is live in the greenroom.</p>
         ) : pubState === "disconnected" ? (
