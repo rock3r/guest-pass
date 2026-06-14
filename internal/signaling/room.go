@@ -212,6 +212,15 @@ func (r *Room) Signal(from PeerID, f Frame) {
 	})
 }
 
+// Chat relays a backstage message to the room's participants, from-stamped (EN-7). The text is
+// relayed and NEVER persisted or logged (EN-20): this path touches no store and no logger — the
+// reducer is pure and the Room only delivers — so the guarantee holds by construction.
+func (r *Room) Chat(from PeerID, text string) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.relayChat(from, text))
+	})
+}
+
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
 // provided (non-nil) modality updates and, on a real change, every viewer's roster
 // re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber
