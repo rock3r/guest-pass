@@ -122,21 +122,31 @@ func (s *roomState) rebroadcastRoster() []outbound {
 	return out
 }
 
-// applyState folds a participant's self-presence ({t:state}, EN-7) into the roster: it
-// updates cam/mic/screen and, on a real change, re-broadcasts the roster so every viewer's
-// tile reflects it. A no-op update (e.g. a level-only tick) emits nothing, avoiding roster
-// churn. A non-participant (OBS source) has no presence and is ignored. The live audio meter
-// is NOT stored here — it is coalesced onto the {t:levels} tick (AD-13, PR-2). Lock
-// enforcement against a suppressed modality lands in PR-3.
-func (s *roomState) applyState(id PeerID, cam, mic, screen bool) []outbound {
+// applyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
+// PROVIDED (non-nil) modality updates, and a real change re-broadcasts the roster so every
+// viewer's tile reflects it. An absent modality is left unchanged, so a documented meter-only
+// update ({t:state,level}) does NOT clobber presence to off — and a no-op update emits
+// nothing, avoiding roster churn. A non-participant (OBS source) has no presence and is
+// ignored. The live audio meter is NOT stored here — it is coalesced onto the {t:levels} tick
+// (AD-13, PR-2). Lock enforcement against a suppressed modality lands in PR-3.
+func (s *roomState) applyState(id PeerID, cam, mic, screen *bool) []outbound {
 	p := s.peers[id]
 	if p == nil || !isParticipant(p.role) {
 		return nil
 	}
-	if p.cam == cam && p.mic == mic && p.screen == screen {
+	changed := false
+	if cam != nil && p.cam != *cam {
+		p.cam, changed = *cam, true
+	}
+	if mic != nil && p.mic != *mic {
+		p.mic, changed = *mic, true
+	}
+	if screen != nil && p.screen != *screen {
+		p.screen, changed = *screen, true
+	}
+	if !changed {
 		return nil
 	}
-	p.cam, p.mic, p.screen = cam, mic, screen
 	return s.rebroadcastRoster()
 }
 

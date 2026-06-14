@@ -144,10 +144,11 @@ func (r *Room) Signal(from PeerID, f Frame) {
 	})
 }
 
-// ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: cam/mic/
-// screen update and, on a real change, every viewer's roster re-broadcasts. The live audio
-// meter rides a separate batched tick (AD-13), so it is not threaded here.
-func (r *Room) ApplyState(id PeerID, cam, mic, screen bool) {
+// ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
+// provided (non-nil) modality updates and, on a real change, every viewer's roster
+// re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber
+// presence). The live audio meter rides a separate batched tick (AD-13), so it is not here.
+func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.applyState(id, cam, mic, screen))
 	})

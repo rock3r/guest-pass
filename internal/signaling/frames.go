@@ -23,11 +23,13 @@ type Frame struct {
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
-	// (a full snapshot, throttled) and the local audio meter. Level rides the room in-memory
-	// only and is coalesced onto a separate batched tick (AD-13), never echoed in the roster.
-	Cam        bool          `json:"cam,omitempty"`
-	Mic        bool          `json:"mic,omitempty"`
-	Screen     bool          `json:"screen,omitempty"`
+	// and the local audio meter. These are POINTERS so an ABSENT modality means "leave it
+	// unchanged" — a documented meter-only update ({"t":"state","level":…}) must not clobber
+	// presence to false (a plain bool would unmarshal absent → false). Level rides the room
+	// in-memory only and is coalesced onto a separate batched tick (AD-13), never in the roster.
+	Cam        *bool         `json:"cam,omitempty"`
+	Mic        *bool         `json:"mic,omitempty"`
+	Screen     *bool         `json:"screen,omitempty"`
 	Level      float64       `json:"level,omitempty"`
 	Peers      []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
 	Peer       *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame

@@ -29,6 +29,10 @@ func onAirSeenBy(out []outbound, to, peer PeerID) string {
 	return e.OnAir
 }
 
+// bptr returns a pointer to b, for building {t:state} presence frames where an absent
+// (nil) modality means "leave unchanged" (a meter-only update must not clobber presence).
+func bptr(b bool) *bool { return &b }
+
 // EN-3: a rebind bumps the epoch, swaps the occupant, resets on-air to unknown, and tells
 // the source page to renegotiate to the new occupant at the new epoch. The occupant's folded
 // on-air starts at status-unavailable until a fresh transition (D-24).
@@ -59,7 +63,7 @@ func TestStateFoldsPresenceIntoRoster(t *testing.T) {
 	s.join("host", "host", "")
 	s.join("g1", "guest", "Greta")
 
-	out := s.applyState("g1", false, true, false) // mic on, cam + screen off
+	out := s.applyState("g1", bptr(false), bptr(true), bptr(false)) // mic on, cam + screen off
 
 	e, ok := rosterEntryFor(out, "host", "g1")
 	if !ok {
@@ -74,15 +78,36 @@ func TestStateFoldsPresenceIntoRoster(t *testing.T) {
 	}
 }
 
-// AD-13: a {t:state} that changes nothing (e.g. a level-only tick) must NOT re-broadcast
-// the roster — continuous meters ride the {t:levels} tick (PR-2), not the roster.
+// AD-13: a {t:state} that changes nothing (e.g. re-asserting the same presence) must NOT
+// re-broadcast the roster — continuous meters ride the {t:levels} tick (PR-2), not the roster.
 func TestStateNoChangeIsQuiet(t *testing.T) {
 	s := newRoomState()
 	s.join("host", "host", "")
 	s.join("g1", "guest", "")
-	s.applyState("g1", true, true, false)
-	if out := s.applyState("g1", true, true, false); out != nil {
+	s.applyState("g1", bptr(true), bptr(true), bptr(false))
+	if out := s.applyState("g1", bptr(true), bptr(true), bptr(false)); out != nil {
 		t.Fatalf("an unchanged state must not churn the roster, got %+v", out)
+	}
+}
+
+// A documented meter-only update ({t:state,level} with no cam/mic/screen, modeled here as an
+// all-nil presence frame) must NOT clobber presence to off — absent modalities are left
+// unchanged, and a frame that changes no modality emits nothing (Codex PR-20).
+func TestStateLevelOnlyPreservesPresence(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.applyState("g1", bptr(true), bptr(true), bptr(true)) // all on
+
+	out := s.applyState("g1", nil, nil, nil) // a level-only {t:state}: no presence fields
+	if out != nil {
+		t.Fatalf("a presence-less {t:state} must not re-broadcast the roster, got %+v", out)
+	}
+	// A subsequent change confirms presence was preserved (still all-on, so a partial off shows).
+	out = s.applyState("g1", bptr(false), nil, nil) // turn cam off only
+	e, ok := rosterEntryFor(out, "host", "g1")
+	if !ok || e.Cam || !e.Mic || !e.Screen {
+		t.Fatalf("presence must survive a meter-only update; got %+v (want cam:false mic:true screen:true)", e)
 	}
 }
 
@@ -90,7 +115,7 @@ func TestStateNoChangeIsQuiet(t *testing.T) {
 func TestStateFromNonParticipantIgnored(t *testing.T) {
 	s := newRoomState()
 	s.join("src", "obs", "")
-	if out := s.applyState("src", true, true, true); out != nil {
+	if out := s.applyState("src", bptr(true), bptr(true), bptr(true)); out != nil {
 		t.Fatalf("an OBS source has no presence; state must be ignored, got %+v", out)
 	}
 }
@@ -432,7 +457,7 @@ func TestRelaySignalStripsExtraneousFields(t *testing.T) {
 		// Hostile extras a client must not be able to smuggle through the relay:
 		Slot: "cam-1", Epoch: epochPtr(9), Reason: "kicked", OnAir: "on-air",
 		OccupantPeerID: "x", Event: "sourceActive", Active: true,
-		Cam: true, Mic: true, Screen: true,
+		Cam: bptr(true), Mic: bptr(true), Screen: bptr(true),
 		Peers:  []RosterEntry{{ID: "fake", Role: "host"}},
 		Peer:   &RosterEntry{ID: "fake", Role: "host"},
 		PeerID: "fake",
@@ -446,7 +471,8 @@ func TestRelaySignalStripsExtraneousFields(t *testing.T) {
 		t.Fatalf("relayed core = %+v, want signal/from=a/same sdp", got)
 	}
 	if got.To != "" || got.Slot != "" || got.Epoch != nil || got.Reason != "" || got.OnAir != "" ||
-		got.OccupantPeerID != "" || got.Event != "" || got.Active || got.Cam || got.Mic || got.Screen ||
+		got.OccupantPeerID != "" || got.Event != "" || got.Active ||
+		got.Cam != nil || got.Mic != nil || got.Screen != nil ||
 		got.Peers != nil || got.Peer != nil || got.PeerID != "" {
 		t.Fatalf("relayed frame leaked client-supplied fields: %+v", got)
 	}
