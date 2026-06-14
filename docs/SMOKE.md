@@ -61,10 +61,11 @@ tears the server + proxy + tunnel down.
 > the tunnel URL**. The client opens its WebSocket from `window.location`, so the loopback-server /
 > tunnel-link split is invisible to guests.
 
-The dashboard gives you, for the **host** (open on **this machine** — loopback `localhost`, never
-over the tunnel): a **sign-in** link (`/auth/dev`) and the **greenroom**. For each participant (the
-links to **share with guests**): a **guest link** (+ QR), an **OBS source URL**, and the pass id;
-plus the **screenshare** source URL.
+The dashboard has three sections: **Host** (open on **this machine** — loopback `localhost`): the
+**sign-in** link (`/auth/dev`) and the **greenroom**. **Guest links** (the public tunnel URLs + QRs):
+the **only** links to hand out — one per guest. **OBS source URLs** (loopback, **host-only**): paste
+into OBS on this machine — their slot **source token is a credential (EN-5), so never share them** (a
+holder could impersonate that OBS source). The tunnel proxy refuses `/s/` for the same reason.
 
 ---
 
@@ -82,7 +83,8 @@ plus the **screenshare** source URL.
    (loopback keeps `/auth/dev` off the tunnel; the host needs no camera). Every guest tile renders —
    the grid shows guests **without** binding; binding only drives the OBS source + the on-air pill.
    Force/release from the greenroom tiles uses the page's own socket, so it does **not** evict it.
-4. **OBS.** Add one or more bound **OBS source URLs** as Browser Sources (1280×720).
+4. **OBS.** On **this machine**, add a bound **OBS source URL** (loopback, from the host-only section
+   — its token is a credential, don't share) as a Browser Source (1280×720).
 
 ---
 

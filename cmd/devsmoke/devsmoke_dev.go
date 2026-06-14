@@ -232,27 +232,32 @@ func run() error {
 	return nil
 }
 
-// printDashboard prints the host links (LOOPBACK — the host is on this machine) and the participant
-// + OBS source URLs (the public tunnel base, what guests/OBS open).
+// printDashboard prints three clearly-separated sections: HOST links (loopback — the host is on this
+// machine), GUEST links (the public tunnel base — the ONLY links to hand out), and OBS source URLs
+// (loopback, HOST-ONLY — they carry the slot source token, a crown-jewel credential (EN-5), which
+// must never reach a guest).
 func printDashboard(localBase, base, streamID string, parts []participant, screenSrcRaw string, screenshare bool) {
 	fmt.Printf("\nSmoke fixtures ready (host=dev-local-host, stream=%s).\n", streamID)
-	fmt.Printf("\nHost — open on THIS machine only (loopback). Do NOT open /auth/dev over the tunnel:\n"+
-		"it grants an admin session to anyone with the URL (see docs/SMOKE.md security note).\n"+
+
+	fmt.Printf("\nHost — open on THIS machine only (loopback; /auth/dev is blocked over the tunnel):\n"+
 		"  Sign in:    %s/auth/dev\n  Greenroom:  %s/greenroom\n", localBase, localBase)
-	fmt.Printf("\nParticipants (%d) — share these (tunnel) links/QRs with guests:\n", len(parts))
+
+	fmt.Printf("\nGuest links (%d) — SHARE one with each guest (QRs below). These are the ONLY links to hand out:\n", len(parts))
 	for _, p := range parts {
 		role := p.role
 		if p.canScreen {
 			role += ", can-screen"
 		}
-		fmt.Printf("\n  %s (%s)\n", p.name, role)
-		fmt.Printf("    Guest link:  %s/p/%s\n", base, p.passRaw)
-		fmt.Printf("    OBS source:  %s/s/%s?token=%s   (binds to %s)\n", base, p.camLabel, p.srcRaw, p.camLabel)
-		fmt.Printf("    pass id:     %s\n", p.passID)
+		fmt.Printf("  %s/p/%s   (%s — %s, pass %s)\n", base, p.passRaw, p.name, role, p.passID)
+	}
+
+	fmt.Printf("\nOBS source URLs — HOST-ONLY, paste into OBS on THIS machine (loopback). The token is a slot\n" +
+		"credential (EN-5): NEVER share these — a holder can impersonate that OBS source:\n")
+	for _, p := range parts {
+		fmt.Printf("  %s/s/%s?token=%s   (%s)\n", localBase, p.camLabel, p.srcRaw, p.name)
 	}
 	if screenshare {
-		fmt.Printf("\nScreenshare source (M3 = moderation-only; live screen media is M4/D-21):\n")
-		fmt.Printf("    OBS source:  %s/s/screen?token=%s\n", base, screenSrcRaw)
+		fmt.Printf("  %s/s/screen?token=%s   (screenshare — M3 moderation-only; live screen media is M4/D-21)\n", localBase, screenSrcRaw)
 	}
 	fmt.Printf(`
 Quick start:
