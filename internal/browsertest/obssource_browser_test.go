@@ -18,10 +18,12 @@ import (
 	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
-// wsRecorderJS wraps window.WebSocket so a test can force-close the page's live signaling
-// socket (to exercise the OBS source's auto-reconnect). It records every socket the page
-// opens and exposes __gpCloseLastWS() to close the most recent open one. Injected before any
-// page script runs via AddScriptToEvaluateOnNewDocument.
+// wsRecorderJS wraps window.WebSocket so a test can drive a page's live signaling socket
+// directly: __gpCloseLastWS() force-closes the most recent open socket (to exercise the OBS
+// source's auto-reconnect), and __gpSendLastWS(obj) sends a frame over it (so the host
+// greenroom tab can issue a slot rebind over its OWN connection — a second host /ws would be
+// evicted as a duplicate identity). It records every socket the page opens. Injected before
+// any page script runs via AddScriptToEvaluateOnNewDocument.
 const wsRecorderJS = `
 (() => {
   const Native = window.WebSocket;
@@ -37,10 +39,9 @@ const wsRecorderJS = `
   Wrapped.CLOSING = Native.CLOSING;
   Wrapped.CLOSED = Native.CLOSED;
   window.WebSocket = Wrapped;
-  window.__gpCloseLastWS = () => {
-    const open = window.__gpSockets.filter((w) => w.readyState === Native.OPEN);
-    if (open.length) open[open.length - 1].close();
-  };
+  const lastOpen = () => window.__gpSockets.filter((w) => w.readyState === Native.OPEN).pop();
+  window.__gpCloseLastWS = () => { const s = lastOpen(); if (s) s.close(); };
+  window.__gpSendLastWS = (obj) => { const s = lastOpen(); if (!s) return false; s.send(JSON.stringify(obj)); return true; };
 })();
 `
 

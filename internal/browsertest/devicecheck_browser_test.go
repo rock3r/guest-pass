@@ -28,8 +28,10 @@ func ptr[T any](v T) *T { return &v }
 type devSeed struct {
 	store      *store.Store
 	base       string // server base URL
-	rawToken   string // guest's raw magic-link token (/p/{rawToken})
-	passID     string
+	rawToken   string // guest A's raw magic-link token (/p/{rawToken})
+	passID     string // guest A's pass id (== A's signaling peer id)
+	rawTokenB  string // guest B's raw magic-link token (a second guest, for live re-route)
+	passIDB    string // guest B's pass id (== B's signaling peer id)
 	hostCookie string // host session JWT for the gp_session cookie (/greenroom + host /ws)
 	srcToken   string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
 	slotLabel  string // the cam slot's signaling label ("cam-1")
@@ -69,6 +71,18 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("CreatePass: %v", err)
 	}
 
+	// A second guest (B) so the tracer can re-route a slot live from one occupant to another.
+	rawB, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint B: %v", err)
+	}
+	passB, err := st.CreatePass(ctx, store.CreatePassParams{
+		StreamID: stream.ID, Name: ptr("Erin"), Role: store.RoleGuest, TokenHash: hasher.Hash(rawB), Status: store.PassSent,
+	})
+	if err != nil {
+		t.Fatalf("CreatePass B: %v", err)
+	}
+
 	// A cam-1 slot with its own source token: the OBS source page authenticates the /ws it
 	// opens with this token (EN-15), resolving to slot "cam-1" server-side.
 	srcRaw, err := token.Mint()
@@ -104,6 +118,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	}
 	return &devSeed{
 		store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID,
+		rawTokenB: rawB, passIDB: passB.ID,
 		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1",
 	}
 }

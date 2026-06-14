@@ -238,7 +238,7 @@ go test ./internal/web/...         # WS transport + handler integration (httptes
 # NB: `web/` is the (non-Go) frontend source dir — the chromedp/Go browser
 # tests live in a tagged Go package, NOT under web/ (RF-26).
 go test -tags browser ./internal/browsertest/...  # islands + OBS source pages
-go test -tags browser -run M2 ./internal/browsertest/...  # M2 media tracer (multi-tab real-Chrome WebRTC)
+go test -tags browser -run Tracer ./internal/browsertest/...  # M2 media tracer (multi-tab real-Chrome WebRTC)
 ```
 
 > RESOLVED (M2 PR-5): the chromedp browser layer is the Go package
