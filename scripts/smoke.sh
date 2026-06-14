@@ -24,7 +24,8 @@
 # the RF-8 force checks). DEV-ONLY: requires the `dev` build tag + AUTH_MODE=dev.
 set -euo pipefail
 
-PORT=8137 # the server binds :8137 (cmd/guestpass main.go); not configurable here
+PORT=8137       # the server binds :8137 (cmd/guestpass main.go); not configurable here
+PROXY_PORT=8138 # the tunnel points here; a path-allowlist proxy forwards only guest routes to :8137
 GUESTS=6
 COHOST=1
 SCREENSHARE=1
@@ -90,11 +91,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# --- preflight: refuse to start if :8137 is already taken (a stale server / another smoke) ---
-if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "!! something is already listening on :$PORT — stop it first (lsof -iTCP:$PORT)." >&2
-  exit 1
-fi
+# --- preflight: refuse to start if a needed port is already taken (a stale server / another smoke) ---
+preflight_ports=("$PORT")
+[[ "$TUNNEL" == 1 ]] && preflight_ports+=("$PROXY_PORT")
+for p in "${preflight_ports[@]}"; do
+  if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "!! something is already listening on :$p — stop it first (lsof -iTCP:$p)." >&2
+    exit 1
+  fi
+done
 
 echo "building frontend bundle…"
 go run ./cmd/build
@@ -102,13 +107,13 @@ go run ./cmd/build
 echo "building dev binaries…"
 go build -tags dev -o "$SMOKE_DIR/guestpass" ./cmd/guestpass
 go build -tags dev -o "$SMOKE_DIR/devsmoke" ./cmd/devsmoke
+[[ "$TUNNEL" == 1 ]] && go build -tags dev -o "$SMOKE_DIR/smokeproxy" ./cmd/smokeproxy
 
-# --- public HTTPS tunnel (so phones / other machines / Safari can reach the loopback server) ---
-PUBLIC_BASE_URL="http://localhost:$PORT"
+# start_tunnel opens a public HTTPS tunnel to the PROXY_PORT (not the server) and sets PUBLIC_BASE_URL.
 start_tunnel() {
   if command -v cloudflared >/dev/null 2>&1; then
     echo "opening cloudflared quick tunnel…"
-    cloudflared tunnel --url "http://localhost:$PORT" >"$SMOKE_DIR/tunnel.log" 2>&1 &
+    cloudflared tunnel --url "http://localhost:$PROXY_PORT" >"$SMOKE_DIR/tunnel.log" 2>&1 &
     PIDS+=("$!")
     local url i
     for i in $(seq 1 60); do
@@ -120,7 +125,7 @@ start_tunnel() {
     exit 1
   elif command -v ngrok >/dev/null 2>&1; then
     echo "opening ngrok tunnel…"
-    ngrok http "$PORT" >"$SMOKE_DIR/tunnel.log" 2>&1 &
+    ngrok http "$PROXY_PORT" >"$SMOKE_DIR/tunnel.log" 2>&1 &
     PIDS+=("$!")
     local url i
     for i in $(seq 1 60); do
@@ -142,8 +147,6 @@ EOF
     exit 1
   fi
 }
-[[ "$TUNNEL" == 1 ]] && start_tunnel
-export PUBLIC_BASE_URL
 
 # --- start the server, wait for readiness (/healthz is registered after migrations, RF-21) ---
 echo "starting server on http://localhost:$PORT …"
@@ -158,13 +161,21 @@ for i in $(seq 1 60); do
   sleep 0.5
 done
 
+# --- expose ONLY guest/OBS routes over the tunnel: tunnel -> path-allowlist proxy -> server. The
+#     admin-granting /auth/dev + host/admin pages stay loopback-only (the host uses localhost). ---
+PUBLIC_BASE_URL="http://localhost:$PORT"
 if [[ "$TUNNEL" == 1 ]]; then
-  echo "tunnel: $PUBLIC_BASE_URL  (guests open this; the server stays on localhost)"
-  echo "  ⚠ SECURITY: anyone with this URL can reach /auth/dev and claim the host/admin session."
-  echo "    Share it with guests only, and Ctrl-C to tear it down when the smoke is finished."
+  echo "starting smoke proxy on :$PROXY_PORT (forwards only guest/OBS routes to :$PORT)…"
+  "$SMOKE_DIR/smokeproxy" --listen ":$PROXY_PORT" --target "http://localhost:$PORT" >"$SMOKE_DIR/proxy.log" 2>&1 &
+  PIDS+=("$!")
+  start_tunnel # points at the proxy; sets PUBLIC_BASE_URL
+  echo "tunnel: $PUBLIC_BASE_URL  (share GUEST links only; the host signs in on localhost)"
+  echo "  the proxy blocks /auth/dev + host/admin routes over the tunnel, so a guest can't claim the"
+  echo "  host session — still, treat the URL as a throwaway secret and Ctrl-C to tear it down when done."
 else
   echo "no tunnel: links use $PUBLIC_BASE_URL (cameras only work on this machine)"
 fi
+export PUBLIC_BASE_URL
 
 # --- seed + print the dashboard, then the interactive bind loop (foreground) ---
 DEVSMOKE_FLAGS=(--guests "$GUESTS")

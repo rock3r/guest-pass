@@ -14,17 +14,17 @@ as smooth as possible:
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
-> ### ⚠ Security: the tunnel URL is a secret
+> ### ⚠ Security: dev instance over a tunnel
 >
-> The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in endpoint
-> `/auth/dev` grants a **host/admin** session and is reachable **through the tunnel** — its
-> loopback guard passes for tunnel-proxied requests, and `SIGNUP_MODE`/Google sign-in do **not**
-> gate it. So **anyone with the tunnel URL can take admin control of the live smoke room.**
-> Mitigations: the harness only advertises `/auth/dev` + the greenroom on **loopback** (the host
-> signs in on the machine running `smoke.sh`, never over the tunnel); the cloudflared/ngrok URL is
-> random and ephemeral. Still: **treat the tunnel URL like a secret** — share only the guest links,
-> and **Ctrl-C to tear it down** as soon as the smoke is done. It is a throwaway dev instance with
-> auto-purged fixtures, not a deployment.
+> The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in `/auth/dev`
+> grants a **host/admin** session, and a guest link unavoidably reveals the tunnel origin — so a
+> guest could otherwise trim `/p/<token>` to `/auth/dev` and take over (the loopback guard passes
+> for tunnel-proxied requests, and `SIGNUP_MODE`/Google do **not** gate `/auth/dev`). To prevent
+> that, **the tunnel points at a path-allowlist proxy** (`cmd/smokeproxy`) that forwards **only**
+> the guest/OBS routes (`/p`, `/s`, `/ws`, `/static`) and **refuses `/auth/dev`, the greenroom, and
+> the admin API**. The **host signs in on loopback** (`localhost`) on the machine running
+> `smoke.sh`. It's still a throwaway dev instance — don't reuse the tunnel URL beyond the smoke, and
+> **Ctrl-C to tear it down** when done.
 
 ---
 
@@ -52,9 +52,10 @@ scripts/smoke.sh --no-tunnel     # same-machine only (cameras work on localhost,
 ```
 
 What it does: generates + persists dev secrets in `.smoke/` (gitignored), uses a **fresh** SQLite
-DB, builds the frontend, opens a public HTTPS tunnel, starts the dev server (STUN-only,
-`MAIL_MODE=log`), then prints a **link dashboard** and an interactive bind prompt. Ctrl-C tears the
-server + tunnel down.
+DB, builds the frontend, starts the dev server (STUN-only, `MAIL_MODE=log`), opens a public HTTPS
+tunnel **in front of a guest-routes-only proxy** (so `/auth/dev` + host pages aren't exposed — see
+the security note above), then prints a **link dashboard** and an interactive bind prompt. Ctrl-C
+tears the server + proxy + tunnel down.
 
 > The server stays on a loopback `BASE_URL` (which `AUTH_MODE=dev` requires); the **guest links use
 > the tunnel URL**. The client opens its WebSocket from `window.location`, so the loopback-server /
