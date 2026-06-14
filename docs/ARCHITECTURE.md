@@ -848,22 +848,26 @@ Guest, D-15) at apply time (demotion-safe, EN-7). An actor may act only on someo
 **strictly below** them; never a peer or a superior. The host is immune and may
 release/override anything.
 
+A control frame names its target by the string `peerId` key (NOT `peer`, which is the
+roster-entry OBJECT key in `peer-joined`) — the same distinction `peer-left` uses, so one
+flat `Frame` envelope can carry either without a string-vs-object collision.
+
 ```jsonc
 // Suppressive, authority-locked forces (D-13). Carry NO "on" direction — always toward off.
-{"t":"force-mute","peer":"<id>"}                          // stop outbound audio at source
-{"t":"force-no-cam","peer":"<id>"}                        // stop outbound video at source
-{"t":"force-no-share","peer":"<id>"}                      // revoke screenshare; pull from preview pool + slot
-{"t":"release","peer":"<id>","kind":"mic"|"cam"|"share"}  // unlock only; target then re-enables itself
+{"t":"force-mute","peerId":"<id>"}                        // stop outbound audio at source (lock kind: mic)
+{"t":"force-no-cam","peerId":"<id>"}                      // stop outbound video at source (lock kind: cam)
+{"t":"force-no-share","peerId":"<id>"}                    // revoke screenshare (lock kind: share); pull from preview pool + slot
+{"t":"release","peerId":"<id>","kind":"mic"|"cam"|"share"} // unlock only; target then re-enables itself
 
 // Roles — host only (D-15)
-{"t":"role","peer":"<id>","role":"cohost"|"guest"}        // promote / demote (live, from the greenroom)
+{"t":"role","peerId":"<id>","role":"cohost"|"guest"}      // promote / demote (live, from the greenroom)
 
 // Screenshare preview-switcher — host only (D-21); the one sanctioned exception to "OBS owns composition"
-{"t":"screen-select","peer":"<id>"}                       // promote this active backstage share to LIVE
-{"t":"screen-select","peer":null}                         // clear slot → placeholder (no auto-advance)
+{"t":"screen-select","peerId":"<id>"}                     // promote this active backstage share to LIVE
+{"t":"screen-select","peerId":null}                       // clear slot → placeholder (no auto-advance)
 
 // Lifecycle
-{"t":"kick","peer":"<id>"}                                // disconnect + invalidate pass (D-25)
+{"t":"kick","peerId":"<id>"}                              // disconnect + invalidate pass (D-25)
 {"t":"end-session"}                                       // host only (D-40)
 ```
 

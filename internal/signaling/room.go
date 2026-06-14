@@ -165,6 +165,23 @@ func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool, level *float64) {
 	})
 }
 
+// Force applies a suppression force (force-mute/force-no-cam/force-no-share) from actor onto
+// target's modality (D-13/EN-7). Authority is enforced server-side against current rank — a
+// guest's or peer's attempt is a no-op. Modality is mic | cam | share.
+func (r *Room) Force(actor, target PeerID, modality string) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.force(actor, target, modality))
+	})
+}
+
+// Release lifts a suppression lock on target's modality (D-13/EN-7). The target can never
+// self-release; authority is the actor's current rank ≥ the lock floor (the host always can).
+func (r *Room) Release(actor, target PeerID, modality string) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.release(actor, target, modality))
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection
