@@ -234,13 +234,16 @@ export class MeshManager {
     return this.peers.has(id);
   }
 
-  /** reconnect tears down and re-opens a mesh link (best-effort manual recovery for a stuck tile). */
+  /**
+   * reconnect forces an ICE restart on a stuck mesh link (manual recovery for a tile). It does NOT
+   * drop+recreate: only the offerer side can re-offer, so dropping from the answerer side would tear
+   * down a working connection that the remote offerer would never re-establish. restartIce is a
+   * no-op on the answerer side — the offerer drives recovery (its own iceconnectionstate "failed"
+   * triggers an automatic restart) — so this is safe from either tile.
+   */
   reconnect(id) {
-    const localStream = this.getLocalStream();
-    if (this.peers.has(id) && localStream) {
-      this._drop(id);
-      this._ensure(id, localStream);
-    }
+    const mp = this.peers.get(id);
+    if (mp) mp.restartIce();
   }
 
   /** applyIceServers updates every live mesh connection with a refreshed ICE config (EN-4). */

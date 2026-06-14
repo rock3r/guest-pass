@@ -181,6 +181,7 @@ export function GuestSession({
                 entry={t.entry}
                 stream={t.stream}
                 viewerRole={viewerRole}
+                live={live}
                 onReconnect={() => onThumbReconnect(t.id)}
                 onForce={(m) => onThumbForce(t.id, m)}
                 onRelease={(m) => onThumbRelease(t.id, m)}

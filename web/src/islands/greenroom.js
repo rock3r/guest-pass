@@ -153,6 +153,7 @@ function Greenroom() {
             entry={t.entry}
             stream={t.stream}
             viewerRole={viewerRole}
+            live={state === "live"}
             onReconnect={() => {
               const link = linksRef.current.get(t.id);
               if (link) link.restartIce();

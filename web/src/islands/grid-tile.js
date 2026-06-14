@@ -50,11 +50,13 @@ function lockNotices(locks) {
  * target. RELEASE shows on a locked modality whenever the viewer's rank is at or above the LOCK
  * FLOOR — independent of the force gate, so a co-host can release a lock on a guest later promoted
  * to co-host — but never on the viewer's OWN tile (a target can't self-release, D-13). Promote/
- * demote and hand-dismiss are host-only. The reducer is the authority — these gates are convenience.
- * @param {{entry:any, viewerRole:string, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void}} props
+ * demote and hand-dismiss are host-only. Every action sends over the signaling socket, so the
+ * buttons are disabled until the connection is `live` (matching the chat/raise-hand controls — a
+ * send on a non-open socket throws). The reducer is the authority — these gates are convenience.
+ * @param {{entry:any, viewerRole:string, live:boolean, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void}} props
  * @returns {import("preact").VNode}
  */
-function Controls({ entry, viewerRole, onForce, onRelease, onRole, onDismissHand }) {
+function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismissHand }) {
   const vr = rankOf(viewerRole);
   const canModerate = vr > rankOf(entry.role); // strictly above the target → may force
   const locks = {};
@@ -67,19 +69,19 @@ function Controls({ entry, viewerRole, onForce, onRelease, onRole, onDismissHand
           // Release is floor-gated and self-forbidden, NOT canModerate-gated (D-13).
           const canRelease = !entry.self && vr >= rankOf(lock.applierRank);
           return canRelease ? (
-            <button type="button" class="gr-release" data-kind={m} onClick={() => onRelease(m)}>
+            <button type="button" class="gr-release" data-kind={m} disabled={!live} onClick={() => onRelease(m)}>
               Release {m}
             </button>
           ) : null;
         }
         return canModerate ? (
-          <button type="button" class="gr-force" data-kind={m} onClick={() => onForce(m)}>
+          <button type="button" class="gr-force" data-kind={m} disabled={!live} onClick={() => onForce(m)}>
             {FORCE_LABEL[m]}
           </button>
         ) : null;
       })}
       {viewerRole === "host" && entry.handRaised ? (
-        <button type="button" class="gr-dismiss-hand" onClick={onDismissHand}>
+        <button type="button" class="gr-dismiss-hand" disabled={!live} onClick={onDismissHand}>
           Dismiss hand
         </button>
       ) : null}
@@ -88,6 +90,7 @@ function Controls({ entry, viewerRole, onForce, onRelease, onRole, onDismissHand
           type="button"
           class="gr-role"
           data-to={entry.role === "guest" ? "cohost" : "guest"}
+          disabled={!live}
           onClick={() => onRole(entry.role === "guest" ? "cohost" : "guest")}
         >
           {entry.role === "guest" ? "Promote to co-host" : "Demote to guest"}
@@ -101,10 +104,10 @@ function Controls({ entry, viewerRole, onForce, onRelease, onRole, onDismissHand
  * Tile renders one participant's P2P video plus its roster-driven status chrome and moderation
  * controls. The stream attaches via an effect so a re-render (e.g. an on-air change) never reloads
  * the <video>. The Reconnect control forces an ICE restart for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void}} props
+ * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, onReconnect, onForce, onRelease, onRole, onDismissHand }) {
+export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   useEffect(() => {
@@ -137,6 +140,7 @@ export function Tile({ entry, stream, viewerRole, onReconnect, onForce, onReleas
       <Controls
         entry={entry}
         viewerRole={viewerRole}
+        live={live}
         onForce={onForce}
         onRelease={onRelease}
         onRole={onRole}
