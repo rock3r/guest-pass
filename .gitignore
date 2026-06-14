@@ -6,6 +6,7 @@
 
 # Go
 /guestpass
+/devsmoke
 *.test
 *.out
 coverage.*
