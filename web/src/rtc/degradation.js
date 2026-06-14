@@ -181,6 +181,25 @@ export class DegradationController {
     this._timer = undefined;
   }
 
+  /**
+   * recoverNow restores every shed sender immediately and resets the ladder — the host "bump
+   * quality now" override (D-34), bypassing the slow recover hysteresis. If the pressure persists,
+   * the next sample simply re-degrades; the immediate sample() re-reports current health.
+   */
+  recoverNow() {
+    for (const t of this.getTargets()) {
+      applyAction(t.sender, { active: true, params: { scaleResolutionDownBy: 1 } });
+    }
+    this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
+    // Report recovered IMMEDIATELY (don't wait for the next ~2s sample) so the host's badge and the
+    // guest's own degradation clear right away — that's the point of the override. If the pressure
+    // persists, the next sample re-degrades.
+    this.report({ signal: this._lastSignal || 0, rttMs: this._lastRttMs || 0, degraded: null });
+    // Debug/test observability: count "bump quality now" executions (deterministic — natural
+    // recovery never calls this), so a test can prove the host→broadcast→recoverNow wiring fired.
+    if (typeof window !== "undefined") window.__gpRecoverNowCount = (window.__gpRecoverNowCount || 0) + 1;
+  }
+
   /** sample reads getStats across the live senders, plans the ladder, applies it, and reports. */
   async sample() {
     // Re-entrancy guard: getStats() is async, so a slow round could overlap the next interval tick
@@ -227,7 +246,9 @@ export class DegradationController {
     if (typeof window !== "undefined") {
       window.__gpDegradation = { reason, degraded: plan.degraded, actions: plan.actions, disabled: plan.disabled };
     }
-    this.report({ signal: signalFromStats(rttMs, lossFrac), rttMs, degraded: plan.degraded });
+    this._lastSignal = signalFromStats(rttMs, lossFrac); // remembered so recoverNow can report at once
+    this._lastRttMs = rttMs;
+    this.report({ signal: this._lastSignal, rttMs, degraded: plan.degraded });
   }
 }
 

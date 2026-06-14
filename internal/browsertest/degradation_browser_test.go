@@ -195,3 +195,88 @@ func TestDegradation_ShedsAndReportsOnCpu(t *testing.T) {
 		t.Fatalf("bandwidth shedding did not lower the constrained sender's resolution params: %v", err)
 	}
 }
+
+// T-14 / AC-15: degradation transparency. The host greenroom shows a per-tile degrading/recovering
+// badge (driven by the guest's {t:stats} self-report), and a host-only "bump quality now" control
+// broadcasts {t:recover-quality}, which forces each publisher to recover immediately — overriding
+// the slow recover hysteresis (D-34). A guest sees only its OWN degradation (AC-15, enforced
+// server-side in PR-13). Here guest A is forced into cpu degradation, the host sees the badge, and
+// "bump quality now" recovers A faster than the unaided hysteresis would.
+func TestDegradationTransparency_HostBadgeAndRecoverNow(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	// Guest A: getStats override + enter.
+	aAlloc, cancelAA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAA()
+	aCtx, cancelA := chromedp.NewContext(aAlloc)
+	defer cancelA()
+	aCtx, cancelAT := context.WithTimeout(aCtx, 150*time.Second)
+	defer cancelAT()
+	injectStats := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(statsOverrideJS).Do(ctx)
+		return err
+	})
+	if err := chromedp.Run(aCtx,
+		injectStats,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"] .gs-selfview`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest A enter: %v", err)
+	}
+
+	// Host: greenroom consumes A → A has a publish sender, and the host sees A's tile.
+	hAlloc, cancelHA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelHA()
+	hCtx, cancelH := chromedp.NewContext(hAlloc)
+	defer cancelH()
+	hCtx, cancelHT := context.WithTimeout(hCtx, 150*time.Second)
+	defer cancelHT()
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	tileA := `.gr-tile[data-guest="` + s.passID + `"]`
+	if err := chromedp.Run(hCtx,
+		network.Enable(), setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(tileA, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("host greenroom did not render guest A's tile: %v", err)
+	}
+
+	// Force A's cpu → A self-reports degradation → the host's tile shows the degrading badge.
+	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpForceLimit = "cpu"`, nil)); err != nil {
+		t.Fatalf("force cpu: %v", err)
+	}
+	if err := chromedp.Run(hCtx, chromedp.WaitVisible(tileA+` .gr-degraded`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("the host tile did not show guest A's degrading badge (AC-15): %v", err)
+	}
+
+	// Host "bump quality now" → broadcast {t:recover-quality} → guest A's recoverNow() executes (the
+	// recovery attempt, D-34). cpu stays forced so this is unambiguous: ONLY recover-quality calls
+	// recoverNow (natural recovery never does), so the counter rising proves the whole wiring fired
+	// — host button → host WS → server broadcast → A's controller — independent of any timing race.
+	if err := chromedp.Run(hCtx, chromedp.Click(`.gr-recover`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("host 'bump quality now' click: %v", err)
+	}
+	if err := chromedp.Run(aCtx, chromedp.Poll(`(window.__gpRecoverNowCount || 0) >= 1`,
+		nil, chromedp.WithPollingTimeout(15*time.Second))); err != nil {
+		t.Fatalf("'bump quality now' did not reach the guest's recover-now path: %v", err)
+	}
+
+	// And with the pressure cleared, a recover-now restores the guest's own state (degraded clears).
+	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpForceLimit = null`, nil)); err != nil {
+		t.Fatalf("clear cpu: %v", err)
+	}
+	if err := chromedp.Run(hCtx, chromedp.Click(`.gr-recover`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("host 'bump quality now' (2) click: %v", err)
+	}
+	if err := chromedp.Run(aCtx, chromedp.Poll(`document.querySelector('[data-entered]').dataset.degraded === ""`,
+		nil, chromedp.WithPollingTimeout(15*time.Second))); err != nil {
+		t.Fatalf("'bump quality now' did not recover guest A's own degradation: %v", err)
+	}
+}

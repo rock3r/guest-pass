@@ -132,6 +132,11 @@ export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onFo
           {notices.join(" · ")}
         </p>
       ) : null}
+      {entry.degraded ? (
+        <p class="gr-degraded" data-degraded={`${entry.degraded.dir}:${entry.degraded.reason}`}>
+          {entry.degraded.dir === "recovering" ? "Recovering" : "Degrading"} ({entry.degraded.reason})
+        </p>
+      ) : null}
       {entry.handRaised ? (
         <span class="gr-hand" data-hand="1">
           ✋ Hand raised

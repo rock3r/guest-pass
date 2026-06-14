@@ -185,6 +185,12 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if id.role == "host" {
 			room.SetRole(id.peer, signaling.PeerID(f.PeerID), f.Role)
 		}
+	case "recover-quality":
+		// Host "bump quality now" (AD-21/D-34): broadcast to every publisher to recover immediately,
+		// overriding the slow recover hysteresis. Host-only — a guest/source attempt is a no-op.
+		if id.role == "host" {
+			room.RecoverQuality()
+		}
 	case "chat":
 		// Backstage chat (EN-20): relayed to participants only, from-stamped. The text is NEVER
 		// persisted or logged — do NOT add any log line here referencing f.Text. OBS sources have

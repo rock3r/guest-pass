@@ -275,6 +275,14 @@ func (r *Room) ApplyStats(id PeerID, signal, rttMs int, degraded *DegradedView) 
 	})
 }
 
+// RecoverQuality broadcasts a host "bump quality now" to every participant (AD-21/D-34). Authority
+// is checked at the dispatch layer (host-only); this is a pure broadcast on the room goroutine.
+func (r *Room) RecoverQuality() {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.recoverQuality())
+	})
+}
+
 // Force applies a suppression force (force-mute/force-no-cam/force-no-share) from actor onto
 // target's modality (D-13/EN-7). Authority is enforced server-side against current rank — a
 // guest's or peer's attempt is a no-op. Modality is mic | cam | share.
