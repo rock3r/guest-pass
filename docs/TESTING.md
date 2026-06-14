@@ -276,7 +276,12 @@ These gates are manual by necessity:
 - **Real-OBS render smoke — manual M2 DoD** (AD-10). Beyond the SPIKE-2 receive
   gate, a manual pass with actual OBS ≥ 31 (CEF 127) confirms the browser source
   renders the occupant in a real OBS scene. This complements, not replaces, the
-  automated tracer (which proves only protocol/plumbing — RF-7).
+  automated tracer (which proves only protocol/plumbing — RF-7). The
+  **`cmd/devsmoke`** dev helper (`-tags dev`, AUTH_MODE=dev only) seeds the
+  fixtures this smoke needs but that have no host UI until M4 — a stream, a guest
+  pass, and a cam-1 slot for the local dev host — prints the guest + OBS-source
+  URLs, and binds the slot to the guest by sending a `{t:rebind}` over a host
+  `/ws` connection.
 - **Safari / mobile guest smoke — manual** (RF-7). The chromedp tracer runs only
   desktop Chrome; Safari and mobile guest rendering are eyeballed manually.
 
