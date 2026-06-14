@@ -16,6 +16,23 @@ type peerInfo struct {
 	// level is the last reported audio meter (0..1), held in-memory only (EN-11: never
 	// persisted) and coalesced onto the batched {t:levels} tick (AD-13), never the roster.
 	level float64
+	// locks are the active suppression locks on this peer, keyed by modality (mic|cam|share)
+	// — at most one per (target, modality) (D-13/EN-7). Persistence backs these in PR-4.
+	locks map[string]*lockState
+}
+
+// lockState is a suppression lock on one (target, modality): the applier and the rank FLOOR
+// at which it was set (D-13). A higher-rank force raises the floor + owner; a lower-or-equal
+// force is a no-op; release needs the actor's CURRENT rank ≥ floor (demotion-safe, EN-7).
+type lockState struct {
+	applier PeerID
+	floor   int // rank floor: rankCohost or rankHost (a guest can never force)
+}
+
+// locked reports whether a modality (mic|cam|share) is suppression-locked on this peer.
+func (p *peerInfo) locked(modality string) bool {
+	_, ok := p.locks[modality]
+	return ok
 }
 
 type slotState struct {
@@ -78,6 +95,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 	p := &peerInfo{id: id, role: role, name: name}
 	if prev != nil {
 		p.cam, p.mic, p.screen, p.handRaised = prev.cam, prev.mic, prev.screen, prev.handRaised
+		// A reconnect must NOT clear suppression locks — otherwise a force-muted target could
+		// self-release simply by reconnecting (defeats D-13/EN-7). Carry them across the rejoin.
+		// (Full-disconnect + restart survival via the pass_locks table is PR-4.)
+		p.locks = prev.locks
 	}
 	s.peers[id] = p
 	var out []outbound
@@ -145,20 +166,35 @@ func (s *roomState) applyState(id PeerID, cam, mic, screen *bool, level *float64
 	if level != nil {
 		p.level = *level // in-memory only; coalesced onto the {t:levels} tick, not the roster
 	}
-	changed := false
-	if cam != nil && p.cam != *cam {
-		p.cam, changed = *cam, true
+	changed, violated := false, false
+	// apply folds one provided modality into presence, but REJECTS a self-state that tries to
+	// re-enable a suppression-locked modality (EN-7): the server is the enforcement point since
+	// UI gating is bypassable. A rejected re-enable is a no-op but flips `violated` so the
+	// target's optimistic UI is corrected by an authoritative re-broadcast.
+	apply := func(pres *bool, want *bool, modality string) {
+		if want == nil {
+			return
+		}
+		if *want && p.locked(modality) {
+			violated = true // can't self-enable a force-suppressed modality
+			return
+		}
+		if *pres != *want {
+			*pres, changed = *want, true
+		}
 	}
-	if mic != nil && p.mic != *mic {
-		p.mic, changed = *mic, true
+	apply(&p.cam, cam, "cam")
+	apply(&p.mic, mic, "mic")
+	apply(&p.screen, screen, "share")
+	if changed {
+		return s.rebroadcastRoster()
 	}
-	if screen != nil && p.screen != *screen {
-		p.screen, changed = *screen, true
+	if violated {
+		// Nothing legitimately changed, but the target tried to defy a lock: re-send ONLY the
+		// violating target its authoritative roster so its UI snaps back (no room-wide churn).
+		return []outbound{s.rosterFrame(id, p.role)}
 	}
-	if !changed {
-		return nil
-	}
-	return s.rebroadcastRoster()
+	return nil
 }
 
 // buildLevels coalesces every participant's last-reported audio meter into ONE batched

@@ -146,9 +146,22 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		// Self-presence (EN-7): cam/mic/screen are the sender's OWN modality flags, folded into
 		// the roster; level is the audio meter, coalesced onto the {t:levels} tick (AD-13), never
 		// the roster. Only a participant has presence — an OBS source reflects on-air, not state.
-		// Lock enforcement against a suppressed modality lands in PR-3.
+		// A self-state that re-enables a suppression-locked modality is rejected server-side (EN-7).
 		if !id.isSource() {
 			room.ApplyState(id.peer, f.Cam, f.Mic, f.Screen, f.Level)
+		}
+	case "force-mute", "force-no-cam", "force-no-share":
+		// Suppressive, authority-locked forces (D-13/EN-7). The actor is the credential's peer;
+		// the target is the `peerId` string. Rank authority (strictly-above, demotion-safe) is
+		// enforced server-side in the reducer, so a guest's or peer's attempt is a no-op there.
+		if !id.isSource() {
+			room.Force(id.peer, signaling.PeerID(f.PeerID), forceModality(f.T))
+		}
+	case "release":
+		// Lift a suppression lock (D-13). The target can never self-release; the reducer checks
+		// the actor's current rank ≥ the lock floor. Kind is the modality (mic|cam|share).
+		if !id.isSource() && isLockModality(f.Kind) {
+			room.Release(id.peer, signaling.PeerID(f.PeerID), f.Kind)
 		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
@@ -185,4 +198,23 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 			room.ObsStreaming(false)
 		}
 	}
+}
+
+// forceModality maps a force frame type to the lock modality it suppresses (D-13).
+func forceModality(t string) string {
+	switch t {
+	case "force-mute":
+		return "mic"
+	case "force-no-cam":
+		return "cam"
+	case "force-no-share":
+		return "share"
+	}
+	return ""
+}
+
+// isLockModality reports whether a {t:release} kind names a real suppression modality, so a
+// malformed release is dropped rather than acted on.
+func isLockModality(kind string) bool {
+	return kind == "mic" || kind == "cam" || kind == "share"
 }

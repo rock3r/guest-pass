@@ -22,6 +22,7 @@ type Frame struct {
 	Active         bool            `json:"active,omitempty"`
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
+	Kind           string          `json:"kind,omitempty"` // {t:release} modality: mic | cam | share (D-13)
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
 	// and the local audio meter. These are POINTERS so an ABSENT field means "leave it
 	// unchanged" — a meter-only update ({"t":"state","level":…}) must not clobber presence to
@@ -35,7 +36,7 @@ type Frame struct {
 	Levels     map[string]float64 `json:"levels,omitempty"` // {t:levels} batched meter tick: peerId → level (AD-13)
 	Peers      []RosterEntry      `json:"peers,omitempty"`  // roster projection (EN-8)
 	Peer       *RosterEntry       `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID     string             `json:"peerId,omitempty"` // the departed peer in a peer-left frame
+	PeerID     string             `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
 	Recipient  string             `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
 	ICEServers []ICEServer        `json:"iceServers,omitempty"`
 	TTLSec     int                `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
