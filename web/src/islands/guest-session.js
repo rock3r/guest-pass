@@ -79,8 +79,13 @@ export function GuestSession({
 
   const notices = (lockedMods || []).map((m) => LOCK_COPY[m]).filter(Boolean);
 
+  // The chat and raise-hand actions send over the signaling socket, which throws while it is still
+  // CONNECTING (and is dead once disconnected) — so they are disabled until the room is live.
+  const live = pubState === "live";
+
   const submit = (e) => {
     e.preventDefault();
+    if (!live) return;
     const text = draft.trim();
     if (!text) return;
     onSendChat(text); // render happens when the server relays it back (proves the round-trip; EN-20)
@@ -119,6 +124,7 @@ export function GuestSession({
             type="button"
             class="gs-hand"
             data-raised={handRaised ? "1" : "0"}
+            disabled={!live}
             onClick={onToggleHand}
           >
             {handRaised ? "Lower hand" : "Raise hand"}
@@ -140,10 +146,11 @@ export function GuestSession({
             class="gs-chat-input"
             type="text"
             value={draft}
+            disabled={!live}
             placeholder="Message the backstage…"
             onInput={(e) => setDraft(/** @type {HTMLInputElement} */ (e.target).value)}
           />
-          <button class="gs-chat-send" type="submit">
+          <button class="gs-chat-send" type="submit" disabled={!live}>
             Send
           </button>
         </form>

@@ -150,6 +150,14 @@ function DeviceCheck() {
     // here too — the panel renders only what the server relays, never an optimistic echo, and the
     // chat is never persisted or logged (the purity is the server's tested invariant, PR-6).
     room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
+    // Keep the peer-name cache fresh between full roster broadcasts: a peer joining AFTER this
+    // guest arrives is announced as a {t:peer-joined} delta (existing peers don't get a fresh
+    // roster), so without this a later-joiner's chat would render as a raw peer id until some
+    // unrelated roster rebroadcast. Mirrors the greenroom's peer-joined/peer-left handling.
+    room.on("peer-joined", (f) => {
+      if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
+    });
+    room.on("peer-left", (f) => setPeers((prev) => prev.filter((p) => p.id !== f.peerId)));
     room.on("streaming", (f) => setStreaming(!!f.active));
     // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
     room.onIce((servers) => publisher.applyIceServers(servers));
@@ -192,11 +200,14 @@ function DeviceCheck() {
   // sendChat relays a backstage message over the live signaling room; it is rendered only when
   // the server relays it back (EN-20 — never an optimistic local echo). toggleHand flips the
   // server-authoritative raise-hand state via {t:hand} (the roster reflection drives the button).
+  // Both guard on pubState === "live": Room.send calls WebSocket.send, which THROWS while the
+  // socket is still CONNECTING, so a click before room.ready resolves must be a no-op (the
+  // GuestSession also disables the controls until live; this is the defense-in-depth backstop).
   function sendChat(text) {
-    if (roomRef.current) roomRef.current.send({ t: "chat", text });
+    if (roomRef.current && pubState === "live") roomRef.current.send({ t: "chat", text });
   }
   function toggleHand() {
-    if (roomRef.current) roomRef.current.send({ t: "hand", raised: !handRaised });
+    if (roomRef.current && pubState === "live") roomRef.current.send({ t: "hand", raised: !handRaised });
   }
 
   if (phase === "entered") {

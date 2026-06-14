@@ -90,6 +90,24 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 		t.Fatalf("backstage chat did not round-trip the relay to the other guest: %v", err)
 	}
 
+	// Sender-name resolution across a LATER join: guest B joined after guest A, so A learned of B
+	// via a {t:peer-joined} delta, not a full roster. B's message must still render in A's log under
+	// B's display name ("Erin"), not B's raw peer id — done BEFORE any lock/hand change rebroadcasts
+	// a full roster to A, so this genuinely exercises the peer-joined name cache.
+	const bMsg = "from-erin-3Vy8w"
+	if err := chromedp.Run(bCtx,
+		chromedp.SendKeys(`.gs-chat-input`, bMsg, chromedp.ByQuery),
+		chromedp.Click(`.gs-chat-send`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest B chat send: %v", err)
+	}
+	if err := chromedp.Run(aCtx, chromedp.Poll(
+		`[...document.querySelectorAll('.gs-chat-msg')].some((m) => m.textContent.includes('Erin') && m.textContent.includes('from-erin-3Vy8w'))`,
+		nil, chromedp.WithPollingTimeout(15*time.Second),
+	)); err != nil {
+		t.Fatalf("guest A did not resolve a later-joined peer's chat sender name (showed a raw id?): %v", err)
+	}
+
 	// Host: greenroom grid. Target guest A's tile by its stable peer id (== pass id) so the two
 	// guest tiles don't race the selector.
 	hAlloc, cancelHA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
