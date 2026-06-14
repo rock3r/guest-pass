@@ -70,6 +70,10 @@ rm -f "$DB_PATH" "$DB_PATH-shm" "$DB_PATH-wal"
 export AUTH_MODE=dev MAIL_MODE=log BASE_URL="http://localhost:$PORT"
 export JWT_SECRET TOKEN_SECRET DB_PATH
 export STUN_URL="${STUN_URL:-stun:stun.l.google.com:19302}" # public STUN for dev; override via env
+# This harness is STUN-only (the chosen smoke posture). Clear any TURN_URL/TURN_SECRET inherited from
+# the shell so the server can't silently relay over a TURN (or fail to boot on a stale TURN_URL) and
+# invalidate the direct-connect / NAT result. (To run a TURN smoke, wire coturn + these vars instead.)
+unset TURN_URL TURN_SECRET
 # Required even in dev (config.validateRequired). allowlist (no ALLOWED_HOSTS) only blocks Google
 # self-signup — it does NOT gate /auth/dev, which bypasses Google + SIGNUP_MODE and grants an admin
 # session. Over the tunnel /auth/dev IS reachable (the loopback guard passes for proxied requests),
