@@ -83,9 +83,14 @@ func run() error {
 		return errors.New("devsmoke is local-dev only — set AUTH_MODE=dev (run the server the same way)")
 	}
 
-	// The links guests actually open. Server keeps a loopback BASE_URL; the printed base may be a
-	// public tunnel URL so phones / other machines can reach it (the WS rides window.location).
+	// The links GUESTS open. The server keeps a loopback BASE_URL; this may be a public tunnel URL so
+	// phones / other machines can reach it (the WS rides window.location, not BASE_URL).
 	publicBase := strings.TrimRight(firstNonEmpty(*publicBaseFlag, os.Getenv("PUBLIC_BASE_URL"), cfg.BaseURL), "/")
+	// The HOST runs this on the same machine as the server, so it signs in over LOOPBACK. The
+	// admin-granting /auth/dev is deliberately NOT advertised over the public tunnel: the loopback
+	// guard passes for any tunnel-proxied request, so anyone with the tunnel URL could otherwise
+	// claim the host/admin session (see the security note in docs/SMOKE.md).
+	localBase := strings.TrimRight(cfg.BaseURL, "/")
 
 	st, err := store.Open(ctx, cfg.DBPath)
 	if err != nil {
@@ -105,9 +110,6 @@ func run() error {
 	if camsNeeded < 1 {
 		return errors.New("nothing to seed: -guests must be >= 1 (or enable -cohost)")
 	}
-	if camsNeeded > 8 {
-		return fmt.Errorf("need %d cam slots but only cam-1..8 exist — lower -guests (capacity target is ~6)", camsNeeded)
-	}
 
 	// The same host /auth/dev signs you in as, so the greenroom + OBS sources share one room.
 	host, err := st.GetHostByGoogleSub(ctx, "dev-local-host")
@@ -119,6 +121,15 @@ func run() error {
 	}
 	if err != nil {
 		return fmt.Errorf("dev host: %w", err)
+	}
+
+	// Preflight BEFORE any stream/pass/slot writes, so a re-run against a non-fresh DB fails cleanly
+	// (with a reset hint) instead of leaving partial fixtures: reserve enough free cam indices, and
+	// refuse if the singleton screenshare slot already exists. scripts/smoke.sh always uses a fresh
+	// DB, so the happy path reserves cam-1.. with nothing in the way.
+	camIdxs, err := planCamSlots(ctx, st, host.ID, camsNeeded, *screenshare)
+	if err != nil {
+		return err
 	}
 
 	stream, err := st.CreateStream(ctx, store.CreateStreamParams{
@@ -142,12 +153,7 @@ func run() error {
 		parts = append(parts, participant{name: "Co-host", role: store.RoleCohost})
 	}
 
-	// Allocate a cam slot + a pass for each participant. Cam idx starts at the lowest free index so
-	// repeated runs against the same DB don't collide on the unique (host_id, idx) cam constraint.
-	camIdx, err := freeCamIdx(ctx, st, host.ID)
-	if err != nil {
-		return err
-	}
+	// Allocate a cam slot + a pass for each participant, using the indices reserved by the preflight.
 	for i := range parts {
 		p := &parts[i]
 		p.passRaw, err = token.Mint()
@@ -167,8 +173,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		idx := camIdx
-		camIdx++
+		idx := camIdxs[i]
 		if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
 			HostID: host.ID, Kind: store.SlotCam, Idx: ptr(idx), SourceTokenHash: hasher.Hash(p.srcRaw),
 		}); err != nil {
@@ -192,17 +197,18 @@ func run() error {
 		}
 	}
 
-	printDashboard(publicBase, stream.ID, parts, screenSrcRaw, *screenshare)
+	printDashboard(localBase, publicBase, stream.ID, parts, screenSrcRaw, *screenshare)
 	if *qr {
 		printQRCodes(publicBase, parts)
 	}
 
-	// Mint a host session JWT with the same ring the server uses, for the rebind connection.
+	// Mint a host session JWT with the same ring the server uses, for the rebind connection. A
+	// generous TTL so a long capacity/degradation soak doesn't outlive it mid-smoke.
 	ring, err := auth.NewKeyRing(cfg.JWTSecret)
 	if err != nil {
 		return fmt.Errorf("key ring: %w", err)
 	}
-	session, err := ring.Issue(host.ID, time.Hour)
+	session, err := ring.Issue(host.ID, 12*time.Hour)
 	if err != nil {
 		return fmt.Errorf("issue host session: %w", err)
 	}
@@ -220,18 +226,20 @@ func run() error {
 			}
 			bound++
 		}
-		fmt.Printf("  sent %d rebind(s). Each bound OBS source should render its participant; bring a source on-program to light its on-air pill.\n", bound)
+		fmt.Printf("  sent %d rebind request(s) — only participants who have ENTERED actually bind (re-press Enter for any that hadn't). Bring a bound OBS source on-program to light its on-air pill.\n", bound)
 		fmt.Print("Press Enter to re-send the rebinds (e.g. for guests who hadn't connected yet), Ctrl-C to quit: ")
 	}
 	return nil
 }
 
-// printDashboard prints the participant links + OBS source URLs + greenroom URL, using publicBase
-// for everything a guest/OBS opens.
-func printDashboard(base, streamID string, parts []participant, screenSrcRaw string, screenshare bool) {
+// printDashboard prints the host links (LOOPBACK — the host is on this machine) and the participant
+// + OBS source URLs (the public tunnel base, what guests/OBS open).
+func printDashboard(localBase, base, streamID string, parts []participant, screenSrcRaw string, screenshare bool) {
 	fmt.Printf("\nSmoke fixtures ready (host=dev-local-host, stream=%s).\n", streamID)
-	fmt.Printf("\nHost:\n  Sign in:    %s/auth/dev   (then open the greenroom)\n  Greenroom:  %s/greenroom\n", base, base)
-	fmt.Printf("\nParticipants (%d):\n", len(parts))
+	fmt.Printf("\nHost — open on THIS machine only (loopback). Do NOT open /auth/dev over the tunnel:\n"+
+		"it grants an admin session to anyone with the URL (see docs/SMOKE.md security note).\n"+
+		"  Sign in:    %s/auth/dev\n  Greenroom:  %s/greenroom\n", localBase, localBase)
+	fmt.Printf("\nParticipants (%d) — share these (tunnel) links/QRs with guests:\n", len(parts))
 	for _, p := range parts {
 		role := p.role
 		if p.canScreen {
@@ -250,7 +258,8 @@ func printDashboard(base, streamID string, parts []participant, screenSrcRaw str
 Quick start:
   1. Open each Guest link on a device/tab, allow camera/mic, click "Enter the greenroom"
      (wait for "your camera is live in the greenroom"). Phones: scan the QR codes below.
-  2. Open the Host sign-in link, then the Greenroom — every guest tile should render.
+  2. On THIS machine open the Host sign-in (loopback), then the Greenroom — every guest tile
+     should render.
   3. Press Enter HERE to bind the cam slots, then add an OBS source URL as a Browser Source
      (1280x720) and bring it on-program to light that guest's on-air pill.
   4. Work the checklist in docs/SMOKE.md (multi-guest grid, on-air, degradation, and the
@@ -278,35 +287,49 @@ func printQRCodes(base string, parts []participant) {
 	}
 }
 
-// firstNonEmpty returns the first non-blank string, or "".
+// firstNonEmpty returns the first non-blank string, trimmed, or "".
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
+		if s := strings.TrimSpace(v); s != "" {
+			return s
 		}
 	}
 	return ""
 }
 
-// freeCamIdx returns the lowest unused cam-slot index (1..8) for the host, so repeated runs
-// against the same DB don't collide on the unique (host_id, idx) cam constraint.
-func freeCamIdx(ctx context.Context, st *store.Store, hostID string) (int64, error) {
+// planCamSlots reserves `need` free cam-slot indices (the lowest free ones in cam-1..8, skipping any
+// already in use so non-contiguous gaps are fine) and, when screenshare is requested, refuses if the
+// singleton per-host screenshare slot already exists. It does ONE read and ALL the capacity/existence
+// checks up front, so a re-run against a non-fresh DB fails cleanly here — before any stream / pass /
+// slot is written — rather than aborting mid-seed on a unique-constraint and leaving partial fixtures.
+func planCamSlots(ctx context.Context, st *store.Store, hostID string, need int, screenshare bool) ([]int64, error) {
 	slots, err := st.ListSlotsByHost(ctx, hostID)
 	if err != nil {
-		return 0, fmt.Errorf("listing slots: %w", err)
+		return nil, fmt.Errorf("listing slots: %w", err)
 	}
 	used := map[int64]bool{}
+	hasScreen := false
 	for _, sl := range slots {
 		if sl.Kind == store.SlotCam && sl.Idx != nil {
 			used[*sl.Idx] = true
 		}
-	}
-	for i := int64(1); i <= 8; i++ {
-		if !used[i] {
-			return i, nil
+		if sl.Kind == store.SlotScreenshare {
+			hasScreen = true
 		}
 	}
-	return 0, errors.New("all 8 cam slots are in use for the dev host — reset with `rm $DB_PATH*` and re-run")
+	if screenshare && hasScreen {
+		return nil, errors.New("a screenshare slot already exists for the dev host — reset the DB (rm $DB_PATH*) and re-run")
+	}
+	var free []int64
+	for i := int64(1); i <= 8; i++ {
+		if !used[i] {
+			free = append(free, i)
+		}
+	}
+	if len(free) < need {
+		return nil, fmt.Errorf("only %d cam slot(s) free (cam-1..8) but need %d — lower --guests or reset the DB (rm $DB_PATH*)", len(free), need)
+	}
+	return free[:need], nil
 }
 
 // sendRebind opens a short-lived host /ws connection and sends one {t:rebind} for the slot. The

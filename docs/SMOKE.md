@@ -14,6 +14,18 @@ as smooth as possible:
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
+> ### ⚠ Security: the tunnel URL is a secret
+>
+> The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in endpoint
+> `/auth/dev` grants a **host/admin** session and is reachable **through the tunnel** — its
+> loopback guard passes for tunnel-proxied requests, and `SIGNUP_MODE`/Google sign-in do **not**
+> gate it. So **anyone with the tunnel URL can take admin control of the live smoke room.**
+> Mitigations: the harness only advertises `/auth/dev` + the greenroom on **loopback** (the host
+> signs in on the machine running `smoke.sh`, never over the tunnel); the cloudflared/ngrok URL is
+> random and ephemeral. Still: **treat the tunnel URL like a secret** — share only the guest links,
+> and **Ctrl-C to tear it down** as soon as the smoke is done. It is a throwaway dev instance with
+> auto-purged fixtures, not a deployment.
+
 ---
 
 ## Prerequisites
@@ -44,13 +56,14 @@ DB, builds the frontend, opens a public HTTPS tunnel, starts the dev server (STU
 `MAIL_MODE=log`), then prints a **link dashboard** and an interactive bind prompt. Ctrl-C tears the
 server + tunnel down.
 
-> The server stays on a loopback `BASE_URL` (which `AUTH_MODE=dev` requires); the **printed links
-> use the tunnel URL**. The client opens its WebSocket from `window.location`, so the
-> loopback-server / tunnel-link split is invisible to guests.
+> The server stays on a loopback `BASE_URL` (which `AUTH_MODE=dev` requires); the **guest links use
+> the tunnel URL**. The client opens its WebSocket from `window.location`, so the loopback-server /
+> tunnel-link split is invisible to guests.
 
-The dashboard gives you, for the host: a **sign-in** link (`/auth/dev`) and the **greenroom**; for
-each participant: a **guest link** (+ QR), an **OBS source URL**, and the pass id; plus the
-**screenshare** source URL.
+The dashboard gives you, for the **host** (open on **this machine** — loopback `localhost`, never
+over the tunnel): a **sign-in** link (`/auth/dev`) and the **greenroom**. For each participant (the
+links to **share with guests**): a **guest link** (+ QR), an **OBS source URL**, and the pass id;
+plus the **screenshare** source URL.
 
 ---
 
@@ -59,7 +72,8 @@ each participant: a **guest link** (+ QR), an **OBS source URL**, and the pass i
 1. **Guests join.** Open each guest link on a device/tab (scan the QR on phones), allow camera/mic,
    click **Enter the greenroom**, wait for "your camera is live in the greenroom". The co-host link
    joins as a co-host. Spread guests across machines/networks for the NAT checks.
-2. **Host watches.** Open the **sign-in** link, then the **greenroom**.
+2. **Host watches.** On **this machine**, open the loopback **sign-in** link, then the **greenroom**
+   (the host needs no camera, so loopback is fine — and keeps `/auth/dev` off the tunnel).
 3. **Bind for OBS.** Press **Enter** in the `smoke.sh` terminal to bind every cam slot to its
    participant. Add one or more **OBS source URLs** as Browser Sources (1280×720).
 

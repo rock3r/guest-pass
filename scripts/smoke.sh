@@ -33,7 +33,7 @@ TUNNEL=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --guests) GUESTS="$2"; shift 2 ;;
+    --guests) [[ $# -ge 2 ]] || { echo "missing value for --guests" >&2; exit 2; }; GUESTS="$2"; shift 2 ;;
     --guests=*) GUESTS="${1#*=}"; shift ;;
     --no-cohost) COHOST=0; shift ;;
     --no-screenshare) SCREENSHARE=0; shift ;;
@@ -69,8 +69,11 @@ rm -f "$DB_PATH" "$DB_PATH-shm" "$DB_PATH-wal"
 export AUTH_MODE=dev MAIL_MODE=log BASE_URL="http://localhost:$PORT"
 export JWT_SECRET TOKEN_SECRET DB_PATH
 export STUN_URL="${STUN_URL:-stun:stun.l.google.com:19302}" # public STUN for dev; override via env
-# Required even in dev (config.validateRequired). /auth/dev signs in as the dev host regardless of
-# SIGNUP_MODE; allowlist (with no ALLOWED_HOSTS) keeps a random Google signup out over the tunnel.
+# Required even in dev (config.validateRequired). allowlist (no ALLOWED_HOSTS) only blocks Google
+# self-signup — it does NOT gate /auth/dev, which bypasses Google + SIGNUP_MODE and grants an admin
+# session. Over the tunnel /auth/dev IS reachable (the loopback guard passes for proxied requests),
+# so the tunnel URL is effectively a secret — see the SECURITY note in docs/SMOKE.md. The host signs
+# in over loopback (devsmoke prints loopback host links), not the tunnel.
 export ADMIN_EMAIL="${ADMIN_EMAIL:-dev@localhost}"
 export SIGNUP_MODE="${SIGNUP_MODE:-allowlist}"
 
@@ -157,6 +160,8 @@ done
 
 if [[ "$TUNNEL" == 1 ]]; then
   echo "tunnel: $PUBLIC_BASE_URL  (guests open this; the server stays on localhost)"
+  echo "  ⚠ SECURITY: anyone with this URL can reach /auth/dev and claim the host/admin session."
+  echo "    Share it with guests only, and Ctrl-C to tear it down when the smoke is finished."
 else
   echo "no tunnel: links use $PUBLIC_BASE_URL (cameras only work on this machine)"
 fi
