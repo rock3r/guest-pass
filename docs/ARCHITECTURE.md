@@ -1045,7 +1045,7 @@ navigation, islands mount per-page against a known root element.
 | Guest ticket / pass acceptance | Go `html/template` | none |
 | Host dashboard / calendar / invites / sources tabs | Go `html/template` | none |
 | Admin console | Go `html/template` | minimal (poll/refresh) |
-| Error / state screens | Go `html/template` | none (except `reconnecting`) |
+| Error / state screens | Go `html/template` | none (the in-session `reconnecting` overlay and terminate-routed screens are island-rendered — they react to a `{t:terminate}` WS frame) |
 | **Device check** | `/p/{token}` server page + island | Preact island |
 | **Guest session** | in-session phase of the device-check island (same page, signaling connection, and captured camera) | Preact island |
 | **Greenroom** (host + co-host + guest) | server page + island | Preact island |

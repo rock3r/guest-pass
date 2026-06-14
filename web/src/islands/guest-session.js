@@ -99,8 +99,8 @@ export function GuestSession({
         <div class="gs-status">
           {pubState === "live" ? (
             <p>You're in — your camera is live in the greenroom.</p>
-          ) : pubState === "disconnected" ? (
-            <p>You're in, but the greenroom connection dropped. Refresh the page to rejoin.</p>
+          ) : pubState === "reconnecting" ? (
+            <p class="gs-reconnecting">Connection dropped — reconnecting to the greenroom…</p>
           ) : (
             <p>You're in — connecting your camera to the greenroom…</p>
           )}

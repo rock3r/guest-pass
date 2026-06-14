@@ -7,6 +7,30 @@
   gap: 16px;
 }
 
+/* Reconnecting overlay (AC-13): shown while a dropped signaling socket auto-retries. */
+.gs-reconnecting {
+  font-weight: 600;
+  color: #8a5a1f;
+}
+
+/* Terminal terminate-routed error screen (AC-13/EN-9): kicked / expired / revoked / … */
+.gs-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.gs-terminal-title {
+  margin: 0;
+}
+.gs-terminal-body {
+  margin: 0;
+  opacity: 0.85;
+}
+
 .gs-stage {
   display: flex;
   flex-wrap: wrap;
