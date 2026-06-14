@@ -22,11 +22,21 @@ type Frame struct {
 	Active         bool            `json:"active,omitempty"`
 	OnAir          string          `json:"onAir,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
-	Peers          []RosterEntry   `json:"peers,omitempty"`  // roster projection (EN-8)
-	Peer           *RosterEntry    `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID         string          `json:"peerId,omitempty"` // the departed peer in a peer-left frame
-	ICEServers     []ICEServer     `json:"iceServers,omitempty"`
-	TTLSec         int             `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
+	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
+	// and the local audio meter. These are POINTERS so an ABSENT modality means "leave it
+	// unchanged" — a documented meter-only update ({"t":"state","level":…}) must not clobber
+	// presence to false (a plain bool would unmarshal absent → false). Level rides the room
+	// in-memory only and is coalesced onto a separate batched tick (AD-13), never in the roster.
+	Cam        *bool         `json:"cam,omitempty"`
+	Mic        *bool         `json:"mic,omitempty"`
+	Screen     *bool         `json:"screen,omitempty"`
+	Level      float64       `json:"level,omitempty"`
+	Peers      []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer       *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID     string        `json:"peerId,omitempty"` // the departed peer in a peer-left frame
+	Recipient  string        `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
+	ICEServers []ICEServer   `json:"iceServers,omitempty"`
+	TTLSec     int           `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
 }
 
 // ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the
@@ -40,13 +50,42 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-// RosterEntry is a peer's projection in a roster / peer-joined frame. The M2 tracer
-// ships the minimal {id, role} shape; the richer fields (name, cam/mic/level, on-air,
-// locks) land with the M3 greenroom. The rank filtering itself (EN-8) is implemented in
-// M2 — see roster.go.
+// RosterEntry is a peer's per-recipient projection in a roster / peer-joined frame (EN-8).
+// It carries the full greenroom entry shape (AC-1); not every field is driven yet — the
+// M3 PRs each populate their slice (locks: PR-3, handRaised: PR-7, signal/rttMs/degraded:
+// PR-13). cam/mic/screen are always serialized for participants (a muted guest is cam:false,
+// not "unknown"); the on-air pill is the three-state OBS reflection folded in from the slot
+// (D-24). The live audio meter is NOT here — it rides the batched {t:levels} tick (AD-13).
 type RosterEntry struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
+	ID         string        `json:"id"`
+	Name       string        `json:"name,omitempty"`
+	Role       string        `json:"role"`
+	Cam        bool          `json:"cam"`
+	Mic        bool          `json:"mic"`
+	Screen     bool          `json:"screen"`
+	HandRaised bool          `json:"handRaised,omitempty"`
+	OnAir      string        `json:"onAir,omitempty"`
+	Signal     int           `json:"signal,omitempty"`
+	RttMs      int           `json:"rttMs,omitempty"`
+	Degraded   *DegradedView `json:"degraded,omitempty"`
+	Locks      []LockView    `json:"locks,omitempty"`
+	Self       bool          `json:"self,omitempty"` // true only on the recipient's own entry in its projection
+}
+
+// LockView is a suppression lock as seen in a roster entry (D-13/EN-7). applierRank tells
+// clients WHO may release it: the applier, anyone at or above the rank floor, or the host.
+// Populated by PR-3.
+type LockView struct {
+	Kind          string `json:"kind"` // mic | cam | share
+	ApplierPeerID string `json:"applierPeerId,omitempty"`
+	ApplierRank   string `json:"applierRank"` // host | cohost
+}
+
+// DegradedView reflects an active per-publisher degradation (AD-21) in a roster entry.
+// Populated by PR-13.
+type DegradedView struct {
+	Dir    string `json:"dir"`    // lowering | recovering
+	Reason string `json:"reason"` // cpu | bandwidth
 }
 
 // Three-state on-air values (D-24).

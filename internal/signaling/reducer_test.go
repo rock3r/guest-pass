@@ -6,13 +6,41 @@ import (
 	"testing"
 )
 
-// EN-3: a rebind bumps the epoch, swaps the occupant, resets on-air to unknown, and
-// tells the source page to renegotiate to the new occupant at the new epoch.
+// rosterEntryFor returns peer's entry as projected in the first {t:roster} frame addressed
+// to `to`, or false if there is no such roster or entry. On-air, presence and locks fold
+// into the roster (D-24/EN-8), so this is how a behavior is asserted post-M3.
+func rosterEntryFor(out []outbound, to, peer PeerID) (RosterEntry, bool) {
+	f, ok := firstFrameOfType(out, to, "roster")
+	if !ok {
+		return RosterEntry{}, false
+	}
+	for _, e := range f.Peers {
+		if e.ID == string(peer) {
+			return e, true
+		}
+	}
+	return RosterEntry{}, false
+}
+
+// onAirSeenBy returns the folded three-state on-air of `peer` in the roster delivered to
+// `to` (D-24), or "" if no such roster/entry was emitted.
+func onAirSeenBy(out []outbound, to, peer PeerID) string {
+	e, _ := rosterEntryFor(out, to, peer)
+	return e.OnAir
+}
+
+// bptr returns a pointer to b, for building {t:state} presence frames where an absent
+// (nil) modality means "leave unchanged" (a meter-only update must not clobber presence).
+func bptr(b bool) *bool { return &b }
+
+// EN-3: a rebind bumps the epoch, swaps the occupant, resets on-air to unknown, and tells
+// the source page to renegotiate to the new occupant at the new epoch. The occupant's folded
+// on-air starts at status-unavailable until a fresh transition (D-24).
 func TestRebindBumpsEpochAndResetsOnAir(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 
 	out := s.rebindSlot("cam-1", "g1")
 
@@ -20,20 +48,87 @@ func TestRebindBumpsEpochAndResetsOnAir(t *testing.T) {
 	if st.epoch != 1 || st.occupant != "g1" || st.onAir != OnAirUnknown {
 		t.Fatalf("slot state = %+v, want epoch 1 / g1 / %s", st, OnAirUnknown)
 	}
-	if len(out) != 1 || out[0].to != "src" || out[0].frame.T != "slot-rebind" ||
-		out[0].frame.OccupantPeerID != "g1" || epochVal(out[0].frame) != 1 {
-		t.Fatalf("outbound = %+v, want one slot-rebind(g1, epoch 1) to src", out)
+	if sr, ok := firstFrameOfType(out, "src", "slot-rebind"); !ok || sr.OccupantPeerID != "g1" || epochVal(sr) != 1 {
+		t.Fatalf("source should get slot-rebind(g1, epoch 1), got %+v", out)
+	}
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirUnknown {
+		t.Fatalf("g1's folded on-air after rebind = %q, want %s", got, OnAirUnknown)
+	}
+}
+
+// AC-1/T-1: a participant's {t:state} folds its cam/mic/screen into the roster — every
+// viewer's tile reflects it, and the sender's own (self-marked) entry carries it too.
+func TestStateFoldsPresenceIntoRoster(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "Greta")
+
+	out := s.applyState("g1", bptr(false), bptr(true), bptr(false)) // mic on, cam + screen off
+
+	e, ok := rosterEntryFor(out, "host", "g1")
+	if !ok {
+		t.Fatalf("host roster should include g1, got %+v", out)
+	}
+	if e.Cam || !e.Mic || e.Screen || e.Name != "Greta" {
+		t.Fatalf("g1 presence = %+v, want name=Greta cam:false mic:true screen:false", e)
+	}
+	self, ok := rosterEntryFor(out, "g1", "g1")
+	if !ok || !self.Self || !self.Mic {
+		t.Fatalf("g1's own entry should be self-marked with mic on, got %+v", self)
+	}
+}
+
+// AD-13: a {t:state} that changes nothing (e.g. re-asserting the same presence) must NOT
+// re-broadcast the roster — continuous meters ride the {t:levels} tick (PR-2), not the roster.
+func TestStateNoChangeIsQuiet(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.applyState("g1", bptr(true), bptr(true), bptr(false))
+	if out := s.applyState("g1", bptr(true), bptr(true), bptr(false)); out != nil {
+		t.Fatalf("an unchanged state must not churn the roster, got %+v", out)
+	}
+}
+
+// A documented meter-only update ({t:state,level} with no cam/mic/screen, modeled here as an
+// all-nil presence frame) must NOT clobber presence to off — absent modalities are left
+// unchanged, and a frame that changes no modality emits nothing (Codex PR-20).
+func TestStateLevelOnlyPreservesPresence(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.applyState("g1", bptr(true), bptr(true), bptr(true)) // all on
+
+	out := s.applyState("g1", nil, nil, nil) // a level-only {t:state}: no presence fields
+	if out != nil {
+		t.Fatalf("a presence-less {t:state} must not re-broadcast the roster, got %+v", out)
+	}
+	// A subsequent change confirms presence was preserved (still all-on, so a partial off shows).
+	out = s.applyState("g1", bptr(false), nil, nil) // turn cam off only
+	e, ok := rosterEntryFor(out, "host", "g1")
+	if !ok || e.Cam || !e.Mic || !e.Screen {
+		t.Fatalf("presence must survive a meter-only update; got %+v (want cam:false mic:true screen:true)", e)
+	}
+}
+
+// EN-7: an OBS source virtual peer has no self-presence; a {t:state} from it is ignored.
+func TestStateFromNonParticipantIgnored(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	if out := s.applyState("src", bptr(true), bptr(true), bptr(true)); out != nil {
+		t.Fatalf("an OBS source has no presence; state must be ignored, got %+v", out)
 	}
 }
 
 // D-24: a source's streamingStarted/Stopped reflection broadcasts a GLOBAL "we're live"
 // state to every participant (host/co-host/guest) — but never to OBS source virtual peers
-// (EN-13) — and is not epoch-scoped.
+// (EN-13) — and is not epoch-scoped. This stays a room-level broadcast (not folded into the
+// per-guest roster, which carries the per-slot onAir).
 func TestObsStreamingBroadcastsToParticipantsOnly(t *testing.T) {
 	s := newRoomState()
-	s.join("host", "host")
-	s.join("g1", "guest")
-	s.join("src-cam-1", "obs") // a source page — must NOT receive the streaming broadcast
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.join("src-cam-1", "obs", "") // a source page — must NOT receive the streaming broadcast
 
 	out := s.obsStreaming(true)
 	if !s.streaming {
@@ -65,14 +160,14 @@ func TestObsStreamingBroadcastsToParticipantsOnly(t *testing.T) {
 	}
 }
 
-// D-24: when the OBS source for a slot disconnects, its on-air reflection is gone — the slot
-// must degrade to status-unavailable and tell the occupant, never leave it asserting a stale
+// D-24: when the OBS source for a slot disconnects, its on-air reflection is gone — the
+// occupant's folded on-air must degrade to status-unavailable, never keep asserting a stale
 // on-air with no live OBS signal behind it ("never assert when unknown").
 func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")         // epoch 1, occupant g1
 	s.obsSourceActive("cam-1", true, 1) // slot reflects on-air
 	if s.slots["cam-1"].onAir != OnAirYes {
@@ -84,31 +179,29 @@ func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
 	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
 		t.Fatalf("on-air must degrade to %s when the source leaves, got %q", OnAirUnknown, st.onAir)
 	}
-	var told bool
-	for _, o := range out {
-		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			told = true
-		}
-	}
-	if !told {
-		t.Fatalf("occupant g1 must be told {t:onair, status-unavailable} on source leave, got %+v", out)
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirUnknown {
+		t.Fatalf("occupant g1's roster must show on-air degraded to %s, got %q (out=%+v)", OnAirUnknown, got, out)
 	}
 }
 
-// EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous
-// epoch must NOT light the new occupant; only the current epoch's event applies.
+// EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
+// must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1") // epoch 1
 
-	if out := s.obsSourceActive("cam-1", true, 1); len(out) != 1 || out[0].frame.OnAir != OnAirYes {
-		t.Fatalf("epoch-1 active should light g1, got %+v", out)
+	out := s.obsSourceActive("cam-1", true, 1)
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("epoch-1 active should light the slot, got %q", s.slots["cam-1"].onAir)
+	}
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirYes {
+		t.Fatalf("g1's roster should show on-air, got %q", got)
 	}
 
-	s.join("g2", "guest")
+	s.join("g2", "guest", "")
 	s.rebindSlot("cam-1", "g2") // epoch 2, on-air reset
 	if s.slots["cam-1"].onAir != OnAirUnknown {
 		t.Fatalf("rebind must reset on-air to %s", OnAirUnknown)
@@ -132,13 +225,13 @@ func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
 // A source that attaches after a slot is already bound learns the current binding.
 func TestAttachSourceGetsCurrentBinding(t *testing.T) {
 	s := newRoomState()
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1") // bound before any source attaches
 
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	out := s.attachSource("cam-1", "src")
-	if len(out) != 1 || out[0].frame.T != "slot-rebind" || out[0].frame.OccupantPeerID != "g1" {
-		t.Fatalf("attach should deliver the current binding, got %+v", out)
+	if sr, ok := firstFrameOfType(out, "src", "slot-rebind"); !ok || sr.OccupantPeerID != "g1" {
+		t.Fatalf("attach should deliver the current binding to the source, got %+v", out)
 	}
 }
 
@@ -146,7 +239,7 @@ func TestAttachSourceGetsCurrentBinding(t *testing.T) {
 // epoch or bind the slot to a peer that can't receive media/on-air.
 func TestRebindToUnknownPeerIsNoOp(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
 
 	if out := s.rebindSlot("cam-1", "ghost"); out != nil {
@@ -159,9 +252,9 @@ func TestRebindToUnknownPeerIsNoOp(t *testing.T) {
 
 func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 
 	out := s.unbindSlot("cam-1")
@@ -169,32 +262,24 @@ func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	if st.epoch != 2 || st.occupant != "" || st.onAir != OnAirUnknown {
 		t.Fatalf("unbind state = %+v", st)
 	}
-	// The slot was never on-air (no transition), so the occupant's pill was already
-	// status-unavailable — unbind just tells the source to placeholder, no on-air degrade.
-	if len(out) != 1 || out[0].frame.T != "slot-unbound" || epochVal(out[0].frame) != 2 {
-		t.Fatalf("unbind outbound = %+v, want one slot-unbound(epoch 2)", out)
+	if su, ok := firstFrameOfType(out, "src", "slot-unbound"); !ok || epochVal(su) != 2 {
+		t.Fatalf("source should get slot-unbound(epoch 2), got %+v", out)
 	}
 }
 
-// D-24: unbinding a slot that WAS on-air degrades the occupant's pill to status-unavailable
-// (it is no longer sourced), alongside the slot-unbound to the source.
+// D-24: unbinding a slot that WAS on-air degrades the occupant's folded on-air to
+// status-unavailable (it is no longer sourced), alongside the slot-unbound to the source.
 func TestUnbindDegradesOnAirOccupant(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 	s.obsSourceActive("cam-1", true, 1) // g1 on-air
 
 	out := s.unbindSlot("cam-1")
-	var degraded bool
-	for _, o := range out {
-		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			degraded = true
-		}
-	}
-	if !degraded {
-		t.Fatalf("unbinding an on-air slot must degrade the occupant's pill (D-24), got %+v", out)
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirUnknown {
+		t.Fatalf("unbinding an on-air slot must degrade the occupant's pill (D-24), got %q (out=%+v)", got, out)
 	}
 }
 
@@ -203,28 +288,21 @@ func TestUnbindDegradesOnAirOccupant(t *testing.T) {
 // go to B). The new occupant B's pill stays at its default until a fresh transition.
 func TestRebindDegradesDisplacedOccupant(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("a", "guest")
-	s.join("b", "guest")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
 	s.rebindSlot("cam-1", "a")
 	s.obsSourceActive("cam-1", true, 1) // a is on-air
 
 	out := s.rebindSlot("cam-1", "b") // reassign the slot to b
 
-	var aReset bool
-	for _, o := range out {
-		if o.to == "a" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			aReset = true
-		}
-		// The incoming occupant b may be degraded to status-unavailable (the slot is now
-		// UNKNOWN), but must NEVER inherit the prior occupant's on-air (EN-3).
-		if o.to == "b" && o.frame.T == "onair" && o.frame.OnAir != OnAirUnknown {
-			t.Fatalf("the new occupant must not inherit a stale on-air, got %+v", o.frame)
-		}
+	if got := onAirSeenBy(out, "a", "a"); got != OnAirUnknown {
+		t.Fatalf("displaced occupant a must degrade to %s, got %q", OnAirUnknown, got)
 	}
-	if !aReset {
-		t.Fatalf("displaced occupant a must be degraded to status-unavailable (D-24), got %+v", out)
+	// The incoming occupant b must NEVER inherit the prior occupant's on-air (EN-3).
+	if got := onAirSeenBy(out, "b", "b"); got != OnAirUnknown {
+		t.Fatalf("the new occupant must not inherit a stale on-air, got %q", got)
 	}
 }
 
@@ -233,22 +311,16 @@ func TestRebindDegradesDisplacedOccupant(t *testing.T) {
 // transition, so the guest must not keep showing the prior pill.
 func TestRebindSameOccupantStillDegrades(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 	s.obsSourceActive("cam-1", true, 1) // g1 on-air
 
 	out := s.rebindSlot("cam-1", "g1") // re-apply to the same occupant
 
-	var degraded bool
-	for _, o := range out {
-		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			degraded = true
-		}
-	}
-	if !degraded {
-		t.Fatalf("re-applying a slot to the same on-air occupant must degrade its pill (D-24), got %+v", out)
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirUnknown {
+		t.Fatalf("re-applying a slot to the same on-air occupant must degrade its pill (D-24), got %q", got)
 	}
 }
 
@@ -257,9 +329,9 @@ func TestRebindSameOccupantStillDegrades(t *testing.T) {
 // has reported no transition yet, so the state is UNKNOWN.
 func TestSourceReattachResetsStaleOnAir(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 	s.obsSourceActive("cam-1", true, 1) // slot is on-air
 	if s.slots["cam-1"].onAir != OnAirYes {
@@ -272,32 +344,27 @@ func TestSourceReattachResetsStaleOnAir(t *testing.T) {
 	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
 		t.Fatalf("a re-attaching source must reset stale on-air to %s, got %q", OnAirUnknown, st.onAir)
 	}
-	var occReset bool
-	for _, o := range out {
-		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
-			occReset = true
-		}
-	}
-	if !occReset {
-		t.Fatalf("a re-attaching source must degrade the occupant's pill (D-24), got %+v", out)
+	if got := onAirSeenBy(out, "g1", "g1"); got != OnAirUnknown {
+		t.Fatalf("a re-attaching source must degrade the occupant's pill (D-24), got %q (out=%+v)", got, out)
 	}
 }
 
-// D-24: a participant joining/rejoining mid-stream is replayed the room's current OBS
-// reflections — the global "we're live" state, and the on-air of any slot it already occupies
-// (an eviction-rejoin keeps its binding) — so it doesn't sit at the defaults until OBS next
-// toggles. OBS source virtual peers don't receive these (EN-13).
+// D-24: a participant joining/rejoining mid-stream gets the room's current OBS reflections —
+// the global "we're live" state (room-level {t:streaming}), and the on-air of any slot it
+// already occupies folded into its fresh roster (an eviction-rejoin keeps its binding) — so
+// it doesn't sit at the defaults until OBS next toggles. OBS source virtual peers get neither
+// (EN-13). The interim per-slot {t:onair} replay is retired.
 func TestJoinReplaysCurrentObsState(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 	s.obsSourceActive("cam-1", true, 1) // slot on-air
 	s.obsStreaming(true)                // broadcast live
 
 	// A new participant joining mid-stream is told the broadcast is live.
-	out := s.join("h", "host")
+	out := s.join("h", "host", "")
 	var hStreaming bool
 	for _, o := range out {
 		if o.to == "h" && o.frame.T == "streaming" && o.frame.Active {
@@ -309,23 +376,24 @@ func TestJoinReplaysCurrentObsState(t *testing.T) {
 	}
 
 	// An OBS source page joining is NOT replayed participant reflections (EN-13).
-	out = s.join("src2", "obs")
+	out = s.join("src2", "obs", "")
 	for _, o := range out {
-		if o.frame.T == "streaming" || o.frame.T == "onair" {
-			t.Fatalf("OBS source pages must not receive on-air/streaming replays, got %+v", o.frame)
+		if o.frame.T == "streaming" || o.frame.T == "roster" || o.frame.T == "onair" {
+			t.Fatalf("OBS source pages must not receive streaming/roster replays, got %+v", o.frame)
 		}
 	}
 
-	// The occupant rejoining (eviction keeps its binding) is replayed its slot's on-air.
-	out = s.join("g1", "guest")
-	var g1OnAir bool
-	for _, o := range out {
-		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirYes {
-			g1OnAir = true
+	// The occupant rejoining (eviction keeps its binding) gets its slot's on-air folded into the
+	// fresh roster — its self entry shows on-air, no separate {t:onair} frame.
+	out = s.join("g1", "guest", "")
+	for _, o := range framesTo(out, "g1") {
+		if o.T == "onair" {
+			t.Fatalf("the interim {t:onair} frame must be retired; on-air rides the roster, got %+v", o)
 		}
 	}
-	if !g1OnAir {
-		t.Fatalf("a rejoining occupant must be replayed its slot's on-air, got %+v", out)
+	e, ok := rosterEntryFor(out, "g1", "g1")
+	if !ok || !e.Self || e.OnAir != OnAirYes {
+		t.Fatalf("a rejoining occupant's roster self entry must show on-air, got %+v (out=%+v)", e, out)
 	}
 }
 
@@ -334,9 +402,9 @@ func TestJoinReplaysCurrentObsState(t *testing.T) {
 // the old epoch — is rejected and can't re-light a stale pill after the reset.
 func TestReattachBumpsEpochInvalidatingStaleReports(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")         // epoch 1
 	s.obsSourceActive("cam-1", true, 1) // on-air at epoch 1
 	oldEpoch := s.slots["cam-1"].epoch
@@ -358,8 +426,8 @@ func TestReattachBumpsEpochInvalidatingStaleReports(t *testing.T) {
 
 func TestRelaySignalToKnownPeerOnly(t *testing.T) {
 	s := newRoomState()
-	s.join("a", "guest")
-	s.join("b", "guest")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
 
 	out := s.relaySignal("a", Frame{T: "signal", To: "b", SDP: []byte(`{"x":1}`)})
 	if len(out) != 1 || out[0].to != "b" || out[0].frame.From != "a" || out[0].frame.To != "" {
@@ -380,8 +448,8 @@ func TestRelaySignalToKnownPeerOnly(t *testing.T) {
 // will act on (D-23: the server relays SDP/ICE, nothing else).
 func TestRelaySignalStripsExtraneousFields(t *testing.T) {
 	s := newRoomState()
-	s.join("a", "guest")
-	s.join("b", "guest")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
 
 	sdp := []byte(`{"type":"offer","sdp":"v=0..."}`)
 	in := Frame{
@@ -389,6 +457,7 @@ func TestRelaySignalStripsExtraneousFields(t *testing.T) {
 		// Hostile extras a client must not be able to smuggle through the relay:
 		Slot: "cam-1", Epoch: epochPtr(9), Reason: "kicked", OnAir: "on-air",
 		OccupantPeerID: "x", Event: "sourceActive", Active: true,
+		Cam: bptr(true), Mic: bptr(true), Screen: bptr(true),
 		Peers:  []RosterEntry{{ID: "fake", Role: "host"}},
 		Peer:   &RosterEntry{ID: "fake", Role: "host"},
 		PeerID: "fake",
@@ -403,6 +472,7 @@ func TestRelaySignalStripsExtraneousFields(t *testing.T) {
 	}
 	if got.To != "" || got.Slot != "" || got.Epoch != nil || got.Reason != "" || got.OnAir != "" ||
 		got.OccupantPeerID != "" || got.Event != "" || got.Active ||
+		got.Cam != nil || got.Mic != nil || got.Screen != nil ||
 		got.Peers != nil || got.Peer != nil || got.PeerID != "" {
 		t.Fatalf("relayed frame leaked client-supplied fields: %+v", got)
 	}
@@ -421,15 +491,15 @@ func epochVal(f Frame) int {
 // slot-unbound carries it even at epoch 0 (EN-3).
 func TestEpochOnlySerializesForSlotFrames(t *testing.T) {
 	s := newRoomState()
-	s.join("a", "guest")
-	s.join("b", "guest")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
 
 	relayed := s.relaySignal("a", Frame{T: "signal", To: "b", SDP: []byte(`"x"`)})
 	if b, _ := json.Marshal(relayed[0].frame); strings.Contains(string(b), "epoch") {
 		t.Fatalf("a relayed signal must not carry epoch on the wire, got %s", b)
 	}
 
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	out := s.attachSource("cam-1", "src") // fresh slot → slot-unbound at epoch 0
 	b, _ := json.Marshal(out[0].frame)
 	if !strings.Contains(string(b), `"epoch":0`) {
@@ -441,8 +511,8 @@ func TestEpochOnlySerializesForSlotFrames(t *testing.T) {
 // never parses them (D-23). An ICE-only frame relays just as an SDP one does.
 func TestRelaySignalRelaysPayloadVerbatim(t *testing.T) {
 	s := newRoomState()
-	s.join("a", "guest")
-	s.join("b", "guest")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
 
 	// An ICE candidate the server has no schema for — relayed unchanged.
 	ice := []byte(`{"candidate":"candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host","sdpMid":"0","sdpMLineIndex":0}`)
@@ -461,9 +531,9 @@ func TestRelaySignalRelaysPayloadVerbatim(t *testing.T) {
 // Leaving while occupying a slot unbinds it (EN-3) so the source falls to placeholder.
 func TestLeaveUnbindsOccupiedSlot(t *testing.T) {
 	s := newRoomState()
-	s.join("src", "obs")
+	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
-	s.join("g1", "guest")
+	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
 
 	out := s.leave("g1")

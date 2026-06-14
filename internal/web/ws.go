@@ -95,7 +95,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 			out <- iceFrame
 		}
 	}
-	if !room.Join(id.peer, id.role, id.slot, out) {
+	if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
 		// reconnect and close; we never registered, so there's no writer to drain.
 		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: "reconnect"})
@@ -142,6 +142,13 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 	switch f.T {
 	case "signal":
 		room.Signal(id.peer, f) // relayed verbatim; server never inspects (D-23)
+	case "state":
+		// Self-presence (EN-7): cam/mic/screen are the sender's OWN modality flags, folded into
+		// the roster. Only a participant has presence — an OBS source reflects on-air, not state.
+		// Lock enforcement against a suppressed modality lands in PR-3.
+		if !id.isSource() {
+			room.ApplyState(id.peer, f.Cam, f.Mic, f.Screen)
+		}
 	case "ice-refresh":
 		// Re-mint and re-send the ICE config before the TURN credential expires (EN-4).
 		// Delivered through the room so the send runs on the room goroutine and can't race

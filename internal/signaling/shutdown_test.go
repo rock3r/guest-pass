@@ -11,7 +11,7 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 	out := make(chan Frame, 16)
 	// Join is async (posted to the room's cmd channel); the FIFO channel guarantees it
 	// runs before the Terminate command Shutdown posts, so the conn is registered first.
-	room.Join(PeerID("p1"), "host", "", out)
+	room.Join(PeerID("p1"), "host", "", "", out)
 
 	h.Shutdown("reconnect")
 
@@ -51,7 +51,7 @@ func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
 	r.Terminate("reconnect") // marks the room terminating (does not stop the goroutine)
 
 	out := make(chan Frame, 4)
-	if r.Join(PeerID("late"), "guest", "", out) {
+	if r.Join(PeerID("late"), "guest", "", "", out) {
 		t.Fatal("Join after Terminate should be refused")
 	}
 }
@@ -65,7 +65,7 @@ func TestRoomTerminate_DoesNotDropTerminate(t *testing.T) {
 	defer r.Close()
 
 	out := make(chan Frame) // unbuffered: Join's non-blocking roster deliver drops (no reader)
-	r.Join(PeerID("p"), "guest", "", out)
+	r.Join(PeerID("p"), "guest", "", "", out)
 
 	returned := make(chan struct{})
 	go func() { r.Terminate("reconnect"); close(returned) }()

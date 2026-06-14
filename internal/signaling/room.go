@@ -81,7 +81,7 @@ func deliver(conns map[PeerID]*peerConn, outs []outbound) {
 // can't slip in after the terminate broadcast and strand itself with no teardown. The
 // caller then closes the connection itself. Join is synchronous: it waits for the
 // command to run, so the result reflects the room's actual state.
-func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) bool {
+func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame) bool {
 	admitted := make(chan bool, 1)
 	cmd := func(st *roomState, conns map[PeerID]*peerConn) {
 		if st.terminating {
@@ -98,7 +98,7 @@ func (r *Room) Join(id PeerID, role string, slot SlotID, out chan<- Frame) bool 
 			close(old.out)
 		}
 		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
-		outs := st.join(id, role)
+		outs := st.join(id, role, name)
 		if role == "obs" || role == "obs_screen" {
 			outs = append(outs, st.attachSource(slot, id)...)
 		}
@@ -141,6 +141,16 @@ func (r *Room) Leave(id PeerID, out chan<- Frame) {
 func (r *Room) Signal(from PeerID, f Frame) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.relaySignal(from, f))
+	})
+}
+
+// ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
+// provided (non-nil) modality updates and, on a real change, every viewer's roster
+// re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber
+// presence). The live audio meter rides a separate batched tick (AD-13), so it is not here.
+func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.applyState(id, cam, mic, screen))
 	})
 }
 

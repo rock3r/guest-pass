@@ -881,13 +881,17 @@ release/override anything.
   {"urls":["stun:stun.example.org:3478"]},
   {"urls":["turns:turn.example.org:5349"],"username":"1700000090:<peerId>","credential":"<base64>"}]}
 
-// Role-filtered roster projection (EN-8) — per-recipient; guests get the reduced shape
-{"t":"roster","peers":[{
+// Role-filtered roster projection (EN-8) — per-recipient; guests get the reduced shape.
+// `self` is the recipient's own peer id, so a client can locate its own entry (e.g. the guest
+// self on-air pill, whose value now folds in via the entry's `onAir`). `level` rides the
+// batched {t:levels} tick (AD-13), NOT the roster, so it is absent here.
+{"t":"roster","self":"<peerId>","peers":[{
   "id":"<peerId>","name":"…","role":"host"|"cohost"|"guest"|"obs"|"obs_screen",
-  "cam":true,"mic":false,"screen":false,"level":0.4,"handRaised":false,
+  "cam":true,"mic":false,"screen":false,"handRaised":false,
   "onAir":"on-air"|"not-on-air"|"status-unavailable",   // three-state, OBS-reflected (D-24)
   "signal":3,"rttMs":48,"degraded":{"dir":"lowering"|"recovering","reason":"cpu"|"bandwidth"},
-  "locks":[{"kind":"mic"|"cam"|"share","applierPeerId":"<id>","applierRank":"host"|"cohost"}]
+  "locks":[{"kind":"mic"|"cam"|"share","applierPeerId":"<id>","applierRank":"host"|"cohost"}],
+  "self":true                                            // present only on the recipient's own entry
                                                           // applierRank tells clients WHO may release (EN-7)
 }]}
 
@@ -903,12 +907,13 @@ release/override anything.
 {"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","epoch":8}
 {"t":"slot-unbound","slot":"cam-3","epoch":9}
 
-// On-air reflection (D-24). M2 INTERIM: until the M3 greenroom folds on-air into the roster's
-// `onAir` field, the server delivers the OBS reflection as standalone frames — {t:onair} to the
-// affected slot's occupant (drives its self pill), and a global {t:streaming} broadcast to every
-// participant. Driven by the source page's {t:obs,event:"sourceActive"/"streamingStarted"/...},
-// and ALSO replayed to a participant on (re)join so a mid-stream joiner isn't stuck at defaults.
-{"t":"onair","slot":"cam-3","onAir":"on-air"|"not-on-air"|"status-unavailable"}  // → the slot occupant
+// On-air reflection (D-24). Per-guest on-air folds into the roster entry's `onAir` field (M3
+// PR-1 retired the interim standalone {t:onair} frame): the server recomputes the occupant's
+// folded on-air from the slot state and re-broadcasts the roster on any change, and a (re)joiner
+// reads its on-air straight from the roster it receives. The broadcast-level "we're live" stays
+// a room-wide {t:streaming} broadcast (it is room-scoped, not per-guest), still replayed to a
+// participant on (re)join so a mid-stream joiner isn't stuck at the default. Both are driven by
+// the source page's {t:obs,event:"sourceActive"/"streamingStarted"/...}.
 {"t":"streaming","active":true}                          // global "we're live" → all participants
 
 // Terminate-reason taxonomy (EN-9) — sent BEFORE close so the client routes correctly
@@ -929,15 +934,19 @@ rank:
 - **Host projection** is the full shape, including the host-only `obs` virtual peers
   (one per slot source page).
 
-> **M2 status.** The roster entry shipped in the M2 tracer is the minimal `{id, role}`
-> shape; the rank distinction enforced is that the `obs`/`obs_screen` source virtual
-> peers are **host-only** (omitted from guest/co-host projections), and OBS source pages
-> receive no roster of their own (EN-13). The richer entry fields (name, cam/mic/level,
-> on-air, locks) and the moderation-aware co-host projection land with the M3 greenroom.
+> **Status (M3 PR-1).** The roster carries the full entry shape — `name`, `cam`/`mic`/`screen`
+> (a `{t:state}` self-presence snapshot, EN-7), `handRaised`, three-state `onAir` (folded from
+> the slot, retiring the interim `{t:onair}`), `signal`/`rttMs`/`degraded`, and `locks[]` — plus
+> a per-recipient `self` marker. The `obs`/`obs_screen` source virtual peers stay **host-only**
+> (omitted from guest/co-host projections), and OBS source pages receive no roster of their own
+> (EN-13). Fields that later PRs drive are present in the shape from PR-1 but unset until their
+> PR populates them: `locks` (PR-3), `handRaised` (PR-7), `signal`/`rttMs`/`degraded` (PR-13);
+> the audio meter rides the `{t:levels}` tick (PR-2), not the roster.
 
 Full `roster` / `peer-joined` / `peer-left` frames go out only on structural change
-(join/leave/lock/role/on-air/slot); continuous audio meters ride a separate batched
-tick frame (AD-13).
+(join/leave/presence/lock/role/on-air/slot): a join/leave uses the `peer-joined`/`peer-left`
+delta, and any other change re-broadcasts each participant its projected `roster`. Continuous
+audio meters ride a separate batched tick frame (AD-13), never the roster.
 
 ### Suppression-lock state machine (D-13 / EN-7)
 

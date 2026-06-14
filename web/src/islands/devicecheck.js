@@ -111,9 +111,14 @@ function DeviceCheck() {
     const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
     pubRef.current = publisher;
     room.on("signal", (f) => publisher.onSignal(f));
-    // On-air self pill + global "we're live" reflection (D-24): the server forwards the OBS
-    // source's reflection for this guest's slot, and the broadcast-level streaming state.
-    room.on("onair", (f) => setOnAir(f.onAir || "status-unavailable"));
+    // On-air self pill + global "we're live" reflection (D-24): the per-guest on-air is now
+    // folded into the roster (PR-1 retired the interim {t:onair} frame) — read it from this
+    // client's OWN entry, located via the roster's `self` marker. The broadcast-level streaming
+    // state stays a room-level {t:streaming} broadcast (it's room-wide, not per-guest).
+    room.on("roster", (f) => {
+      const me = (f.peers || []).find((p) => p.self || p.id === f.self);
+      if (me) setOnAir(me.onAir || "status-unavailable");
+    });
     room.on("streaming", (f) => setStreaming(!!f.active));
     // Apply a refreshed ICE config (rotated TURN credential, EN-4) to live consumers.
     room.onIce((servers) => publisher.applyIceServers(servers));
