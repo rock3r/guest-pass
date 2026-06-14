@@ -169,8 +169,80 @@ func TestUnbindBumpsEpochAndPlaceholders(t *testing.T) {
 	if st.epoch != 2 || st.occupant != "" || st.onAir != OnAirUnknown {
 		t.Fatalf("unbind state = %+v", st)
 	}
-	if len(out) != 1 || out[0].frame.T != "slot-unbound" || epochVal(out[0].frame) != 2 {
-		t.Fatalf("unbind outbound = %+v", out)
+	// The source is told to placeholder, and the displaced occupant's pill degrades (D-24).
+	var sawUnbound, sawOccupantReset bool
+	for _, o := range out {
+		if o.to == "src" && o.frame.T == "slot-unbound" && epochVal(o.frame) == 2 {
+			sawUnbound = true
+		}
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			sawOccupantReset = true
+		}
+	}
+	if !sawUnbound {
+		t.Fatalf("unbind must tell the source to placeholder (slot-unbound, epoch 2), got %+v", out)
+	}
+	if !sawOccupantReset {
+		t.Fatalf("unbind must degrade the displaced occupant's pill to status-unavailable (D-24), got %+v", out)
+	}
+}
+
+// D-24: reassigning a slot from occupant A to B must degrade A's pill — A is no longer
+// sourced here, so it can't keep asserting the on-air it last had (later sourceActive frames
+// go to B). The new occupant B's pill stays at its default until a fresh transition.
+func TestRebindDegradesDisplacedOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest")
+	s.join("b", "guest")
+	s.rebindSlot("cam-1", "a")
+	s.obsSourceActive("cam-1", true, 1) // a is on-air
+
+	out := s.rebindSlot("cam-1", "b") // reassign the slot to b
+
+	var aReset bool
+	for _, o := range out {
+		if o.to == "a" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			aReset = true
+		}
+		if o.to == "b" {
+			t.Fatalf("the new occupant must not be told on-air on a bare rebind, got %+v", o.frame)
+		}
+	}
+	if !aReset {
+		t.Fatalf("displaced occupant a must be degraded to status-unavailable (D-24), got %+v", out)
+	}
+}
+
+// D-24: a source reconnect/reload that re-attaches (Room.Join evicts the old conn WITHOUT
+// running leave) must reset a stale on-air and degrade the occupant — the refreshed source
+// has reported no transition yet, so the state is UNKNOWN.
+func TestSourceReattachResetsStaleOnAir(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, 1) // slot is on-air
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("precondition: slot should be on-air")
+	}
+
+	// The source page refreshes: the replacement connection re-attaches to the same slot.
+	out := s.attachSource("cam-1", "src")
+
+	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
+		t.Fatalf("a re-attaching source must reset stale on-air to %s, got %q", OnAirUnknown, st.onAir)
+	}
+	var occReset bool
+	for _, o := range out {
+		if o.to == "g1" && o.frame.T == "onair" && o.frame.OnAir == OnAirUnknown {
+			occReset = true
+		}
+	}
+	if !occReset {
+		t.Fatalf("a re-attaching source must degrade the occupant's pill (D-24), got %+v", out)
 	}
 }
 
