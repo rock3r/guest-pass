@@ -115,7 +115,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
 		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd}
-		app := &appServer{store: cfg.Store, rd: rd}
+		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore()}
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
@@ -131,9 +131,16 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Get("/app", app.dashboard)
 			hr.Get("/app/calendar", app.calendar)
 			hr.Post("/app/streams", app.createStream)
+			hr.Get("/app/streams/{id}", app.streamDetail)
 			hr.Get("/app/streams/{id}/edit", app.editStreamForm)
 			hr.Post("/app/streams/{id}", app.updateStream)
 			hr.Post("/app/streams/{id}/delete", app.deleteStream)
+			// Invites tab (EN-23): guest list + invite form (name/email/role only) +
+			// inline role edit + re-issue + revoke. No live production controls here.
+			hr.Post("/app/streams/{id}/passes", app.createInvite)
+			hr.Post("/app/streams/{id}/passes/{pid}/role", app.setInviteRole)
+			hr.Post("/app/streams/{id}/passes/{pid}/reissue", app.reissueInvite)
+			hr.Post("/app/streams/{id}/passes/{pid}/revoke", app.revokeInvite)
 		})
 
 		// Public guest landing + device-check entry. Rate-limited (when configured) to blunt

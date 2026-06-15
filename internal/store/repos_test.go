@@ -215,6 +215,55 @@ func TestPassRepo_CRUDAndStatus(t *testing.T) {
 	}
 }
 
+// SetPassRole and ReissuePass back the host's invites tab (M4 PR-3). Role flips guest↔cohost
+// in place; re-issue rotates the token (old hash stops resolving — EN-5), returns the pass to
+// "sent" stamping sent_at, and keeps the rest of the row.
+func TestPassRepo_SetRoleAndReissue(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-reissue")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show"})
+	past := int64(1)
+	p, err := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "old-hash", Status: PassOpened, ExpiresAt: &past})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+
+	// Role flip.
+	if err := st.SetPassRole(ctx, p.ID, RoleCohost); err != nil {
+		t.Fatalf("SetPassRole cohost: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, p.ID); got.Role != RoleCohost {
+		t.Fatalf("role = %q, want cohost", got.Role)
+	}
+
+	// Re-issue rotates the token + returns to sent.
+	if err := st.ReissuePass(ctx, p.ID, "new-hash"); err != nil {
+		t.Fatalf("ReissuePass: %v", err)
+	}
+	if _, err := st.GetPassByTokenHash(ctx, "old-hash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old token still resolves after re-issue: %v", err)
+	}
+	got, err := st.GetPassByTokenHash(ctx, "new-hash")
+	if err != nil || got.ID != p.ID {
+		t.Fatalf("new token does not resolve to the pass: %+v / %v", got, err)
+	}
+	if got.Status != PassSent || got.SentAt == nil {
+		t.Fatalf("after re-issue: status=%q sent_at=%v, want sent + stamped", got.Status, got.SentAt)
+	}
+	if got.ExpiresAt != nil {
+		t.Fatalf("re-issue must clear expires_at (so the fresh link isn't born expired), got %v", *got.ExpiresAt)
+	}
+
+	// Both operations error on an unknown id (errIfNoRows).
+	if err := st.SetPassRole(ctx, "nope", RoleGuest); err == nil {
+		t.Fatal("SetPassRole on missing id should error")
+	}
+	if err := st.ReissuePass(ctx, "nope", "x"); err == nil {
+		t.Fatal("ReissuePass on missing id should error")
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {

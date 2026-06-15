@@ -9,7 +9,7 @@
 {{range .Data.Streams}}
 <li class="stream-card">
 <div class="stream-meta">
-<a class="stream-title" href="/app/streams/{{.ID}}/edit">{{.Title}}</a>
+<a class="stream-title" href="/app/streams/{{.ID}}">{{.Title}}</a>
 <span class="stream-status status-{{.Status}}">{{.Status}}</span>
 {{if .HasSchedule}}<span class="stream-when">{{.ScheduledAt}}</span>{{end}}
 </div>

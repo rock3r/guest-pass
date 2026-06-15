@@ -14,7 +14,7 @@
 {{range .Data.Weeks}}{{range .}}
 <div class="cal-cell{{if not .InMonth}} cal-empty{{end}}{{if .IsToday}} cal-today{{end}}">
 {{if .InMonth}}<span class="cal-day">{{.Day}}</span>
-{{range .Streams}}<a class="cal-event status-{{.Status}}" href="/app/streams/{{.ID}}/edit" title="{{.Title}}">{{.Title}}</a>{{end}}
+{{range .Streams}}<a class="cal-event status-{{.Status}}" href="/app/streams/{{.ID}}" title="{{.Title}}">{{.Title}}</a>{{end}}
 {{end}}
 </div>
 {{end}}{{end}}
@@ -27,7 +27,7 @@
 {{range .Data.Agenda}}
 <li class="agenda-item">
 <span class="agenda-when">{{.When}}</span>
-<a class="agenda-title" href="/app/streams/{{.ID}}/edit">{{.Title}}</a>
+<a class="agenda-title" href="/app/streams/{{.ID}}">{{.Title}}</a>
 <span class="stream-status status-{{.Status}}">{{.Status}}</span>
 </li>
 {{end}}

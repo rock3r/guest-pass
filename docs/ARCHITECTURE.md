@@ -1096,8 +1096,18 @@ create/edit/delete are server-rendered forms — `POST /app/streams`,
 `GET /app/streams/{id}/edit`, `POST /app/streams/{id}`, `POST /app/streams/{id}/delete`
 — that mutate then redirect (POST-redirect-GET). `GET /app/calendar` is a read-only
 month + agenda view of the host's scheduled streams (keyed by `scheduled_at`,
-`?month=YYYY-MM`; recurring control hidden, D-8). The stream-detail (Invites/Sources
-tabs) and settings surfaces hang off the same prefix as they land.
+`?month=YYYY-MM`; recurring control hidden, D-8). `GET /app/streams/{id}` is the
+tabbed stream-detail page; its **Invites** tab is the guest list (inline role edit
+guest↔co-host, re-issue, revoke) with an invite form of **name/email/role only** —
+**no** live production controls (slot binding, screenshare eligibility, mic/cam) live
+here; those are greenroom-only (EN-23). Invite actions: `POST /app/streams/{id}/passes`
+(create), `POST /app/streams/{id}/passes/{pid}/{role,reissue,revoke}`. Create/re-issue
+**POST-redirect-GET** to `…/{id}?reveal=<nonce>` (so a refresh never re-mints a pass or
+re-rotates a token); the detail GET reveals the magic link **once** via that single-use
+nonce — the raw token is never stored (EN-5) and never rides the URL (the nonce is not
+the token). Re-issue rotates the token so the old link stops resolving **and clears the
+deadline** so the fresh link can't be born expired (PD-2/D-5). The Sources tab and
+settings surfaces hang off the same prefix as they land.
 No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
 `SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
 separate CSRF token is needed. After Google sign-in the host lands on `/app`.
