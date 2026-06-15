@@ -114,30 +114,39 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 			out <- iceFrame
 		}
 	}
-	if !room.Join(id.peer, id.role, id.name, id.slot, out) {
-		// The room started draining between hub.Room and Join. Tell the client to
-		// reconnect and close; we never registered, so there's no writer to drain.
-		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
-		return
-	}
-
-	// Replay a guest's/co-host's persisted cam-slot binding as a live (re)bind (D-20/D-40): now
-	// that it is a room peer, Room.ResumeBind re-routes /s/{slot} to it — so a binding made before
-	// OBS/guests connected, or surviving a reconnect, takes effect without the host re-binding.
-	// The binding is re-read HERE (not at the handshake), so a host PUT during the join window
-	// can't replay a stale label. ResumeBind (not Rebind) is NON-displacing: an automatic replay
-	// must never knock a different live occupant off a slot. v1 runs one live session per host,
-	// but pass.slot_id isn't gated on which stream is live (session lifecycle is v1.1), so a guest
-	// of a non-live stream opening their link must not auto-hijack the on-air slot. The host's own
+	// Guests/co-hosts are stream-gated (EN-2/D-20): hold the per-host binding lock across the
+	// admission RE-CHECK, Join, AND replay. The handshake admitted this guest against the active
+	// session as of THEN, but a concurrent goLive can make a different stream live (and run its
+	// straggler eviction) in the window before this Join — so without re-checking under the lock
+	// (which goLive also holds) a non-live-stream guest could slip into the now-live room after the
+	// eviction already ran (codex). The lock also orders the replay's room command with a concurrent
+	// host PUT by DB-commit order (D-20).
+	//
+	// The replay re-reads passes.slot_id HERE (not at the handshake), so a host PUT during the join
+	// window can't route from a stale label. ResumeBind (not Rebind) is NON-displacing — an
+	// automatic replay must never knock a different live occupant off a slot; the host's own
 	// greenroom (re)bind still displaces deliberately (putPassSlot → Rebind/RebindOrVacate).
 	if id.role == "guest" || id.role == "cohost" {
-		// Re-read + enqueue under the per-host binding lock so a concurrent host PUT can't make
-		// this replay route from a stale binding (the lock orders the room commands by DB commit).
 		unlock := h.binds.lock(id.session)
+		if !h.resolver.guestAdmissible(ctx, string(id.peer), id.session) {
+			unlock()
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
+			return
+		}
+		if !room.Join(id.peer, id.role, id.name, id.slot, out) {
+			unlock()
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
+			return
+		}
 		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
 			room.ResumeBind(slot, id.peer)
 		}
 		unlock()
+	} else if !room.Join(id.peer, id.role, id.name, id.slot, out) {
+		// The room started draining between hub.Room and Join. Tell the client to
+		// reconnect and close; we never registered, so there's no writer to drain.
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
+		return
 	}
 
 	// Single writer goroutine (EN-12): the ONLY place this socket is written. It ends when

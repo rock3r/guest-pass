@@ -154,6 +154,28 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
 }
 
+// guestAdmissible re-checks at JOIN time (under the per-host binding lock) that a guest/co-host may
+// enter the host's room: admit when there's no live session yet (pre-live) or the live session is
+// for the guest's OWN stream; refuse otherwise. The handshake already gated admission, but a
+// concurrent goLive can make a DIFFERENT stream live in the window between the handshake and Join —
+// re-checking under the lock (which goLive also holds) closes that TOCTOU so a non-live-stream
+// guest can't slip into the now-live room after the straggler eviction ran (codex). Fail-closed on
+// a lookup error.
+func (wr *wsResolver) guestAdmissible(ctx context.Context, passID, hostID string) bool {
+	pass, err := wr.store.GetPass(ctx, passID)
+	if err != nil {
+		return false
+	}
+	switch sess, serr := wr.store.ActiveSession(ctx, hostID); {
+	case errors.Is(serr, store.ErrNotFound):
+		return true // no live session yet — pre-live, admit
+	case serr != nil:
+		return false // fail-closed
+	default:
+		return sess.StreamID == pass.StreamID
+	}
+}
+
 // guestBoundSlot re-reads a guest's persisted cam-slot binding (passes.slot_id resolved to its
 // label) at REPLAY time — AFTER Join, not at the handshake — so a host PUT during the join
 // window can't make the replay route from a stale binding. It returns a label ONLY when the

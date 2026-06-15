@@ -329,6 +329,35 @@ func TestWS_RejectsNonLiveStreamGuest(t *testing.T) {
 	}
 }
 
+// guestAdmissible is the Join-time re-check (under the binding lock) that closes the goLive↔join
+// TOCTOU (codex): admit pre-live or a live-stream guest, refuse a guest whose stream isn't the
+// active session's. Mirrors the handshake gate but re-evaluated against the CURRENT session.
+func TestWS_GuestAdmissibleRecheck(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "admissible", store.HostActive)
+	live := h.seedStream(t, host.ID)
+	other := h.seedStream(t, host.ID)
+	_, livePass := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, nil)
+	_, otherPass := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+	wr := &wsResolver{store: h.store}
+
+	// Pre-live (no session): every guest is admissible.
+	if !wr.guestAdmissible(ctx, livePass.ID, host.ID) || !wr.guestAdmissible(ctx, otherPass.ID, host.ID) {
+		t.Fatal("pre-live: all guests must be admissible")
+	}
+	// Live for `live`: the live-stream guest is admissible, the other-stream guest is NOT.
+	if _, err := h.store.StartSession(ctx, live.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if !wr.guestAdmissible(ctx, livePass.ID, host.ID) {
+		t.Fatal("live-stream guest must be admissible at join")
+	}
+	if wr.guestAdmissible(ctx, otherPass.ID, host.ID) {
+		t.Fatal("a guest whose stream isn't live must be refused at join")
+	}
+}
+
 func TestWS_RejectsExpiredPassByStatus(t *testing.T) {
 	h := newWSHarness(t, wsHarnessOpts{})
 	host, _ := h.seedHost(t, "host1", store.HostActive)
