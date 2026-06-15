@@ -1,4 +1,9 @@
 import { Room } from "./room.js";
+import { TERMINAL_REASONS, isTerminal } from "./terminate.js";
+
+// Re-exported so existing importers (devicecheck) keep importing TERMINAL_REASONS from
+// session.js; the definitions now live in the tiny terminate.js shared with the OBS entry.
+export { TERMINAL_REASONS, isTerminal };
 
 /**
  * Reconnect backoff bounds: a dropped signaling socket retries fast at first, then backs off to a
@@ -16,33 +21,8 @@ const RECONNECT_MAX_MS = 10_000;
 // backoff) still tolerates a server restart of up to ~25s before giving up; a successful open resets.
 const MAX_FAILED_OPENS = 6;
 
-/**
- * TERMINAL_REASONS maps each TERMINAL terminate reason to its guest-facing error-screen copy. The
- * five EN-9 reasons arrive as a {t:terminate,reason} frame; "unreachable" is the client-derived
- * terminal when reconnection is exhausted (RF-22 — e.g. a pass revoked while the socket was down,
- * which fails the upgrade with no frame). A terminal reason routes to the matching screen and STOPS;
- * any other close (a bare drop, or the TRANSIENT reason "reconnect") is recoverable and retries.
- * @type {Record<string,{title:string, body:string}>}
- */
-export const TERMINAL_REASONS = {
-  kicked: { title: "You were removed", body: "The host removed you from the greenroom." },
-  expired: { title: "Your pass has expired", body: "This guest pass is past its window. Ask the host for a new link." },
-  revoked: { title: "Your pass was revoked", body: "This guest pass is no longer valid. Ask the host for a new link." },
-  "session-ended": { title: "The stream has ended", body: "The host ended this session." },
-  "token-rotated": { title: "This link was replaced", body: "Ask the host for a fresh link." },
-  unreachable: { title: "Couldn't reconnect", body: "We couldn't reconnect you to the greenroom. The session may have ended, or your pass is no longer valid — ask the host for a new link." },
-};
-
-/**
- * isTerminal reports whether a {t:terminate} reason is terminal (route to an error screen) rather
- * than transient (reconnect). An unknown/absent reason is treated as transient (RF-22: default to
- * recoverable unless the server explicitly says otherwise).
- * @param {string} [reason]
- * @returns {boolean}
- */
-export function isTerminal(reason) {
-  return !!reason && Object.prototype.hasOwnProperty.call(TERMINAL_REASONS, reason);
-}
+// TERMINAL_REASONS + isTerminal now live in ./terminate.js (re-exported above), so the OBS
+// source entry can import the terminal-reason logic without the app-only ReconnectingSession.
 
 /**
  * ReconnectingSession owns a self-healing signaling connection (AC-13). It (re)builds a Room, runs

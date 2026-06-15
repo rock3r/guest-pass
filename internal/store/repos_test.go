@@ -258,6 +258,75 @@ func TestSlotRepo_EnsurePoolConcurrentAllOrNone(t *testing.T) {
 	}
 }
 
+// RotateSlotToken backs the D-22 regenerate: the old hash stops resolving, the new one
+// resolves, and the leak-detection metadata is cleared.
+func TestSlotRepo_RotateToken(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-rotate")
+	sl, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "old"})
+	if err != nil {
+		t.Fatalf("CreateSlot: %v", err)
+	}
+	if err := st.RecordSlotTokenUse(ctx, sl.ID, "203.0.113.9"); err != nil {
+		t.Fatalf("RecordSlotTokenUse: %v", err)
+	}
+
+	if err := st.RotateSlotToken(ctx, sl.ID, "new"); err != nil {
+		t.Fatalf("RotateSlotToken: %v", err)
+	}
+	if _, err := st.GetSlotBySourceTokenHash(ctx, "old"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old token still resolves after rotation: %v", err)
+	}
+	got, err := st.GetSlotBySourceTokenHash(ctx, "new")
+	if err != nil || got.ID != sl.ID {
+		t.Fatalf("new token does not resolve to the slot: %+v / %v", got, err)
+	}
+	if got.SourceTokenLastUsedAt != nil || got.SourceTokenLastSourceIP != nil {
+		t.Fatalf("rotation must clear leak-detection metadata, got used=%v ip=%v",
+			got.SourceTokenLastUsedAt, got.SourceTokenLastSourceIP)
+	}
+	if err := st.RotateSlotToken(ctx, "no-such-slot", "x"); err == nil {
+		t.Fatal("rotating a missing slot should error")
+	}
+}
+
+// RotateSlotTokens (rotate-all) is all-or-nothing: every slot's hash rotates together, and a
+// batch naming a missing slot rotates NONE — so a mid-batch failure never leaves some slots on
+// fresh, un-revealed tokens.
+func TestSlotRepo_RotateTokensBatch(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-batch")
+	c1, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "c1-old"})
+	scr, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotScreenshare, SourceTokenHash: "scr-old"})
+
+	if err := st.RotateSlotTokens(ctx, map[string]string{c1.ID: "c1-new", scr.ID: "scr-new"}); err != nil {
+		t.Fatalf("RotateSlotTokens: %v", err)
+	}
+	for _, old := range []string{"c1-old", "scr-old"} {
+		if _, err := st.GetSlotBySourceTokenHash(ctx, old); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("old token %q still resolves after rotate-all", old)
+		}
+	}
+	for _, nw := range []string{"c1-new", "scr-new"} {
+		if _, err := st.GetSlotBySourceTokenHash(ctx, nw); err != nil {
+			t.Fatalf("new token %q does not resolve: %v", nw, err)
+		}
+	}
+
+	// A batch naming a missing slot rolls back entirely — the existing slots keep "*-new".
+	if err := st.RotateSlotTokens(ctx, map[string]string{c1.ID: "c1-doomed", "ghost": "x"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("batch with a missing slot = %v, want ErrNotFound", err)
+	}
+	if _, err := st.GetSlotBySourceTokenHash(ctx, "c1-new"); err != nil {
+		t.Fatal("a failed batch must not rotate any slot (c1 should still be c1-new)")
+	}
+	if _, err := st.GetSlotBySourceTokenHash(ctx, "c1-doomed"); err == nil {
+		t.Fatal("a failed batch rotated a slot anyway")
+	}
+}
+
 func TestSlotRepo_SingletonKinds(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

@@ -1114,9 +1114,16 @@ slot, D-20; the host slot is DEF-1) and renders per-slot cards (slot + current o
 page carries no live WS, D-24). Each slot's permanent OBS URL is **revealed once**, at
 provisioning — the source token is stored hashed (EN-5) so it can't be re-derived;
 re-revealing is a regenerate (D-22, the rotation step). The cards carry **no editable
-controls** — binding, nameplate, and the quality ceiling all live in the host-only
-greenroom People controls, which each card links to (EN-23/EN-26). The settings surface
-hangs off the same prefix as it lands.
+controls** except the D-22 **regenerate** actions — `POST
+/app/streams/{id}/sources/slots/{slotId}/regenerate` (one slot) and `POST
+/app/streams/{id}/sources/regenerate-all` (the "my URLs leaked" panic button): each mints
+a fresh token, rotates the stored hash so the old OBS URL stops authenticating, tears down
+any live `/s/{slot}` subscription with a terminal `token-rotated` terminate
+(`Hub.TerminateSourceIfLive` → `Room.RotateSource`; the OBS source page stops, not
+reconnects, and the host re-pastes the fresh URL), and reveals the new URL once via the
+same PRG reveal nonce. Binding, nameplate, and the quality ceiling still live only in the
+host-only greenroom People controls, which each card links to (EN-23/EN-26). The settings
+surface hangs off the same prefix as it lands.
 No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
 `SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
 separate CSRF token is needed. After Google sign-in the host lands on `/app`.

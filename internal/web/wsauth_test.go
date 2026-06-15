@@ -544,6 +544,54 @@ func TestWS_NullOriginAllowedForSource(t *testing.T) {
 	}
 }
 
+// AC-5: a rotated (D-22) slot source token no longer authenticates a /ws?src= handshake —
+// the leaked URL is dead. (The resolver rejects it before the upgrade; the live-source
+// teardown half is covered by the signaling + browser tests.)
+func TestWS_RotatedSourceTokenRejected(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "host1", store.HostActive)
+	srcRaw, slot := h.seedCamSlot(t, host.ID, 1)
+
+	// Valid before rotation.
+	c := h.dialOK(t, "src="+srcRaw, http.Header{"Origin": {"null"}})
+	c.CloseNow()
+
+	newRaw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw)); err != nil {
+		t.Fatalf("RotateSlotToken: %v", err)
+	}
+
+	// The old token is now rejected; the fresh one works.
+	if _, resp, err := h.dial(t, "src="+srcRaw, http.Header{"Origin": {"null"}}); err == nil {
+		t.Fatalf("rotated-out source token still connected (status %v)", resp)
+	}
+	c2 := h.dialOK(t, "src="+newRaw, http.Header{"Origin": {"null"}})
+	c2.CloseNow()
+}
+
+// sourceStillValid backs the resolve→Join re-validation that closes the rotation TOCTOU: a
+// token is valid until its slot is rotated, then no longer (the rotated hash doesn't resolve).
+func TestWS_SourceStillValidRevalidation(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "host1", store.HostActive)
+	srcRaw, slot := h.seedCamSlot(t, host.ID, 1)
+	wr := &wsResolver{hasher: h.hasher, store: h.store}
+
+	if !wr.sourceStillValid(context.Background(), srcRaw) {
+		t.Fatal("a current source token should re-validate as valid")
+	}
+	newRaw, _ := token.Mint()
+	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw)); err != nil {
+		t.Fatalf("RotateSlotToken: %v", err)
+	}
+	if wr.sourceStillValid(context.Background(), srcRaw) {
+		t.Fatal("a rotated source token must re-validate as invalid (TOCTOU close)")
+	}
+}
+
 // The null-Origin relaxation is for source-token connections ONLY (TESTING.md §WS): a
 // guest (?pass=) in a normal browser always sends a real Origin, so a literal "null" on
 // the guest path is rejected — host/guest Origin validation is not weakened.

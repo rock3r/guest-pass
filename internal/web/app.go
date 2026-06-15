@@ -11,6 +11,7 @@ import (
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -25,10 +26,11 @@ import (
 type appServer struct {
 	store   *store.Store
 	rd      *renderer
-	hasher  *token.Hasher // magic-link token hashing for the invites tab (EN-5)
-	mailer  mail.Mailer   // invite delivery
-	baseURL string        // absolute origin for building magic links
-	reveals *revealStore  // one-time post-redirect reveal of a just-minted magic link
+	hasher  *token.Hasher  // magic-link + slot token hashing (EN-5)
+	mailer  mail.Mailer    // invite delivery
+	baseURL string         // absolute origin for building magic links + OBS source URLs
+	reveals *revealStore   // one-time post-redirect reveal of a just-minted secret
+	hub     *signaling.Hub // to tear down a live OBS source on slot-token rotation (D-22); may be nil
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).

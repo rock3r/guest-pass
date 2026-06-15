@@ -1,6 +1,7 @@
 import "./obs.css";
 import { Room } from "../rtc/room.js";
 import { PeerLink } from "../rtc/peerlink.js";
+import { isTerminal, TERMINAL_REASONS } from "../rtc/terminate.js";
 
 /**
  * OBS cam source page (EN-13): a chromeless render surface OBS loads as a browser source.
@@ -47,6 +48,27 @@ function start() {
   let reconnectTimer;
   /** @type {import("../rtc/room.js").Room|null} the live signaling room (rebuilt each reconnect) */
   let room = null;
+  // Set once a TERMINAL {t:terminate} (e.g. token-rotated, D-22) ends this source for good, so
+  // the reconnect loop stops — the host must re-paste the fresh slot URL into OBS. Reflected on
+  // the document for the host (a visible note in OBS) and the browser test.
+  let terminated = false;
+
+  // showTerminal stops the source and surfaces a terminal reason in OBS (the page is normally
+  // chromeless; a token-rotated/kicked source is a real dead-end the host should see).
+  function showTerminal(reason) {
+    terminated = true;
+    clearLink();
+    document.documentElement.dataset.obsConnected = "";
+    document.documentElement.dataset.obsTerminated = reason;
+    const copy = TERMINAL_REASONS[reason];
+    let note = document.getElementById("obs-terminal");
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "obs-terminal";
+      document.body.appendChild(note);
+    }
+    note.textContent = copy ? copy.title + " — " + copy.body : "This source ended.";
+  }
 
   function clearLink() {
     if (link) link.close();
@@ -66,7 +88,14 @@ function start() {
   }
 
   function connect() {
+    if (terminated) return; // a terminal terminate (e.g. token-rotated) stops the loop for good
     room = new Room("src=" + encodeURIComponent(token));
+    // Capture a {t:terminate} reason BEFORE the socket closes, so onClose can tell a terminal
+    // end (stop) from a transient drop (reconnect). Per-connection: a fresh Room each retry.
+    let lastReason = null;
+    room.on("terminate", (f) => {
+      lastReason = f && f.reason;
+    });
 
     // bind the slot to occupantPeerId by opening a recvonly link and rendering its track.
     function bind(occupantPeerId, ep) {
@@ -128,6 +157,7 @@ function start() {
     // otherwise leave a stale "live" banner until OBS next toggles (D-24).
     room.ready.then(() => {
       backoff = RECONNECT_MIN_MS;
+      document.documentElement.dataset.obsConnected = "1"; // test/host seam: source is live
       reassertStreaming();
     }).catch(() => {
       /* the onclose handler drives the reconnect; nothing to do here */
@@ -135,7 +165,15 @@ function start() {
 
     room.onClose(() => {
       clearLink();
+      document.documentElement.dataset.obsConnected = "";
       epoch = -1; // accept whatever the reconnect's binding frame reports
+      // A TERMINAL terminate (token-rotated, kicked, …) ends the source — stop retrying; the
+      // old slot token is dead, so reconnecting would just 401 forever (D-22 / EN-9). The host
+      // re-pastes the fresh URL from the Sources tab. A transient drop reconnects as before.
+      if (isTerminal(lastReason)) {
+        showTerminal(lastReason);
+        return;
+      }
       clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);

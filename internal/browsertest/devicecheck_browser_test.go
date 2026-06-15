@@ -35,6 +35,9 @@ type devSeed struct {
 	hostCookie string // host session JWT for the gp_session cookie (/greenroom + host /ws)
 	srcToken   string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
 	slotLabel  string // the cam slot's signaling label ("cam-1")
+	hostID     string // the host's id (room/session key)
+	streamID   string // the seeded stream's id (host-app routes)
+	slotID     string // the cam-1 slot's DB id (regenerate route)
 }
 
 func seedDeviceCheck(t *testing.T) *devSeed {
@@ -89,9 +92,10 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	if err != nil {
 		t.Fatalf("mint src: %v", err)
 	}
-	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
+	camSlot, err := st.CreateSlot(ctx, store.CreateSlotParams{
 		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("CreateSlot: %v", err)
 	}
 
@@ -120,6 +124,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID,
 		rawTokenB: rawB, passIDB: passB.ID,
 		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1",
+		hostID: host.ID, streamID: stream.ID, slotID: camSlot.ID,
 	}
 }
 
