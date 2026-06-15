@@ -45,7 +45,12 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 	// clean, so roll the session back and fail rather than go live with peers that can mesh with the
 	// show. (The handshake gate only blocks FUTURE joins.)
 	if err := s.evictNonSessionPeersLocked(ctx, host.ID, st.ID); err != nil {
-		_ = s.store.EndActiveSession(ctx, host.ID) // best-effort rollback to pre-live
+		// Roll back on a FRESH context: `ctx` is the very context whose expiry/cancel may have failed
+		// the reconcile, so reusing it would cancel EndActiveSession too and leave the session wrongly
+		// active (codex). A new detached context with its own budget undoes the commit.
+		rbCtx, rbCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer rbCancel()
+		_ = s.store.EndActiveSession(rbCtx, host.ID)
 		http.Error(w, "could not go live — please try again", http.StatusInternalServerError)
 		return
 	}

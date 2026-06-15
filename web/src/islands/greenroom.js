@@ -49,11 +49,13 @@ function Greenroom() {
   const streamsRef = useRef(new Map());
   /** @type {{current: Map<string, any>}} */
   const entriesRef = useRef(new Map());
-  // Per-pass bind sequence: the host can change a picker twice quickly, so multiple PUTs are in
-  // flight. Pre-live there's no roster to reconcile, so an OLDER response landing last would
-  // overwrite the newer selection — track the latest request per pass and ignore stale responses.
-  /** @type {{current: Object<string, number>}} */
-  const bindSeqRef = useRef({});
+  // Bind ordering: the host can change pickers quickly, so multiple PUTs are in flight and (pre-live,
+  // with no roster to reconcile) an OLDER response landing last would overwrite a newer selection. A
+  // global monotonic counter stamps each bind; we track the latest stamp per PASS and per SLOT, and
+  // ignore a response that a newer bind superseded — for the same pass OR for the same slot (a
+  // cross-pass displacement, codex).
+  /** @type {{current: {g:number, pass:Object<string,number>, slot:Object<string,number>}}} */
+  const bindSeqRef = useRef({ g: 0, pass: {}, slot: {} });
 
   useEffect(() => {
     const room = new Room(""); // host: the session cookie authenticates the WS
@@ -228,9 +230,13 @@ function Greenroom() {
   // picker) reflect the new assignment. Same-origin fetch carries the host cookie; CSRF is the
   // SameSite=Lax cookie (a cross-site request can't send it) + connect-src 'self'.
   function bindSlot(passId, slot) {
-    const seq = (bindSeqRef.current[passId] || 0) + 1;
-    bindSeqRef.current[passId] = seq;
-    const isStale = () => bindSeqRef.current[passId] !== seq; // a newer bind for this pass superseded us
+    const seq = ++bindSeqRef.current.g; // global order across all binds
+    bindSeqRef.current.pass[passId] = seq;
+    if (slot) bindSeqRef.current.slot[slot] = seq;
+    // Stale if a newer bind superseded this one — for the SAME pass, or one that CLAIMED the same
+    // slot (cross-pass displacement). An unassign (slot:"") only checks the pass.
+    const isStale = () =>
+      bindSeqRef.current.pass[passId] !== seq || (!!slot && bindSeqRef.current.slot[slot] !== seq);
     fetch(`/api/passes/${encodeURIComponent(passId)}/slot`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
