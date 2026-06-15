@@ -7,12 +7,15 @@ as smooth as possible:
 - **Real OBS-CEF media receive + on-air** — an actual OBS browser source (CEF 127) renders a guest,
   and bringing it on-program lights the on-air pill via the real OBS event (AD-10 / RF-17 / D-24).
 - **Multi-machine / real-network NAT traversal** — guests on separate networks connect over real
-  ICE. **STUN-only** (D-38): direct connect is the gate; a TURN relay is **out of scope for v1**.
+  ICE. This smoke is **STUN-only**: a direct connection is the gate. A **TURN relay is OFF by
+  default** (D-38) and isn't run here, so symmetric-NAT / locked-firewall pairs won't connect (TURN
+  is an optional/BYO self-host config — see `DEPLOYMENT.md` §2 — not part of this smoke).
 
 The behavioral checks (multi-guest grid, RF-8 detach, on-air *state*, degradation) are
 **browser-automated** — by the headful driver below and the chromedp suite in CI — so they need no
-real machines. **Out of scope for v1** (don't test here): mobile / non-Chrome incl. **Safari**, and
-**~6-guest capacity** (SPIKE-0 already proved encoder load on real hardware, AD-21).
+real machines. **Not tested here:** mobile / non-Chrome incl. **Safari** (deferred from v1 — see
+`TESTING.md` §5), and **~6-guest capacity** (already proven by **SPIKE-0** on real hardware, AD-24/
+AD-21 — not re-tested).
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
@@ -34,7 +37,8 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 > suite (`onair_browser_test.go`, `degradation_browser_test.go`) in CI, not by this driver. The only
 > **physical** residue a fake-media browser on one machine can't prove stays a manual pass (the
 > checklist below): the real **OBS app** (CEF) rendering + its real on-air event, and real
-> cross-network **NAT** (STUN-only). (Mobile/non-Chrome and ~6-guest capacity are out of scope for v1.)
+> cross-network **NAT** (STUN-only). (Mobile/non-Chrome is deferred from v1; ~6-guest capacity is
+> already proven by SPIKE-0 — neither is tested here.)
 
 > ### ⚠ Security: dev instance over a tunnel
 >
@@ -151,9 +155,11 @@ The driver already proves this headless; this confirms it on the **real OBS-CEF 
 ### 5. Real-network / NAT — STUN-only (RF-7 / D-38)
 - [ ] A guest on a **second machine on a different network** connects and renders — STUN gives the
       reflexive candidates for a direct P2P path through the common cone-NAT types (the v1 gate).
-- [ ] A pair behind **symmetric NAT / a UDP-blocking firewall simply won't connect**: there is **no
-      TURN relay in v1** (D-38; TURN-as-relay is out of scope), and the friendly "blocks P2P" error
-      isn't built yet, so today it just fails. Test from ordinary networks (not both symmetric).
+- [ ] A pair behind **symmetric NAT / a UDP-blocking firewall won't connect** with this STUN-only
+      smoke: a **TURN relay is OFF by default** (D-38) and not run here (it's an optional / BYO
+      self-host config, `DEPLOYMENT.md` §2). Per D-38 the guest should show a clear "network blocks
+      peer-to-peer" message rather than hang — **confirm that** (a silent hang is a finding to file).
+      Test mainly from ordinary networks (not both symmetric).
 
 ---
 
@@ -174,10 +180,10 @@ The driver already proves this headless; this confirms it on the **real OBS-CEF 
 
 ## Notes
 
-- **Dev-only / STUN-only.** This harness mints a dev host session without Google and serves over a
-  tunnel for convenience; it is not a deployment. **TURN relay is out of scope for v1** (D-38 —
-  STUN-only; the ~10–15% symmetric-NAT / locked-firewall pairs are an accepted, un-relayed
-  limitation). The TURN ICE-config plumbing exists (`TURN_URL`/`TURN_SECRET` + a coturn,
-  `DEPLOYMENT.md` §2/§9) but running a relay is not part of v1.
+- **Dev-only / STUN-only smoke.** This harness mints a dev host session without Google and serves
+  over a tunnel for convenience; it is not a deployment. It runs **no TURN relay** — relay is **OFF
+  by default** (D-38), so the ~10–15% symmetric-NAT / locked-firewall pairs are an accepted,
+  un-relayed limitation in this smoke. TURN itself is a supported **optional / BYO** self-host config
+  (`TURN_URL`/`TURN_SECRET` + a coturn, `DEPLOYMENT.md` §2/§9) — it's simply not exercised here.
 - See `docs/TESTING.md` §5 for why these gates are manual, and `docs/ARCHITECTURE.md` (RF-8, §7)
   for the suppression-lock receiver-side contract this smoke confirms on real OBS + peers.

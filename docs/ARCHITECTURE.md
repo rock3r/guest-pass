@@ -63,7 +63,9 @@ is LOCKED.
 - No obs-websocket bridge (browser-source reflection only; bridge is future work).
 - No viewer counts / platform analytics, no public viewer share page, no
   guest-book / cross-stream guest reuse (→ v1.1).
-- Mobile is "guest flow works on a phone," not optimized.
+- Mobile / non-Chrome guests are **deferred from v1** (owner decision, 2026-06-15):
+  v1 targets **desktop Chrome** guests (and OBS-CEF). A phone or Safari may happen to
+  work but is untested and unsupported in v1.
 
 ---
 

@@ -132,10 +132,11 @@ What it does **not** prove (RF-7), and what covers each instead:
   feasibility on real hardware is proven by **SPIKE-0** before M1 (AD-24, the
   basis on which SPIKE-0 confirmed AD-21 — now wired in M3, see
   [§5](#5-what-cannot-be-automated)).
-- **Real-network / NAT traversal**, **real OBS-CEF media receive**, and
-  **Safari/mobile** — none are exercised by fake-media headless Chrome; all are
-  covered by the documented **manual** smokes (multi-machine/multi-network +
-  real-OBS-CEF) in [§5](#5-what-cannot-be-automated).
+- **Real-network / NAT traversal** and **real OBS-CEF media receive** — neither is
+  exercised by fake-media headless Chrome; both are covered by the documented
+  **manual** smokes (multi-machine/multi-network + real-OBS-CEF) in
+  [§5](#5-what-cannot-be-automated). (Safari / non-Chrome / mobile guests are
+  **deferred from v1** — owner 2026-06-15 — so they are not a v1 gate; see §5.)
 
 `pion` test-peers are rejected for this: production forbids a server-side media
 stack (D-23), so a pion peer would be false confidence. Real Chrome WebRTC is
@@ -270,10 +271,14 @@ These gates are manual by necessity:
   down-level rewrite (targeting the oldest supported *guest* browser, not
   OBS-CEF-127) has **known Safari bugs**. The transpiled output must be eyeballed
   in real Safari before M1 is done — do not assume the transpile is correct.
+  (Safari / mobile guest support is now **deferred from v1** — owner 2026-06-15 —
+  so this is no longer a live v1 gate.)
 - **Multi-machine / multi-network smoke — manual M2 DoD** (RF-7). Real-network
   and NAT traversal are out of reach for headless fake-media Chrome; run guests
-  across **separate machines on separate networks** to exercise actual ICE/NAT
-  and relay fallback.
+  across **separate machines on separate networks** to exercise actual ICE/NAT.
+  The default posture is **STUN-only** (D-38): a direct connection is the gate;
+  **relay fallback** is exercised only when an optional / BYO TURN is configured
+  (off by default). See `docs/SMOKE.md`.
 - **Real-OBS render smoke — manual M2 DoD** (AD-10). Beyond the SPIKE-2 receive
   gate, a manual pass with actual OBS ≥ 31 (CEF 127) confirms the browser source
   renders the occupant in a real OBS scene. This complements, not replaces, the
@@ -283,8 +288,9 @@ These gates are manual by necessity:
   pass, and a cam-1 slot for the local dev host — prints the guest + OBS-source
   URLs, and binds the slot to the guest by sending a `{t:rebind}` over a host
   `/ws` connection.
-- **Safari / mobile guest smoke — manual** (RF-7). The chromedp tracer runs only
-  desktop Chrome; Safari and mobile guest rendering are eyeballed manually.
+- **Safari / mobile guest smoke — DEFERRED from v1** (owner decision, 2026-06-15).
+  Safari and non-Chrome / mobile guest support is **post-v1**, so it is **not a v1
+  gate** (was RF-7). v1 targets desktop Chrome guests (and OBS-CEF) only.
 
 ---
 
