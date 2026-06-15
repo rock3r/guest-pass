@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -155,6 +156,41 @@ func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error
 		return fmt.Errorf("assigning slot: %w", err)
 	}
 	return nil
+}
+
+// BoundCamPass is a pass currently bound to a cam slot, paired with that slot's label — used to
+// reconcile a freshly-live room with persisted bindings on Go live (D-40 replay).
+type BoundCamPass struct {
+	PassID    string
+	SlotLabel string // "cam-1".."cam-8"
+}
+
+// BoundCamPassesForStream lists the stream's still-active passes bound to a cam slot, each with
+// its "cam-N" label. On Go live the handler replays these into the now-live room so a guest who
+// connected BEFORE the session started (its join-replay was gated off, any pre-live bind DB-only)
+// gets bound without the host re-picking. Retired passes are excluded (they can't be live peers).
+func (s *Store) BoundCamPassesForStream(ctx context.Context, streamID string) ([]BoundCamPass, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
+		 WHERE p.stream_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)`,
+		streamID, SlotCam, PassRevoked, PassExpired)
+	if err != nil {
+		return nil, fmt.Errorf("listing bound cam passes: %w", err)
+	}
+	defer rows.Close()
+	var out []BoundCamPass
+	for rows.Next() {
+		var id string
+		var idx int64
+		if err := rows.Scan(&id, &idx); err != nil {
+			return nil, fmt.Errorf("scanning bound cam pass: %w", err)
+		}
+		out = append(out, BoundCamPass{PassID: id, SlotLabel: "cam-" + strconv.FormatInt(idx, 10)})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating bound cam passes: %w", err)
+	}
+	return out, nil
 }
 
 // ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a

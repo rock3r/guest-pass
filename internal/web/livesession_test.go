@@ -103,6 +103,55 @@ func TestSession_EndTerminatesRoom(t *testing.T) {
 	}
 }
 
+// Going live reconciles an already-spawned room with persisted bindings (codex P2/D-40): a guest
+// that connected and was bound BEFORE Go live (replay gated off, picker DB-only) gets routed onto
+// its slot the moment the host goes live, without re-picking.
+func TestSession_GoLiveReplaysPreLiveBindings(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "prelive", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	srcRaw, _ := h.seedCamSlot(t, host.ID, 1)
+
+	// Guest + OBS source connect BEFORE Go live: no active session, so no replay fires.
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc)
+	sc := h.dialOK(t, "src="+srcRaw, http.Header{"Origin": {"null"}})
+	defer sc.CloseNow()
+	if f := wsReadFrame(t, sc); f.T != "slot-unbound" {
+		t.Fatalf("source first frame = %q, want slot-unbound", f.T)
+	}
+
+	// Host binds the guest to cam-1 via the picker — DB-only, since the stream isn't live yet.
+	req, _ := http.NewRequest(http.MethodPut, h.srv.URL+"/api/passes/"+pass.ID+"/slot", strings.NewReader(`{"slot":"cam-1"}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	_ = resp.Body.Close()
+	if got, _ := h.store.GetPass(ctx, pass.ID); got.SlotID == nil {
+		t.Fatal("pre-live bind should persist in the DB")
+	}
+
+	// Host goes live → the pre-live binding is replayed → the source re-routes to the guest.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	greq, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/app/streams/"+stream.ID+"/session/start", nil)
+	greq.AddCookie(cookie)
+	gresp, err := noRedirect.Do(greq)
+	if err != nil {
+		t.Fatalf("go-live POST: %v", err)
+	}
+	_ = gresp.Body.Close()
+
+	if f := readFrameOfType(t, sc, "slot-rebind"); f.OccupantPeerID != pass.ID {
+		t.Fatalf("go-live did not replay the pre-live binding; slot-rebind occupant = %q, want %q", f.OccupantPeerID, pass.ID)
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

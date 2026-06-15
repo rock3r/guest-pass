@@ -28,6 +28,11 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not go live", http.StatusInternalServerError)
 		return
 	}
+	// Reconcile an already-spawned room with the persisted bindings now that the session is live
+	// (D-40): a guest that connected BEFORE Go live had its join-replay gated off and any pre-live
+	// picker bind was DB-only, so bind them now. Under the per-host binding lock to order with
+	// concurrent joins/PUTs; ResumeBind is non-displacing and no-ops for a peer that isn't connected.
+	s.replayBindingsOnGoLive(r.Context(), host.ID, st.ID)
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)
 }
 
@@ -52,6 +57,30 @@ func (s *appServer) endSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)
+}
+
+// replayBindingsOnGoLive binds the stream's persisted cam bindings into the live room (if one
+// already exists) the moment the session starts — closing the gap where guests/OBS connected
+// before Go live (join-replay gated off, pre-live picker binds DB-only). Held under the per-host
+// binding lock so it orders with concurrent joins/picker PUTs; ResumeBind is non-displacing and
+// no-ops for a pass whose peer isn't connected, so replaying the whole set is safe.
+func (s *appServer) replayBindingsOnGoLive(ctx context.Context, hostID, streamID string) {
+	if s.hub == nil {
+		return
+	}
+	room := s.hub.RoomIfLive(hostID)
+	if room == nil {
+		return // nobody connected yet — each guest's own join-replay will bind it (now in-scope)
+	}
+	unlock := s.binds.lock(hostID)
+	defer unlock()
+	bound, err := s.store.BoundCamPassesForStream(ctx, streamID)
+	if err != nil {
+		return // best-effort: a read miss just means the host re-picks; no live disruption
+	}
+	for _, b := range bound {
+		room.ResumeBind(signaling.SlotID(b.SlotLabel), signaling.PeerID(b.PassID))
+	}
 }
 
 // sessionState reports whether streamID is the host's live session, and whether the host is live

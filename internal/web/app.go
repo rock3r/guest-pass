@@ -31,6 +31,7 @@ type appServer struct {
 	baseURL string         // absolute origin for building magic links + OBS source URLs
 	reveals *revealStore   // one-time post-redirect reveal of a just-minted secret
 	hub     *signaling.Hub // to tear down a live OBS source on slot-token rotation (D-22); may be nil
+	binds   *bindingLocks  // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
