@@ -297,6 +297,45 @@ func TestSession_DeletePreLiveStreamEvictsPeers(t *testing.T) {
 	}
 }
 
+// Going live evicts a pre-live straggler from a DIFFERENT stream (codex P1): a guest of stream B
+// that connected while no session was live (admitted) must not remain in stream A's room once A is
+// on-air. It is bumped with the transient reconnect reason, then the admission gate refuses its
+// re-handshake.
+func TestSession_GoLiveEvictsOtherStreamStraggler(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "straggler", store.HostActive)
+	live := h.seedStream(t, host.ID)
+	other := h.seedStream(t, host.ID)
+	otherRaw, _ := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+
+	// Stream B's guest connects pre-live (no session yet → admitted) and spawns the room.
+	gc := h.dialOK(t, "pass="+otherRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc)
+	if h.hub.RoomIfLive(host.ID) == nil {
+		t.Fatal("pre-live straggler should have spawned the room")
+	}
+
+	// Host goes live for stream A.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/app/streams/"+live.ID+"/session/start", nil)
+	req.AddCookie(cookie)
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		t.Fatalf("go-live POST: %v", err)
+	}
+	_ = resp.Body.Close()
+	if _, err := h.store.ActiveSession(ctx, host.ID); err != nil {
+		t.Fatalf("session should be live for A: %v", err)
+	}
+
+	// The straggler is bumped from the room (transient reconnect; the admission gate then refuses it).
+	if f := readFrameOfType(t, gc, "terminate"); f.Reason != signaling.TerminateReconnect {
+		t.Fatalf("straggler terminate reason = %q, want %q", f.Reason, signaling.TerminateReconnect)
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

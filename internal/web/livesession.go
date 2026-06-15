@@ -37,6 +37,10 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 	// picker bind was DB-only, so bind them now. ResumeBind is non-displacing and no-ops for a peer
 	// that isn't connected.
 	s.replayBindingsLocked(r.Context(), host.ID, st.ID)
+	// Evict any pre-live straggler from a DIFFERENT stream: it was admitted while no session was
+	// live, but now that THIS stream is on-air a non-live-stream guest must not remain in the room
+	// (isolation, codex). The admission gate refuses new such joins; this clears existing ones.
+	s.evictOtherStreamStragglersLocked(r.Context(), host.ID, st.ID)
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)
 }
 
@@ -121,6 +125,28 @@ func teardownDeletedStream(hub *signaling.Hub, hostID string, wasLive bool, peer
 		return
 	}
 	hub.EvictIfLive(hostID, signaling.TerminateRevoked, peers)
+}
+
+// evictOtherStreamStragglersLocked evicts any peer from one of the host's OTHER streams that is
+// connected to the now-live room (isolation, codex). They were admitted pre-live (no session);
+// now that liveStreamID is on-air they must leave. The TRANSIENT reconnect reason bumps them to
+// re-handshake, where the admission gate refuses them with "stream not live" — the proper terminal
+// state — without inventing a new reason. The CALLER holds the per-host binding lock; EvictPeers
+// no-ops ids that aren't actually connected and isn't a host-global slot source (those are pass
+// ids only).
+func (s *appServer) evictOtherStreamStragglersLocked(ctx context.Context, hostID, liveStreamID string) {
+	if s.hub == nil {
+		return
+	}
+	ids, err := s.store.OtherStreamPassIDs(ctx, hostID, liveStreamID)
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	peers := make([]signaling.PeerID, 0, len(ids))
+	for _, id := range ids {
+		peers = append(peers, signaling.PeerID(id))
+	}
+	s.hub.EvictIfLive(hostID, signaling.TerminateReconnect, peers)
 }
 
 // sessionState reports whether streamID is the host's live session, and whether the host is live

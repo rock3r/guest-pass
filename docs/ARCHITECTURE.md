@@ -350,9 +350,18 @@ hashed):
 The host declares **which stream is live** from its detail page (**Go live** / **End
 session**), opening a row in `sessions` (`status = active`, one per host via the partial
 unique index — concurrent shows are v1.1). The active session's `stream_id` is the runtime
-answer to "which of my streams is live" and gates the join-replay above; ending the session
-(or going live for another stream) closes it. The session row is a thin durable audit — live
-roster/lock/epoch state stays in-memory (AD-3).
+answer to "which of my streams is live". It gates the host-scoped room three ways:
+
+- **Admission** — a guest/co-host `/ws` handshake is **refused** (`stream not live`) when the
+  host is live for a *different* stream, so a non-live-stream guest can't enter the room and
+  mesh with the live session's peers. With **no** active session (pre-live) anyone is admitted.
+- **Join-replay** — only a guest of the live stream auto-binds its persisted slot (above).
+- **Go live / End / Delete** — going live **replays** the live stream's persisted bindings and
+  **evicts** any pre-live straggler from another stream; ending the session, or deleting the
+  stream, tears the room down (or evicts the deleted stream's peers) so nothing carries into
+  the next session.
+
+The session row is a thin durable audit — live roster/lock/epoch state stays in-memory (AD-3).
 
 ### Slot-rebind protocol + slot epoch (EN-3)
 

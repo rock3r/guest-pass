@@ -134,6 +134,19 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	if aerr := wr.requireActiveHost(ctx, stream.HostID); aerr != nil {
 		return wsIdentity{}, aerr
 	}
+	// One live session per host (EN-2/D-20): if the host is live for a DIFFERENT stream, this
+	// guest's show isn't the on-air one — REFUSE admission so a non-live-stream guest can't enter
+	// the host-scoped room and see/mesh with the live session's peers (the replay gate alone left
+	// the socket admitted, codex). No active session = pre-live: admit (the host isn't live yet);
+	// Go live evicts any straggler from another stream. Fail-closed on a lookup error.
+	switch sess, serr := wr.store.ActiveSession(ctx, stream.HostID); {
+	case errors.Is(serr, store.ErrNotFound):
+		// no live session yet — pre-live, admit
+	case serr != nil:
+		return wsIdentity{}, &wsAuthError{http.StatusInternalServerError, "session lookup failed"}
+	case sess.StreamID != pass.StreamID:
+		return wsIdentity{}, &wsAuthError{http.StatusForbidden, "stream not live"}
+	}
 	name := ""
 	if pass.Name != nil {
 		name = *pass.Name

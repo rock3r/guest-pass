@@ -197,6 +197,34 @@ func (s *Store) BoundCamPassesForStream(ctx context.Context, streamID string) ([
 	return out, nil
 }
 
+// OtherStreamPassIDs returns the ids of all passes belonging to the host's streams OTHER than
+// exceptStreamID (their room peer ids). On Go live for one stream they are evicted from the
+// host-scoped room, so a guest of a NON-live stream that connected pre-live can't linger in (and
+// mesh with) the now-live session — the admission gate refuses NEW such joins, this clears the
+// pre-live stragglers (codex). EvictPeers no-ops the ids that aren't actually connected.
+func (s *Store) OtherStreamPassIDs(ctx context.Context, hostID, exceptStreamID string) ([]string, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id FROM passes p JOIN streams st ON p.stream_id = st.id
+		 WHERE st.host_id = ? AND p.stream_id != ?`,
+		hostID, exceptStreamID)
+	if err != nil {
+		return nil, fmt.Errorf("listing other-stream passes: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning other-stream pass: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating other-stream passes: %w", err)
+	}
+	return out, nil
+}
+
 // ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a
 // greenroom "unassign" (the live half is Room.Unbind).
 func (s *Store) ClearPassSlot(ctx context.Context, passID string) error {

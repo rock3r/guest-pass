@@ -293,6 +293,42 @@ func TestWS_RejectsRevokedPass(t *testing.T) {
 	}
 }
 
+// A guest of a NON-live stream is refused admission while the host is live for a DIFFERENT stream
+// (codex P1): one live session per host (EN-2/D-20), so a non-live-stream guest must not enter the
+// host-scoped room and mesh with the live session's peers. A guest of the LIVE stream is admitted,
+// and (pre-live) with no active session anyone is admitted.
+func TestWS_RejectsNonLiveStreamGuest(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "host-adm", store.HostActive)
+	live := h.seedStream(t, host.ID)
+	other := h.seedStream(t, host.ID)
+	liveRaw, _ := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, nil)
+	otherRaw, _ := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+
+	// Pre-live (no active session): the other-stream guest is admitted.
+	c0, _, err := h.dial(t, "pass="+otherRaw, nil)
+	if err != nil {
+		t.Fatalf("pre-live guest should be admitted: %v", err)
+	}
+	c0.CloseNow()
+
+	// Host goes live for `live`.
+	if _, err := h.store.StartSession(context.Background(), live.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	// The live stream's guest is admitted; the other-stream guest is refused (403 stream not live).
+	cl := h.dialOK(t, "pass="+liveRaw, nil)
+	cl.CloseNow()
+	_, resp, err := h.dial(t, "pass="+otherRaw, nil)
+	if err == nil {
+		t.Fatal("a non-live-stream guest must be refused while another stream is live")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %v, want 403", resp)
+	}
+}
+
 func TestWS_RejectsExpiredPassByStatus(t *testing.T) {
 	h := newWSHarness(t, wsHarnessOpts{})
 	host, _ := h.seedHost(t, "host1", store.HostActive)
