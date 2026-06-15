@@ -1087,6 +1087,17 @@ Islands are confined to ~4–5 screens, keeping the JS attack-and-maintenance su
 tiny and the frontend off the DB/PII path entirely (server-side authz EN-6/EN-8 is
 the guard).
 
+**Host-app shell routes (M4).** The out-of-room host UI mounts under the `/app`
+prefix, all behind `RequireHost` (EN-6, so pending/suspended hosts are gated). The
+dashboard is `GET /app` (lists the host's streams + the create form); stream
+create/edit/delete are server-rendered forms — `POST /app/streams`,
+`GET /app/streams/{id}/edit`, `POST /app/streams/{id}`, `POST /app/streams/{id}/delete`
+— that mutate then redirect (POST-redirect-GET). The calendar, stream-detail
+(Invites/Sources tabs), and settings surfaces hang off the same prefix as they land.
+No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
+`SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
+separate CSRF token is needed. After Google sign-in the host lands on `/app`.
+
 ### Islands — plain JS + JSDoc (D-32)
 
 Islands are authored in **plain JS with JSDoc type annotations, not TypeScript**:

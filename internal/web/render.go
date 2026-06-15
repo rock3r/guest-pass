@@ -20,9 +20,19 @@ type pageData struct {
 	ScriptIntegrity string // SRI for the JS bundle the page loads (app.js, or obs.js for source pages)
 	DevLogin        bool
 	Nonce           string
-	StreamTitle     string // pass landing page only
-	GuestName       string // pass landing page only
-	Slot            string // OBS source page only — the opaque slot label (EN-15)
+	StreamTitle     string   // pass landing page only
+	GuestName       string   // pass landing page only
+	Slot            string   // OBS source page only — the opaque slot label (EN-15)
+	Host            *navHost // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
+	Nav             string   // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
+	Data            any      // host-app pages only — the page-specific payload, rendered server-side (D-32)
+}
+
+// navHost is the authenticated host's identity surfaced in the host-app shell nav. It
+// carries only the display name the host chose at Google sign-in — never the email or any
+// token (EN-16/D-37).
+type navHost struct {
+	Name string
 }
 
 // renderer holds the parsed page templates and the per-build constants injected into
@@ -36,17 +46,31 @@ type renderer struct {
 	devLogin  bool
 }
 
-// pageFiles are the server-rendered pages composed into base.html (each defines a
-// "content" template). The OBS source page is NOT one of these — it is a standalone,
-// chromeless, font-free page (EN-13) with its own template.
+// pageFiles are the public/guest server-rendered pages composed into base.html (each
+// defines a "content" template). The OBS source page is NOT one of these — it is a
+// standalone, chromeless, font-free page (EN-13) with its own template.
 var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html"}
+
+// appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
+// appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the
+// public pages do not carry. Each also defines a "content" template; parsed in their own
+// template.Template instances so "base" can mean appbase.html here and base.html there
+// with no name clash.
+var appPageFiles = []string{"dashboard.html", "streamedit.html"}
 
 // newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
 // manifest carries the SRI hashes (nil/empty in tests); devLogin toggles dev sign-in.
 func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*renderer, error) {
-	pages := make(map[string]*template.Template, len(pageFiles))
+	pages := make(map[string]*template.Template, len(pageFiles)+len(appPageFiles))
 	for _, p := range pageFiles {
 		t, err := template.New("base").ParseFS(templateFS, "templates/base.html", "templates/"+p)
+		if err != nil {
+			return nil, err
+		}
+		pages[p] = t
+	}
+	for _, p := range appPageFiles {
+		t, err := template.New("base").ParseFS(templateFS, "templates/appbase.html", "templates/"+p)
 		if err != nil {
 			return nil, err
 		}

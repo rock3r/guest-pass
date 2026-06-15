@@ -115,6 +115,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
 		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd}
+		app := &appServer{store: cfg.Store, rd: rd}
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
@@ -124,6 +125,14 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Delete("/api/streams/{id}", api.deleteStream)
 			hr.Get("/api/streams/{id}/passes", api.listPasses)
 			hr.Post("/api/streams/{id}/passes", api.createPass)
+
+			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
+			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).
+			hr.Get("/app", app.dashboard)
+			hr.Post("/app/streams", app.createStream)
+			hr.Get("/app/streams/{id}/edit", app.editStreamForm)
+			hr.Post("/app/streams/{id}", app.updateStream)
+			hr.Post("/app/streams/{id}/delete", app.deleteStream)
 		})
 
 		// Public guest landing + device-check entry. Rate-limited (when configured) to blunt

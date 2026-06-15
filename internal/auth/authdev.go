@@ -52,7 +52,7 @@ func (a *Authenticator) DevLogin(hosts HostUpserter, email, name string) http.Ha
 			http.Error(w, "session failed", http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/app", http.StatusFound) // land on the host-app dashboard (M4)
 	}
 }
 

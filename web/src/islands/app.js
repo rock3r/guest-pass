@@ -1,4 +1,5 @@
 import "../styles/tokens.css";
+import "../styles/app-host.css"; // host-app shell styles (dashboard/CRUD); no JS rides this (D-32)
 import { mountDeviceCheck } from "./devicecheck.js";
 import { mountGreenroom } from "./greenroom.js";
 
