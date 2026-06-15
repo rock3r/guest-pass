@@ -33,6 +33,44 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 	_ = room
 }
 
+// TestHubEndSession_RoomDiscoverableUntilTerminated (codex): EndSession must keep the ending room
+// in the registry until its teardown completes, so a concurrent /ws handshake for the same host
+// resolves to the draining room (refused) rather than spawning a fresh one that survives the
+// teardown. A peer on an unbuffered, unread out stalls Terminate's budgeted send, holding
+// EndSession mid-teardown — during which the room must still be the registry entry, and only gone
+// once teardown finishes.
+func TestHubEndSession_RoomDiscoverableUntilTerminated(t *testing.T) {
+	h := NewHub(nil, nil)
+	room := h.Room("s1")
+	out := make(chan Frame) // unbuffered, no reader → Terminate's budgeted send stalls
+	room.Join(PeerID("p1"), "guest", "", "", out)
+
+	ended := make(chan struct{})
+	go func() { h.EndSession("s1", "session-ended"); close(ended) }()
+
+	// Let EndSession enter Terminate (where it blocks on the stalled peer).
+	select {
+	case <-ended:
+		t.Fatal("EndSession returned before the stalled peer drained")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// Mid-teardown, the room must STILL be discoverable in the registry (so a racing connect can't
+	// spawn a fresh, surviving room).
+	if h.RoomIfLive("s1") != room {
+		t.Fatal("ending room must remain the registry entry until teardown completes")
+	}
+
+	// Drain the peer → Terminate completes → EndSession returns → the room is removed.
+	go func() {
+		for range out { // pull the terminate frame, then the close ends the range
+		}
+	}()
+	<-ended
+	if h.RoomIfLive("s1") != nil {
+		t.Fatal("room must be removed once teardown completes")
+	}
+}
+
 func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	h := NewHub(nil, nil)
 	h.Shutdown("reconnect")

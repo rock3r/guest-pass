@@ -70,19 +70,27 @@ func (h *Hub) TerminateSourceIfLive(session string, source PeerID) {
 // EndSession terminates the host's live room (if any) with reason and removes it from the
 // registry, so guests and OBS sources get the terminal teardown and NO connection carries into
 // the next session — rooms are keyed by host id, so without this an "end session" would leave the
-// old peers live in the room the next stream reuses (D-40). The room is removed under the lock,
-// then terminated/closed outside it (like Shutdown) so a wedged socket can't hold the registry
-// lock. A no-op when no room is live (the host went live but nobody connected). The NEXT
-// connection for this host spawns a fresh room.
+// old peers live in the room the next stream reuses (D-40). The room is terminated/closed WHILE it
+// is still the registry entry, THEN removed: during teardown a concurrent /ws handshake for this
+// host resolves (via Hub.Room) to the draining room — whose Join refuses (terminating) or whose
+// closed r.done rejects it — instead of spawning a fresh room that would survive the teardown and
+// carry into the next session (codex). hub.mu is not held across the blocking Terminate, so other
+// hub ops aren't stalled. A no-op when no room is live. The NEXT connection (after removal) spawns
+// a fresh room.
 func (h *Hub) EndSession(session, reason string) {
 	h.mu.Lock()
 	r := h.rooms[session]
-	delete(h.rooms, session)
 	h.mu.Unlock()
-	if r != nil {
-		r.Terminate(reason)
-		r.Close()
+	if r == nil {
+		return
 	}
+	r.Terminate(reason) // marks the room draining (Join refuses) + evicts peers, still discoverable
+	r.Close()
+	h.mu.Lock()
+	if h.rooms[session] == r { // don't drop a room a racing start already replaced
+		delete(h.rooms, session)
+	}
+	h.mu.Unlock()
 }
 
 // EvictIfLive evicts the named peers from the host's live room (if any) with a terminal reason —
