@@ -29,10 +29,12 @@ import (
 // TestSmokeDrive_MultiGuest is a HEADFUL, screenshot-capturing driver for the multi-guest behavioral
 // smoke — so the owner never hand-juggles guests/OBS. It reuses the fake-media chromedp harness to
 // spin up N guest publishers + the host greenroom + an OBS source page (all browser tabs, fake cam/
-// mic, peers over loopback), binds a cam slot, and walks the RF-8 / grid / on-air flow on screen:
-// renders the grid, force-no-cams a guest from the host tile (the host tile AND the OBS source go
-// black — receiver-side enforcement, RF-8), then releases. It saves a screenshot at each step and,
-// when headful, holds the windows open so you can watch.
+// mic, peers over loopback), binds a cam slot, and walks the multi-guest grid + RF-8 flow on screen:
+// renders the grid, then force-no-cams a NON-cooperating guest from the host tile (the host tile AND
+// the OBS source go black — receiver-side enforcement, RF-8), then releases. It saves a screenshot at
+// each step and, when headful, holds the windows open so you can watch. It does NOT exercise the
+// on-air pill (it never fires obsSourceActiveChanged) or degradation — the onair/degradation
+// browser tests cover those headless in CI.
 //
 // It is NOT a CI test: it is SKIPPED unless SMOKE_DRIVE=1, runs HEADFUL by default (set
 // SMOKE_HEADLESS=1 to capture the same screenshots without popping windows), and is normally driven

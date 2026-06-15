@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # smoke-drive.sh — headful, browser-driven multi-guest smoke (dev-only). Spins up N fake-media guest
-# tabs + the host greenroom + an OBS source tab, binds a cam slot, and walks the grid / RF-8 / on-air
-# flow ON SCREEN (a guest is forced off camera → the host tile AND the OBS source go black, then
-# release restores them), saving a screenshot at each step. No guest juggling; needs a local Chrome.
+# tabs + the host greenroom + an OBS source tab, binds a cam slot, and walks the multi-guest grid +
+# RF-8 flow ON SCREEN (a NON-cooperating guest is forced off camera → the host tile AND the OBS
+# source go black, then release restores them), saving a screenshot at each step. No guest juggling;
+# needs a local Chrome. (On-air + degradation are covered by the chromedp suite, not this driver.)
 #
 # Usage: scripts/smoke-drive.sh [--guests N] [--watch SECONDS] [--headless]
 #   --headless   capture the screenshots without popping browser windows
@@ -32,7 +33,7 @@ export SMOKE_DRIVE=1 SMOKE_GUESTS="$GUESTS" SMOKE_WATCH_SEC="$WATCH" SMOKE_SHOTS
 # Set/clear explicitly so an inherited SMOKE_HEADLESS can't force headless on a headful run.
 if [[ "$HEADLESS" == 1 ]]; then export SMOKE_HEADLESS=1; else unset SMOKE_HEADLESS; fi
 
-echo "headful smoke driver: $GUESTS guests → grid / RF-8 / on-air, screenshots in $SHOTS"
+echo "headful smoke driver: $GUESTS guests → multi-guest grid + RF-8, screenshots in $SHOTS"
 echo "(builds the frontend, launches the browsers, drives the flow, then holds the windows ${WATCH}s)"
 go test -tags browser -run TestSmokeDrive_MultiGuest ./internal/browsertest/ -v -count=1 -timeout 20m
 
