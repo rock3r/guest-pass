@@ -165,11 +165,16 @@ export class MeshManager {
    * @param {() => MediaStream|null} getLocalStream the guest's camera/mic (read lazily so a late
    *   capture is still picked up)
    * @param {() => void} onUpdate called when the rendered thumbnail set changes
+   * @param {(pc: RTCPeerConnection, id: string) => void} [onPc] notified when a mesh peer connection
+   *   is created, so the guest can watch it for connectivity (D-38 network-blocked detection).
+   * @param {(id: string) => void} [onUntrack] notified when a mesh peer connection is dropped.
    */
-  constructor(room, getLocalStream, onUpdate) {
+  constructor(room, getLocalStream, onUpdate, onPc, onUntrack) {
     this.room = room;
     this.getLocalStream = getLocalStream;
     this.onUpdate = onUpdate || (() => {});
+    this.onPc = onPc || (() => {});
+    this.onUntrack = onUntrack || (() => {});
     /** @type {Map<string, MeshPeer>} */
     this.peers = new Map();
     /** @type {Map<string, MediaStream>} */
@@ -218,6 +223,7 @@ export class MeshManager {
       this.onUpdate();
     };
     this.peers.set(remoteId, mp);
+    this.onPc(mp.pc, remoteId); // watch this mesh connection for D-38 network-blocked detection
     mp.start(); // offerer offers immediately; answerer waits for the offer
   }
 
@@ -227,6 +233,7 @@ export class MeshManager {
     this.peers.delete(id);
     this._streams.delete(id);
     this._locked.delete(id);
+    this.onUntrack(id); // this peer's connection no longer counts toward connectivity (D-38)
     this.onUpdate();
   }
 
@@ -298,7 +305,10 @@ export class MeshManager {
 
   /** close tears down every mesh connection. */
   close() {
-    for (const mp of this.peers.values()) mp.close();
+    for (const [id, mp] of this.peers) {
+      mp.close();
+      this.onUntrack(id); // each connection stops counting toward connectivity (D-38), order-independent
+    }
     this.peers.clear();
     this._streams.clear();
   }

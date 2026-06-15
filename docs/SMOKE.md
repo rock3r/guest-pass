@@ -157,9 +157,14 @@ The driver already proves this headless; this confirms it on the **real OBS-CEF 
       reflexive candidates for a direct P2P path through the common cone-NAT types (the v1 gate).
 - [ ] A pair behind **symmetric NAT / a UDP-blocking firewall won't connect** with this STUN-only
       smoke: a **TURN relay is OFF by default** (D-38) and not run here (it's an optional / BYO
-      self-host config, `DEPLOYMENT.md` §2). Per D-38 the guest should show a clear "network blocks
-      peer-to-peer" message rather than hang — **confirm that** (a silent hang is a finding to file).
-      Test mainly from ordinary networks (not both symmetric).
+      self-host config, `DEPLOYMENT.md` §2). The guest client now **detects** this (the
+      `ConnectivityWatch` watchdog, D-38): within ~20 s of no P2P connection ever forming, it replaces
+      the false "you're live" with the **"Your network blocks peer-to-peer video"** screen — different
+      network / phone-hotspot guidance + a **Retry** — instead of a silent hang. **Confirm that screen
+      appears** (a silent hang, or a stuck "you're live" with no media reaching OBS/peers, is a finding
+      to file). Test mainly from ordinary networks (not both symmetric); the automated
+      `netblocked_browser_test.go` already forces the relay-only path headless, so this manual pass
+      just confirms it on a real blocked network.
 
 ---
 
