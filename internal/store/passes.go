@@ -225,6 +225,36 @@ func (s *Store) OtherStreamPassIDs(ctx context.Context, hostID, exceptStreamID s
 	return out, nil
 }
 
+// RetiredPassIDsForStream returns the stream's NON-joinable pass ids — split into revoked and
+// expired (by status OR past the expires_at deadline) — so a guest that connected pre-live but
+// whose invite lapsed before Go live can be evicted with the right terminal reason (codex). Mirrors
+// passJoinable's notion of "retired".
+func (s *Store) RetiredPassIDsForStream(ctx context.Context, streamID string, now int64) (revoked, expired []string, err error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT id, status, expires_at FROM passes WHERE stream_id = ?`, streamID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing retired passes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		var exp *int64
+		if err := rows.Scan(&id, &status, &exp); err != nil {
+			return nil, nil, fmt.Errorf("scanning retired pass: %w", err)
+		}
+		switch {
+		case status == PassRevoked:
+			revoked = append(revoked, id)
+		case status == PassExpired || (exp != nil && *exp <= now):
+			expired = append(expired, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterating retired passes: %w", err)
+	}
+	return revoked, expired, nil
+}
+
 // ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a
 // greenroom "unassign" (the live half is Room.Unbind).
 func (s *Store) ClearPassSlot(ctx context.Context, passID string) error {

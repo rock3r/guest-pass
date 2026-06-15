@@ -202,6 +202,32 @@ func TestBinding_PersistedBindingReplaysOnJoin(t *testing.T) {
 	}
 }
 
+// Binding a RETIRED (revoked/expired) pass is rejected before AssignPassSlot (codex): it would
+// otherwise displace the slot's live occupant and route OBS to a guest who can't connect.
+func TestBinding_RejectsRetiredPass(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "retired-bind", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	_, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassRevoked, nil)
+	_, _ = h.seedCamSlot(t, host.ID, 1)
+
+	req, _ := http.NewRequest(http.MethodPut, h.srv.URL+"/api/passes/"+pass.ID+"/slot", strings.NewReader(`{"slot":"cam-1"}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("binding a revoked pass = %d, want 409", resp.StatusCode)
+	}
+	// The slot must NOT have been assigned to the retired pass.
+	if got, _ := h.store.GetPass(context.Background(), pass.ID); got.SlotID != nil {
+		t.Fatalf("revoked pass was bound to %v despite rejection", got.SlotID)
+	}
+}
+
 // The join-replay is gated on the active session's stream (codex P1): guestBoundSlot — the
 // resolver the /ws join calls to decide what to replay — returns a label ONLY when the binding's
 // stream is the host's LIVE one. A guest of an upcoming (non-live) stream whose pass carries a

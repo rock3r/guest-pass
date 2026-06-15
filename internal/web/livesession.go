@@ -48,6 +48,9 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 	// live, but now that THIS stream is on-air a non-live-stream guest must not remain in the room
 	// (isolation, codex). The admission gate refuses new such joins; this clears existing ones.
 	s.evictOtherStreamStragglersLocked(ctx, host.ID, st.ID)
+	// Evict same-stream guests whose invite lapsed (revoked/expired) while connected pre-live — the
+	// replay skips their retired bindings, but the peer would otherwise stay in the live session.
+	s.evictRetiredSameStreamLocked(ctx, host.ID, st.ID)
 	// Tell a greenroom that was open BEFORE Go live to drop its optimistic pre-live slot overrides
 	// and reconcile to the now-authoritative roster (codex) — sent AFTER the replay so the live
 	// bindings land first.
@@ -157,11 +160,33 @@ func (s *appServer) evictOtherStreamStragglersLocked(ctx context.Context, hostID
 	if err != nil || len(ids) == 0 {
 		return
 	}
-	peers := make([]signaling.PeerID, 0, len(ids))
-	for _, id := range ids {
-		peers = append(peers, signaling.PeerID(id))
+	s.hub.EvictIfLive(hostID, signaling.TerminateReconnect, peerIDs(ids))
+}
+
+// evictRetiredSameStreamLocked evicts guests of the LIVE stream whose invite lapsed (revoked or
+// expired) while they were connected pre-live (codex): the replay skips their now-retired bindings,
+// but the peer itself would otherwise linger in the now-on-air session. Revoked → revoked screen,
+// expired/past-deadline → expired screen. Caller holds the per-host binding lock; EvictPeers no-ops
+// ids that aren't connected.
+func (s *appServer) evictRetiredSameStreamLocked(ctx context.Context, hostID, streamID string) {
+	if s.hub == nil {
+		return
 	}
-	s.hub.EvictIfLive(hostID, signaling.TerminateReconnect, peers)
+	revoked, expired, err := s.store.RetiredPassIDsForStream(ctx, streamID, time.Now().Unix())
+	if err != nil {
+		return
+	}
+	s.hub.EvictIfLive(hostID, signaling.TerminateRevoked, peerIDs(revoked))
+	s.hub.EvictIfLive(hostID, signaling.TerminateExpired, peerIDs(expired))
+}
+
+// peerIDs converts pass ids (which are room peer ids) to PeerIDs.
+func peerIDs(ids []string) []signaling.PeerID {
+	out := make([]signaling.PeerID, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, signaling.PeerID(id))
+	}
+	return out
 }
 
 // sessionState reports whether streamID is the host's live session, and whether the host is live

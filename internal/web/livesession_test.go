@@ -336,6 +336,45 @@ func TestSession_GoLiveEvictsOtherStreamStraggler(t *testing.T) {
 	}
 }
 
+// Going live evicts a SAME-stream guest whose invite lapsed while connected pre-live (codex): the
+// replay skips its retired binding, but the peer would otherwise stay in the now-on-air session. It
+// is removed with the matching terminal reason (revoked here).
+func TestSession_GoLiveEvictsRetiredSameStreamGuest(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "retired-golive", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+
+	// The guest connects pre-live (admitted: no active session), spawning the room.
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc)
+	if h.hub.RoomIfLive(host.ID) == nil {
+		t.Fatal("pre-live guest should have spawned the room")
+	}
+
+	// The invite is revoked while the guest is still connected.
+	if err := h.store.SetPassStatus(ctx, pass.ID, store.PassRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	// Host goes live for the stream.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/app/streams/"+stream.ID+"/session/start", nil)
+	req.AddCookie(cookie)
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		t.Fatalf("go-live: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	// The now-revoked same-stream guest is evicted with the revoked terminal reason.
+	if f := readFrameOfType(t, gc, "terminate"); f.Reason != signaling.TerminateRevoked {
+		t.Fatalf("retired guest terminate reason = %q, want %q", f.Reason, signaling.TerminateRevoked)
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

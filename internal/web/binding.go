@@ -72,6 +72,15 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A retired (revoked/expired or past-deadline) pass can't go on air: binding it would displace
+	// the slot's current occupant and route the OBS source to a guest who can't connect (codex).
+	// Reject before AssignPassSlot. (The unassign path above is left open so the host can still
+	// clear a retired guest's stale binding.)
+	if !passJoinable(pass) {
+		writeError(w, http.StatusConflict, "this guest's invite is no longer active")
+		return
+	}
+
 	// Bind: resolve the cam slot by label.
 	idx, ok := parseCamLabel(req.Slot)
 	if !ok {
