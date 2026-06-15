@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
@@ -42,6 +43,12 @@ func (s *appServer) endSession(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.EndActiveSession(r.Context(), host.ID); err != nil {
 			http.Error(w, "could not end session", http.StatusInternalServerError)
 			return
+		}
+		// Tear down the live room so connected guests/OBS sources get the terminal session-ended
+		// teardown and no connection carries into the next stream — rooms are keyed by host id
+		// (D-40). No-op when nothing is connected.
+		if s.hub != nil {
+			s.hub.EndSession(host.ID, signaling.TerminateSessionEnded)
 		}
 	}
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)

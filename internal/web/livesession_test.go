@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
@@ -55,6 +56,50 @@ func TestSession_GoLiveAndEnd(t *testing.T) {
 	}
 	if _, err := a.store.ActiveSession(ctx, host.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("after end: ActiveSession err = %v, want ErrNotFound", err)
+	}
+}
+
+// Ending the session tears down the live room (codex P1/D-40): connected guests/OBS receive the
+// terminal session-ended teardown and the room is removed, so no connection carries into the next
+// stream (rooms are keyed by host id).
+func TestSession_EndTerminatesRoom(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "ender", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, _ := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	if _, err := h.store.StartSession(ctx, stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	// A guest connects → the room spawns.
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc) // initial roster: the join completed, the room is live
+	if h.hub.RoomIfLive(host.ID) == nil {
+		t.Fatal("room should be live after the guest joined")
+	}
+
+	// Host ends the session (POST-redirect-GET; don't chase the redirect).
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/app/streams/"+stream.ID+"/session/end", nil)
+	req.AddCookie(cookie)
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		t.Fatalf("end POST: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	// The guest receives the terminal session-ended teardown...
+	if f := readFrameOfType(t, gc, "terminate"); f.Reason != signaling.TerminateSessionEnded {
+		t.Fatalf("terminate reason = %q, want %q", f.Reason, signaling.TerminateSessionEnded)
+	}
+	// ...the DB session is ended, and the room is gone (a fresh one would spawn for the next stream).
+	if _, err := h.store.ActiveSession(ctx, host.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("session not ended in DB: %v", err)
+	}
+	if h.hub.RoomIfLive(host.ID) != nil {
+		t.Fatal("room must be removed on end-session, else connections carry into the next stream")
 	}
 }
 

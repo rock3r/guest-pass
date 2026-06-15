@@ -67,6 +67,24 @@ func (h *Hub) TerminateSourceIfLive(session string, source PeerID) {
 	}
 }
 
+// EndSession terminates the host's live room (if any) with reason and removes it from the
+// registry, so guests and OBS sources get the terminal teardown and NO connection carries into
+// the next session — rooms are keyed by host id, so without this an "end session" would leave the
+// old peers live in the room the next stream reuses (D-40). The room is removed under the lock,
+// then terminated/closed outside it (like Shutdown) so a wedged socket can't hold the registry
+// lock. A no-op when no room is live (the host went live but nobody connected). The NEXT
+// connection for this host spawns a fresh room.
+func (h *Hub) EndSession(session, reason string) {
+	h.mu.Lock()
+	r := h.rooms[session]
+	delete(h.rooms, session)
+	h.mu.Unlock()
+	if r != nil {
+		r.Terminate(reason)
+		r.Close()
+	}
+}
+
 // Shutdown gracefully terminates every live room for a server drain (RF-21): each room
 // broadcasts a terminate frame with reason to its peers, then is stopped. The registry
 // is cleared so no new work is routed to a stopping room.
