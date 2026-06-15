@@ -454,11 +454,13 @@ func TestPassRepo_SetRoleAndReissue(t *testing.T) {
 	}
 }
 
-// Re-issue clears slot_id so a previously-bound-then-retired pass can't resurrect a stale slot
-// binding and collide with whoever now holds that slot (codex, M4 PR-6): the partial unique
-// index excludes retired rows, so without the clear, re-issuing would re-enter the index and
-// conflict with the active occupant.
-func TestPassRepo_ReissueClearsStaleSlotBinding(t *testing.T) {
+// Re-assigning a slot clears it from EVERY other row on that (stream, slot) — including a
+// retired row that kept a stale slot_id when it was revoked/expired (codex, M4 PR-6). Without
+// that cleanup the stale binding survives, and a later Re-issue re-activates the row back into
+// the partial unique index, colliding with the slot's current active occupant. Re-issue itself
+// deliberately leaves slot_id alone (so it can't silently unbind a connected guest from the
+// live room), which is exactly why the displacement, not re-issue, must do the cleanup.
+func TestPassRepo_RebindClearsRetiredSlotBinding(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
 	h := seedHost(t, st, "host-reissue-slot")
@@ -469,7 +471,8 @@ func TestPassRepo_ReissueClearsStaleSlotBinding(t *testing.T) {
 	b, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "b-tok"})
 
 	// Bind A to cam-1, revoke A (slot_id retained but A excluded from the active index), then
-	// bind B to cam-1 — B is now the active occupant; A keeps a STALE slot_id.
+	// bind B to cam-1 — B becomes the active occupant and the displacement must scrub A's stale
+	// slot_id even though A is retired.
 	if err := st.AssignPassSlot(ctx, a.ID, slot.ID); err != nil {
 		t.Fatalf("assign a: %v", err)
 	}
@@ -479,13 +482,13 @@ func TestPassRepo_ReissueClearsStaleSlotBinding(t *testing.T) {
 	if err := st.AssignPassSlot(ctx, b.ID, slot.ID); err != nil {
 		t.Fatalf("assign b: %v", err)
 	}
+	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
+		t.Fatalf("re-binding the slot must scrub the retired row's stale slot_id, got %v", got.SlotID)
+	}
 
-	// Re-issuing A must SUCCEED (not collide with B) and leave A unbound.
+	// Re-issuing A must therefore SUCCEED (no index collision with B) and leave B untouched.
 	if err := st.ReissuePass(ctx, a.ID, "a-tok-2"); err != nil {
 		t.Fatalf("re-issuing a previously-bound-then-revoked pass should not conflict: %v", err)
-	}
-	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
-		t.Fatalf("re-issue must clear the stale slot binding, got %v", got.SlotID)
 	}
 	if got, _ := st.GetPass(ctx, b.ID); got.SlotID == nil || *got.SlotID != slot.ID {
 		t.Fatalf("B's binding must be untouched, got %v", got.SlotID)

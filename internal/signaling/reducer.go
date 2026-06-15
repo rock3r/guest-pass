@@ -443,10 +443,14 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 	var out []outbound
 	// One cam slot per occupant (D-20): vacate any OTHER cam slot this occupant already holds
 	// before binding, so a move / re-bind / concurrent double-bind can never leave the guest
-	// live in two OBS sources while the DB stores only the last slot.
-	for other, st := range s.slots {
-		if other != sid && st.occupant == occupant && isCamSlot(other) {
-			out = append(out, s.vacateSlot(other)...)
+	// live in two OBS sources while the DB stores only the last slot. Gate this on the NEW slot
+	// being a cam slot: the screenshare slot is independent of the camera pool, so binding it
+	// must not evict the guest's camera (a guest can be both on-cam and screensharing).
+	if isCamSlot(sid) {
+		for other, st := range s.slots {
+			if other != sid && st.occupant == occupant && isCamSlot(other) {
+				out = append(out, s.vacateSlot(other)...)
+			}
 		}
 	}
 	out = append(out, s.bindSlot(sid, occupant)...)

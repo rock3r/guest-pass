@@ -116,3 +116,25 @@ func TestRebindEnforcesOneCamSlotPerOccupant(t *testing.T) {
 		t.Fatalf("g still in cam-1 after moving to cam-2 (occupant %q) — two slots at once", occ)
 	}
 }
+
+// Binding the shared screenshare slot must NOT evict the occupant's camera (codex): the
+// one-cam-slot-per-occupant rule is scoped to cam slots, and the screen slot is independent —
+// a guest can be on-cam AND screensharing at once.
+func TestRebindScreenSlotKeepsCamSlot(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g", "guest", "")
+
+	s.rebindSlot("cam-1", "g")
+	if s.slot("cam-1").occupant != "g" {
+		t.Fatalf("cam-1 occupant = %q, want g", s.slot("cam-1").occupant)
+	}
+	// Bind g to the screenshare slot; the cam slot must stay bound.
+	s.rebindSlot("screen", "g")
+	if s.slot("screen").occupant != "g" {
+		t.Fatalf("screen occupant = %q, want g", s.slot("screen").occupant)
+	}
+	if occ := s.slot("cam-1").occupant; occ != "g" {
+		t.Fatalf("binding the screen slot evicted g from cam-1 (occupant %q) — cam cleanup must be cam-only", occ)
+	}
+}
