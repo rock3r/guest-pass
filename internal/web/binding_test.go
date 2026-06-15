@@ -126,6 +126,11 @@ func TestBinding_LiveRebindReachesSource(t *testing.T) {
 	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
 	srcRaw, slot := h.seedCamSlot(t, host.ID, 1)
 
+	// The host is live for this stream, so the picker's live reroute is in-scope (EN-2/D-20).
+	if _, err := h.store.StartSession(context.Background(), stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
 	// The guest joins (so the rebind has an in-room occupant) and the OBS source joins cam-1.
 	gc := h.dialOK(t, "pass="+passRaw, nil)
 	defer gc.CloseNow()
@@ -239,6 +244,32 @@ func TestBinding_ReplayGatedByActiveSession(t *testing.T) {
 	}
 }
 
+// The greenroom picker's LIVE reroute is gated the same way as the replay (codex P1): streamIsLive
+// — the predicate putPassSlot consults before touching the host-global room — is true only for the
+// host's active session's stream. Binding an upcoming (non-live) stream's guest persists the DB
+// binding but must be DB-only, so it can't vacate/hijack the on-air slot pool.
+func TestBinding_PickerRerouteGatedByActiveSession(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "live-gate", store.HostActive)
+	a := h.seedStream(t, host.ID)
+	b := h.seedStream(t, host.ID)
+	api := &apiServer{store: h.store}
+
+	if api.streamIsLive(ctx, host.ID, a.ID) {
+		t.Fatal("no active session: streamIsLive must be false (no live reroute)")
+	}
+	if _, err := h.store.StartSession(ctx, a.ID, host.ID); err != nil {
+		t.Fatalf("StartSession(a): %v", err)
+	}
+	if !api.streamIsLive(ctx, host.ID, a.ID) {
+		t.Fatal("stream A is live: streamIsLive must be true")
+	}
+	if api.streamIsLive(ctx, host.ID, b.ID) {
+		t.Fatal("stream B is not live: a bind for B must be DB-only, not reroute the live room")
+	}
+}
+
 // cursor (HIGH): binding an OFFLINE guest onto an OCCUPIED slot must DISPLACE the live
 // occupant — the slot falls to placeholder (slot-unbound), it does NOT keep routing OBS to
 // the displaced guest while the DB names the offline one.
@@ -249,6 +280,11 @@ func TestBinding_OfflineSwapVacatesSlot(t *testing.T) {
 	aRaw, aPass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
 	_, bPass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil) // B never connects
 	srcRaw, slot := h.seedCamSlot(t, host.ID, 1)
+
+	// Host live for this stream so the picker's live reroute fires (EN-2/D-20).
+	if _, err := h.store.StartSession(context.Background(), stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
 
 	put := func(passID, slotLabel string) {
 		t.Helper()

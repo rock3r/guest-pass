@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -42,6 +43,12 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A live reroute of the host-global room is in-scope ONLY when this pass's stream is the
+	// host's active session (EN-2/D-20). The DB binding is always persisted (it's the pass's own
+	// stream), but touching the LIVE room for an upcoming/non-live stream's guest would disturb
+	// the on-air slot pool — symmetric with the join-replay gate (codex).
+	live := a.streamIsLive(r.Context(), host.ID, pass.StreamID)
+
 	// Unassign: clear the persistent binding + vacate whatever cam slot the guest holds LIVE
 	// (keyed on live occupancy, so a concurrent move can't leave a stale slot bound).
 	if strings.TrimSpace(req.Slot) == "" {
@@ -49,7 +56,9 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not unassign slot")
 			return
 		}
-		a.liveUnbind(host.ID, pass.ID)
+		if live {
+			a.liveUnbind(host.ID, pass.ID)
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"boundSlot": ""})
 		return
 	}
@@ -84,8 +93,20 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newLabel := slotLabel(slot)
-	a.liveRebind(host.ID, newLabel, pass.ID)
+	if live {
+		a.liveRebind(host.ID, newLabel, pass.ID)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"boundSlot": newLabel})
+}
+
+// streamIsLive reports whether streamID is the host's currently-live session (EN-2/D-20). The
+// greenroom picker persists a binding for any of the host's streams, but a LIVE reroute of the
+// host-global room must only fire for the live stream — otherwise (re)binding an upcoming
+// stream's guest would disturb the on-air slot pool. Fail-closed: no active session, a stream
+// mismatch, or a read error all answer false (DB-only), matching the join-replay gate.
+func (a *apiServer) streamIsLive(ctx context.Context, hostID, streamID string) bool {
+	sess, err := a.store.ActiveSession(ctx, hostID)
+	return err == nil && sess.StreamID == streamID
 }
 
 // liveRebind re-routes the live room (if any) to put occupant in newLabel. It uses

@@ -22,6 +22,11 @@ import (
 // EN-3). The reducer-level boundSlot projection + epoch invariants are in the Go tests.
 func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 	s := seedDeviceCheck(t)
+	// The host is live for this stream so the picker's live reroute is in-scope (EN-2/D-20);
+	// without an active session the (re)bind would persist DB-only and never reach the source.
+	if _, err := s.store.StartSession(context.Background(), s.streamID, s.hostID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
 	defer cancelAlloc()
