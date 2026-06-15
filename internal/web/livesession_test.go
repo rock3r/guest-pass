@@ -375,6 +375,22 @@ func TestSession_GoLiveEvictsRetiredSameStreamGuest(t *testing.T) {
 	}
 }
 
+// The go-live room reconciliation fails CLOSED (codex): if the to-evict pass lists can't be
+// loaded, evictNonSessionPeersLocked must return the error so goLive rolls the session back rather
+// than going live with un-evicted stragglers. A canceled context forces the load to fail.
+func TestSession_EvictNonSessionPeersFailsClosedOnLoadError(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "failclosed", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	api := &appServer{store: h.store, hub: h.hub}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the pass-list reads will fail with context.Canceled
+	if err := api.evictNonSessionPeersLocked(ctx, host.ID, stream.ID); err == nil {
+		t.Fatal("evictNonSessionPeersLocked must propagate a load error (so goLive fails closed), got nil")
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

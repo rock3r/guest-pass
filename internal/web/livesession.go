@@ -35,22 +35,24 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 	}
 	// The session row is committed; the room reconciliation below MUST NOT be abandoned if the
 	// host's POST is canceled/disconnects — otherwise a straggler from another stream would linger
-	// in the now-live room and pre-live bindings wouldn't replay. Detach from the request's
-	// cancellation (keeping its values) with a short timeout (codex).
+	// in the now-live room. Detach from the request's cancellation (keeping its values) with a short
+	// timeout (codex).
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	// Reconcile an already-spawned room with the persisted bindings now that the session is live
-	// (D-40): a guest that connected BEFORE Go live had its join-replay gated off and any pre-live
-	// picker bind was DB-only, so bind them now. ResumeBind is non-displacing and no-ops for a peer
-	// that isn't connected.
+	// ISOLATION-CRITICAL, fail closed (codex): evict guests that must not be in the now-on-air room
+	// — other-stream stragglers admitted pre-live, and same-stream guests whose invite lapsed. If
+	// their pass lists can't even be loaded (DB error / timeout), we cannot guarantee the room is
+	// clean, so roll the session back and fail rather than go live with peers that can mesh with the
+	// show. (The handshake gate only blocks FUTURE joins.)
+	if err := s.evictNonSessionPeersLocked(ctx, host.ID, st.ID); err != nil {
+		_ = s.store.EndActiveSession(ctx, host.ID) // best-effort rollback to pre-live
+		http.Error(w, "could not go live — please try again", http.StatusInternalServerError)
+		return
+	}
+	// Best-effort: replay an already-spawned room's persisted bindings now that the session is live
+	// (D-40) — a guest that connected BEFORE Go live had its join-replay gated off and any pre-live
+	// picker bind was DB-only. A load failure here is non-isolation (the host just re-picks).
 	s.replayBindingsLocked(ctx, host.ID, st.ID)
-	// Evict any pre-live straggler from a DIFFERENT stream: it was admitted while no session was
-	// live, but now that THIS stream is on-air a non-live-stream guest must not remain in the room
-	// (isolation, codex). The admission gate refuses new such joins; this clears existing ones.
-	s.evictOtherStreamStragglersLocked(ctx, host.ID, st.ID)
-	// Evict same-stream guests whose invite lapsed (revoked/expired) while connected pre-live — the
-	// replay skips their retired bindings, but the peer would otherwise stay in the live session.
-	s.evictRetiredSameStreamLocked(ctx, host.ID, st.ID)
 	// Tell a greenroom that was open BEFORE Go live to drop its optimistic pre-live slot overrides
 	// and reconcile to the now-authoritative roster (codex) — sent AFTER the replay so the live
 	// bindings land first.
@@ -145,39 +147,30 @@ func teardownDeletedStream(hub *signaling.Hub, hostID string, wasLive bool, peer
 	hub.EvictIfLive(hostID, signaling.TerminateRevoked, peers)
 }
 
-// evictOtherStreamStragglersLocked evicts any peer from one of the host's OTHER streams that is
-// connected to the now-live room (isolation, codex). They were admitted pre-live (no session);
-// now that liveStreamID is on-air they must leave. The TRANSIENT reconnect reason bumps them to
-// re-handshake, where the admission gate refuses them with "stream not live" — the proper terminal
-// state — without inventing a new reason. The CALLER holds the per-host binding lock; EvictPeers
-// no-ops ids that aren't actually connected and isn't a host-global slot source (those are pass
-// ids only).
-func (s *appServer) evictOtherStreamStragglersLocked(ctx context.Context, hostID, liveStreamID string) {
+// evictNonSessionPeersLocked clears the now-on-air room of guests that must not be in it
+// (isolation, codex): (1) stragglers from one of the host's OTHER streams, admitted pre-live, get a
+// TRANSIENT reconnect — re-handshake then refused by the admission gate ("stream not live"); and
+// (2) same-stream guests whose invite lapsed (revoked/expired) while connected pre-live get the
+// matching terminal reason (revoked/expired screen). It loads BOTH pass lists FIRST and returns any
+// load error so the caller fails closed — it must not evict a partial set and report success. The
+// caller holds the per-host binding lock; EvictPeers no-ops ids that aren't connected (and slot
+// sources aren't pass ids, so they're never caught).
+func (s *appServer) evictNonSessionPeersLocked(ctx context.Context, hostID, liveStreamID string) error {
 	if s.hub == nil {
-		return
+		return nil
 	}
-	ids, err := s.store.OtherStreamPassIDs(ctx, hostID, liveStreamID)
-	if err != nil || len(ids) == 0 {
-		return
-	}
-	s.hub.EvictIfLive(hostID, signaling.TerminateReconnect, peerIDs(ids))
-}
-
-// evictRetiredSameStreamLocked evicts guests of the LIVE stream whose invite lapsed (revoked or
-// expired) while they were connected pre-live (codex): the replay skips their now-retired bindings,
-// but the peer itself would otherwise linger in the now-on-air session. Revoked → revoked screen,
-// expired/past-deadline → expired screen. Caller holds the per-host binding lock; EvictPeers no-ops
-// ids that aren't connected.
-func (s *appServer) evictRetiredSameStreamLocked(ctx context.Context, hostID, streamID string) {
-	if s.hub == nil {
-		return
-	}
-	revoked, expired, err := s.store.RetiredPassIDsForStream(ctx, streamID, time.Now().Unix())
+	stragglers, err := s.store.OtherStreamPassIDs(ctx, hostID, liveStreamID)
 	if err != nil {
-		return
+		return err
 	}
+	revoked, expired, err := s.store.RetiredPassIDsForStream(ctx, liveStreamID, time.Now().Unix())
+	if err != nil {
+		return err
+	}
+	s.hub.EvictIfLive(hostID, signaling.TerminateReconnect, peerIDs(stragglers))
 	s.hub.EvictIfLive(hostID, signaling.TerminateRevoked, peerIDs(revoked))
 	s.hub.EvictIfLive(hostID, signaling.TerminateExpired, peerIDs(expired))
+	return nil
 }
 
 // peerIDs converts pass ids (which are room peer ids) to PeerIDs.

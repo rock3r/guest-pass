@@ -49,6 +49,11 @@ function Greenroom() {
   const streamsRef = useRef(new Map());
   /** @type {{current: Map<string, any>}} */
   const entriesRef = useRef(new Map());
+  // Per-pass bind sequence: the host can change a picker twice quickly, so multiple PUTs are in
+  // flight. Pre-live there's no roster to reconcile, so an OLDER response landing last would
+  // overwrite the newer selection — track the latest request per pass and ignore stale responses.
+  /** @type {{current: Object<string, number>}} */
+  const bindSeqRef = useRef({});
 
   useEffect(() => {
     const room = new Room(""); // host: the session cookie authenticates the WS
@@ -202,6 +207,9 @@ function Greenroom() {
   // picker) reflect the new assignment. Same-origin fetch carries the host cookie; CSRF is the
   // SameSite=Lax cookie (a cross-site request can't send it) + connect-src 'self'.
   function bindSlot(passId, slot) {
+    const seq = (bindSeqRef.current[passId] || 0) + 1;
+    bindSeqRef.current[passId] = seq;
+    const isStale = () => bindSeqRef.current[passId] !== seq; // a newer bind for this pass superseded us
     fetch(`/api/passes/${encodeURIComponent(passId)}/slot`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -209,8 +217,9 @@ function Greenroom() {
     })
       .then(async (r) => {
         if (r.ok) {
-          setBindError("");
           const body = await r.json().catch(() => ({}));
+          if (isStale()) return; // ignore an out-of-order response (codex)
+          setBindError("");
           const newSlot = (body && body.boundSlot) || "";
           if (body && body.live) {
             // A LIVE bind: the authoritative roster already carries the new boundSlot, so keep NO
@@ -243,11 +252,13 @@ function Greenroom() {
         } catch (_) {
           /* non-JSON body: keep the generic message */
         }
+        if (isStale()) return; // a newer bind superseded this rejected one
         setBindError(msg);
         rollbackPicker();
       })
       .catch(() => {
         // fetch only rejects on a network/transport failure; the binding is unchanged.
+        if (isStale()) return;
         setBindError("Couldn't reach the server to update the slot.");
         rollbackPicker();
       });
