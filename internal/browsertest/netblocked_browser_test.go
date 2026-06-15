@@ -356,3 +356,69 @@ func TestNetBlocked_HostLeaveBeforeICE_NoFalsePositive(t *testing.T) {
 	}
 	assertNeverBlocked(t, gCtx)
 }
+
+// D-38 false-positive guard (slot unbind/rebind-away path — the Codex stop-review residual). A guest
+// whose only consumer is an OBS source must NOT show the network-blocked screen when the host UNBINDS
+// the slot before ICE: the source stays connected (so there is no source-leave peer-left/consumer-left),
+// but the occupant changed, so the server emits {t:consumer-left} to the prior occupant from
+// vacateSlot, and the guest drops the now-stale source pc. Red without the bindSlot/vacateSlot change
+// (the source pc stays tracked → the watchdog trips).
+func TestNetBlocked_SourceUnbindBeforeICE_NoFalsePositive(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	gAlloc, cancelGA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelGA()
+	gCtx, cancelG := chromedp.NewContext(gAlloc)
+	defer cancelG()
+	gCtx, cancelGT := context.WithTimeout(gCtx, 90*time.Second)
+	defer cancelGT()
+	if err := chromedp.Run(gCtx,
+		injectScript(relayOnlyRTCJS),
+		injectScript(setNetBlockMsJS(10000)),
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("blocked guest enter: %v", err)
+	}
+
+	// OBS source as the ONLY consumer (child tab → loopback); bind cam-1 → the guest so the source
+	// offers and the guest's Publisher creates pcs["src-cam-1"], arming the watchdog.
+	obsCtx, cancelOBS := chromedp.NewContext(gCtx)
+	defer cancelOBS()
+	obsCtx, cancelOBST := context.WithTimeout(obsCtx, 60*time.Second)
+	defer cancelOBST()
+	if err := chromedp.Run(obsCtx,
+		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
+		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("obs source page did not load: %v", err)
+	}
+
+	hostConn := dialHostWS(t, s)
+	defer hostConn.Close(websocket.StatusNormalClosure, "done")
+	writeFrame(t, hostConn, signaling.Frame{T: "rebind", Slot: s.slotLabel, OccupantPeerID: s.passID})
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked >= 1`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("guest never tracked the OBS source pc: %v", err)
+	}
+
+	// The host UNBINDS the slot before ICE — the source stays, but the occupant changes, so the server
+	// emits consumer-left to the prior occupant and the guest untracks the stale source pc.
+	writeFrame(t, hostConn, signaling.Frame{T: "unbind", Slot: s.slotLabel})
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked === 0`, nil, chromedp.WithPollingTimeout(8*time.Second)),
+	); err != nil {
+		t.Fatalf("guest did not untrack the source after unbind (consumer-left): %v", err)
+	}
+
+	if err := chromedp.Run(gCtx, chromedp.Sleep(12*time.Second)); err != nil {
+		t.Fatalf("wait past watchdog: %v", err)
+	}
+	assertNeverBlocked(t, gCtx)
+}

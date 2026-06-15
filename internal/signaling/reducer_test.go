@@ -235,6 +235,79 @@ func TestSourceLeaveUnoccupiedSlotNotifiesNoOne(t *testing.T) {
 	}
 }
 
+// D-38: rebinding a sourced slot AWAY from its occupant leaves the PRIOR occupant's publisher with a
+// (possibly never-connected) pc to that source, which the prior occupant gets no peer-left for. So a
+// rebind notifies the prior occupant with consumer-left(source) — but NOT the new occupant (which is
+// about to receive a fresh offer from the same source).
+func TestSlotRebindNotifiesPriorOccupantConsumerLeft(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
+	s.rebindSlot("cam-1", "a") // a occupies, sourced by "src"
+
+	out := s.rebindSlot("cam-1", "b") // rebind away to b → a's source pc is now stale
+
+	if cl, ok := firstFrameOfType(out, "a", "consumer-left"); !ok || cl.PeerID != "src" {
+		t.Fatalf("prior occupant a must get consumer-left(src) on rebind-away, got %+v", framesTo(out, "a"))
+	}
+	if _, ok := firstFrameOfType(out, "b", "consumer-left"); ok {
+		t.Fatalf("the new occupant b must NOT get consumer-left, got %+v", framesTo(out, "b"))
+	}
+}
+
+// D-38: unbinding a sourced slot leaves the occupant's publisher with a stale source pc → notify it.
+func TestSlotUnbindNotifiesOccupantConsumerLeft(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest", "")
+	s.rebindSlot("cam-1", "a")
+
+	out := s.unbindSlot("cam-1") // host unbinds → a's source pc is now stale
+
+	if cl, ok := firstFrameOfType(out, "a", "consumer-left"); !ok || cl.PeerID != "src" {
+		t.Fatalf("occupant a must get consumer-left(src) on unbind, got %+v", framesTo(out, "a"))
+	}
+}
+
+// D-38: a re-bind to the SAME occupant (e.g. a reconnect re-bind) is not a consumer change — the
+// occupant still consumes the source, so it must NOT get a spurious consumer-left.
+func TestSlotRebindSameOccupantNoConsumerLeft(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest", "")
+	s.rebindSlot("cam-1", "a")
+
+	out := s.rebindSlot("cam-1", "a") // re-bind to the same occupant
+
+	if _, ok := firstFrameOfType(out, "a", "consumer-left"); ok {
+		t.Fatalf("a re-bind to the SAME occupant must not emit consumer-left, got %+v", framesTo(out, "a"))
+	}
+}
+
+// D-38: when the occupant itself LEAVES the room, its slot is vacated — but it is already gone, so no
+// (pointless) consumer-left is sent to the departed peer (the guard skips a prior occupant no longer
+// in the room; its publisher is closing anyway).
+func TestOccupantLeaveDoesNotNotifyDepartedOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest", "")
+	s.rebindSlot("cam-1", "a")
+
+	out := s.leave("a") // the occupant disconnects
+
+	if _, ok := firstFrameOfType(out, "a", "consumer-left"); ok {
+		t.Fatalf("a departed occupant must not be sent consumer-left, got %+v", framesTo(out, "a"))
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
