@@ -1,0 +1,216 @@
+/* Host-app shell — the day-to-day out-of-room UI (dashboard, stream CRUD, and the later
+   calendar / detail / settings surfaces). Functional-first/on-brand styling (D-B); exact
+   v2-prototype pixel fidelity is a deferred polish pass (DEF-2). Server-rendered, no JS
+   (CONVENTIONS §3.1) — these styles ride the app.css bundle the host pages already load. */
+
+body.app {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.app-brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.app-links {
+  display: flex;
+  gap: 14px;
+  flex: 1;
+}
+
+.app-links a {
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.8;
+}
+
+.app-links a[aria-current="page"] {
+  opacity: 1;
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent);
+}
+
+.app-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-host {
+  opacity: 0.8;
+}
+
+.app-signout-form {
+  margin: 0;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  box-sizing: border-box;
+}
+
+/* Buttons + links shared across the host-app forms. */
+.btn {
+  display: inline-block;
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+  line-height: 1.2;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-quiet {
+  background: transparent;
+}
+
+.btn-danger {
+  border-color: #a3261c;
+  color: #a3261c;
+  background: transparent;
+}
+
+/* Dashboard stream list. */
+.dash-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.stream-list {
+  list-style: none;
+  margin: 16px 0 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stream-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.stream-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stream-title {
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.stream-status {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  opacity: 0.85;
+}
+
+.stream-when {
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+
+.stream-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.inline-form {
+  margin: 0;
+}
+
+.dash-empty {
+  opacity: 0.7;
+  margin: 16px 0 28px;
+}
+
+/* Create + edit forms. */
+.stream-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 460px;
+}
+
+.stream-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.stream-form input {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.stream-form button {
+  align-self: flex-start;
+}
+
+.stream-create {
+  border-top: 1px solid var(--ink);
+  padding-top: 20px;
+}
+
+.stream-delete {
+  margin-top: 20px;
+}
+
+.back-link a {
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.8;
+}
+
+.form-error {
+  color: #a3261c;
+  font-weight: 600;
+}

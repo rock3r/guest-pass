@@ -152,6 +152,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		BaseURL:      cfg.BaseURL,
 		Policy:       auth.LoginPolicy{SignupMode: cfg.SignupMode, AdminEmail: cfg.AdminEmail, AllowedHosts: cfg.AllowedHosts},
 		Secure:       secure,
+		SuccessURL:   "/app", // land on the host-app dashboard after Google sign-in (M4)
 	}, authn, st)
 
 	hasher, err := token.NewHasher(cfg.TokenSecret)

@@ -1,0 +1,39 @@
+{{define "content"}}
+<section class="dash">
+<div class="dash-head">
+<h1>Your streams</h1>
+</div>
+
+{{if .Data.Streams}}
+<ul class="stream-list">
+{{range .Data.Streams}}
+<li class="stream-card">
+<div class="stream-meta">
+<a class="stream-title" href="/app/streams/{{.ID}}/edit">{{.Title}}</a>
+<span class="stream-status status-{{.Status}}">{{.Status}}</span>
+{{if .HasSchedule}}<span class="stream-when">{{.ScheduledAt}}</span>{{end}}
+</div>
+<div class="stream-actions">
+<a class="btn btn-quiet" href="/app/streams/{{.ID}}/edit">Edit</a>
+<form method="post" action="/app/streams/{{.ID}}/delete" class="inline-form">
+<button type="submit" class="btn btn-danger">Delete</button>
+</form>
+</div>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="dash-empty">No streams yet — create your first one below.</p>
+{{end}}
+
+<section class="stream-create">
+<h2>Create a stream</h2>
+<form method="post" action="/app/streams" class="stream-form">
+<label>Title<input type="text" name="title" required maxlength="200" autocomplete="off"></label>
+<label>Scheduled start<input type="datetime-local" name="scheduled_at"></label>
+<label>Duration (minutes)<input type="number" name="duration_min" min="0" max="1440" step="1"></label>
+<button type="submit" class="btn btn-primary">Create stream</button>
+</form>
+</section>
+</section>
+{{end}}
