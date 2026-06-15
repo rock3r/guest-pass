@@ -104,6 +104,23 @@ export class Publisher {
     }
   }
 
+  /**
+   * dropConsumer tears down one consumer's connection when the server says that consumer departed
+   * (a host monitor via {t:peer-left}, an OBS source via {t:consumer-left}). It closes + forgets the
+   * pc and untracks it from the connectivity watchdog, so a never-connected departed consumer can't
+   * keep the D-38 watchdog armed (a false "network blocks P2P"). It also means a later re-offer from
+   * the same id builds a FRESH pc (onSignal only creates one when none exists) rather than reusing a
+   * dead one. A no-op for an id with no live pc (e.g. a mesh peer, which the Publisher never serves).
+   * @param {string} id the departed consumer's peer id
+   */
+  dropConsumer(id) {
+    const pc = this.pcs[id];
+    if (!pc) return;
+    pc.close();
+    delete this.pcs[id];
+    this.onUntrack(id);
+  }
+
   /** Close all consumer connections (the local stream is owned by the caller). */
   close() {
     this.closed = true;

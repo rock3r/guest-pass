@@ -298,6 +298,15 @@ func (s *roomState) leave(id PeerID) []outbound {
 	var out []outbound
 	for sid, st := range s.slots {
 		if st.source == id {
+			// D-38: tell the bound occupant (the guest whose publisher served this source) that this
+			// consumer is gone, so its connectivity watchdog untracks the never-connected source pc and
+			// can't trip a false "your network blocks peer-to-peer". A guest receives no peer-left for a
+			// source (sources aren't participants — they're hidden by visibleTo, roster.go), so this
+			// {t:consumer-left} is the source's analogue, sent ONLY to the occupant. The peer id is one
+			// the guest already answered on the source's offer; the source token is never in the frame.
+			if st.occupant != "" {
+				out = append(out, outbound{to: st.occupant, frame: Frame{T: "consumer-left", PeerID: string(id)}})
+			}
 			st.source = ""
 			// The OBS reflection for this slot is gone — its on-air is now UNKNOWN, not whatever
 			// it last was (D-24: never assert on-air with no live signal behind it). Reset it; the
