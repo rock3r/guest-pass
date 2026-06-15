@@ -11,8 +11,10 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/coder/websocket"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
 // D-38 network-blocked guest error (docs/ARCHITECTURE.md §8, docs/DEPLOYMENT.md §2). GuestPass media
@@ -202,4 +204,155 @@ func TestNetBlocked_NormalGuest_NeverBlocked(t *testing.T) {
 	if !entered {
 		t.Fatalf("a connected guest is no longer in-session (expected to stay entered)")
 	}
+}
+
+// assertNeverBlocked confirms the guest never flagged network-blocked: the screen is absent, the
+// watchdog never fired (flaggedBlocked false — catches even a transient flash), and it is still
+// in-session. Used by the departed-consumer tests after the watchdog window has elapsed.
+func assertNeverBlocked(t *testing.T, ctx context.Context) {
+	t.Helper()
+	var blocked, entered, everFlagged bool
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.querySelector('.dc-netblocked') !== null`, &blocked),
+		chromedp.Evaluate(`document.querySelector('[data-entered="1"]') !== null`, &entered),
+		chromedp.Evaluate(`!!window.__gpNetwatch && window.__gpNetwatch.flaggedBlocked === true`, &everFlagged),
+	); err != nil {
+		t.Fatalf("read final state: %v", err)
+	}
+	if blocked || everFlagged {
+		t.Fatalf("a guest whose only consumer departed wrongly flagged network-blocked (blocked=%v everFlagged=%v)", blocked, everFlagged)
+	}
+	if !entered {
+		t.Fatalf("guest is no longer in-session (expected to stay entered)")
+	}
+}
+
+// D-38 false-positive guard (the chip task_9cf0497d fix). A guest whose ONLY publisher consumer is an
+// OBS source that connects-then-departs BEFORE ICE must NOT show the network-blocked screen: the
+// server emits {t:consumer-left} to the slot's occupant when the source leaves, and the guest untracks
+// the never-connected source pc. OBS sources aren't in the guest roster (EN-13), so this is their
+// analogue of peer-left. Red without the reducer change (the source pc stays tracked → the watchdog
+// trips). The guest is relay-only so the source pc can never connect on its own.
+func TestNetBlocked_SourceLeaveBeforeICE_NoFalsePositive(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	// Blocked guest (relay-only, no TURN) + a generous watchdog (10s), so the connect-attempt →
+	// source-leave → untrack sequence completes well before the timer could fire.
+	gAlloc, cancelGA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelGA()
+	gCtx, cancelG := chromedp.NewContext(gAlloc)
+	defer cancelG()
+	gCtx, cancelGT := context.WithTimeout(gCtx, 90*time.Second)
+	defer cancelGT()
+	if err := chromedp.Run(gCtx,
+		injectScript(relayOnlyRTCJS),
+		injectScript(setNetBlockMsJS(10000)),
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("blocked guest enter: %v", err)
+	}
+
+	// The guest's ONLY consumer is an OBS source (no host greenroom). Open it in a child tab (same
+	// browser → loopback), then bind cam-1 → the guest so the source offers and the guest's Publisher
+	// creates pcs["src-cam-1"], arming the watchdog. The relay-only guest never lets it connect.
+	obsCtx, cancelOBS := chromedp.NewContext(gCtx)
+	obsCtx, cancelOBST := context.WithTimeout(obsCtx, 60*time.Second)
+	defer cancelOBST()
+	if err := chromedp.Run(obsCtx,
+		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
+		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
+	); err != nil {
+		cancelOBS()
+		t.Fatalf("obs source page did not load: %v", err)
+	}
+
+	hostConn := dialHostWS(t, s)
+	defer hostConn.Close(websocket.StatusNormalClosure, "done")
+	writeFrame(t, hostConn, signaling.Frame{T: "rebind", Slot: s.slotLabel, OccupantPeerID: s.passID})
+
+	// The guest tracks the source pc (the watchdog is armed with a still-unconnected consumer).
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked >= 1`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("guest never tracked the OBS source pc: %v", err)
+	}
+
+	// The OBS source departs BEFORE ICE (close its tab). The server emits consumer-left to the
+	// occupant; the guest drops the pc and untracks it — confirm tracked → 0, well before the watchdog.
+	cancelOBS()
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked === 0`, nil, chromedp.WithPollingTimeout(8*time.Second)),
+	); err != nil {
+		t.Fatalf("guest did not untrack the departed OBS source (consumer-left): %v", err)
+	}
+
+	// Past the watchdog window the netblocked screen must NEVER appear (the timer fires into an empty
+	// tracked set and returns) — no false positive.
+	if err := chromedp.Run(gCtx, chromedp.Sleep(12*time.Second)); err != nil {
+		t.Fatalf("wait past watchdog: %v", err)
+	}
+	assertNeverBlocked(t, gCtx)
+}
+
+// D-38 false-positive guard (host consumer half). A guest whose ONLY consumer is the host greenroom
+// monitor, which connects-then-departs before ICE, must NOT show the network-blocked screen: the host
+// IS visible to the guest, so the existing {t:peer-left} reaches it and the guest drops the "pub:host"
+// pc. Red without the peer-left → dropConsumer wiring (the host pc stays tracked → the watchdog trips).
+func TestNetBlocked_HostLeaveBeforeICE_NoFalsePositive(t *testing.T) {
+	s := seedGrid(t, 1)
+	raw := s.rawTokens[0]
+
+	gAlloc, cancelGA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelGA()
+	gCtx, cancelG := chromedp.NewContext(gAlloc)
+	defer cancelG()
+	gCtx, cancelGT := context.WithTimeout(gCtx, 90*time.Second)
+	defer cancelGT()
+	if err := chromedp.Run(gCtx,
+		injectScript(relayOnlyRTCJS),
+		injectScript(setNetBlockMsJS(10000)),
+		chromedp.Navigate(s.base+"/p/"+raw),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("blocked guest enter: %v", err)
+	}
+
+	// The host greenroom is the guest's ONLY consumer; it offers → guest tracks "pub:host".
+	_, cancelHost := hostGreenroomConsumes(t, s.base, s.hostCookie)
+	hostCancelled := false
+	defer func() {
+		if !hostCancelled {
+			cancelHost()
+		}
+	}()
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked >= 1`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("guest never tracked the host monitor pc: %v", err)
+	}
+
+	// The host departs before ICE (close its browser). The guest gets peer-left("host") and drops the pc.
+	cancelHost()
+	hostCancelled = true
+	if err := chromedp.Run(gCtx,
+		chromedp.Poll(`!!window.__gpNetwatch && window.__gpNetwatch.tracked === 0`, nil, chromedp.WithPollingTimeout(8*time.Second)),
+	); err != nil {
+		t.Fatalf("guest did not untrack the departed host monitor (peer-left): %v", err)
+	}
+
+	if err := chromedp.Run(gCtx, chromedp.Sleep(12*time.Second)); err != nil {
+		t.Fatalf("wait past watchdog: %v", err)
+	}
+	assertNeverBlocked(t, gCtx)
 }

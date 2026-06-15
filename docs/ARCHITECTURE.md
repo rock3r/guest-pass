@@ -171,9 +171,12 @@ connection is created (someone is actually trying), a watchdog (~20 s) flags
 *network-blocked* iff **no** tracked P2P connection has **ever** reached
 `connected`. The "ever connected" guard scopes this to the **initial** can't-connect
 case: a guest that reaches anyone is never warned, and a later mid-session drop is
-the existing reconnecting path (see *Connection resilience*), not this screen. TURN
-is a NAT-traversal *packet* relay (encrypted DTLS-SRTP forwarded without
-inspection), so it is D-23-safe — not "media through the server."
+the existing reconnecting path (see *Connection resilience*), not this screen. A
+consumer that *departs* before connecting is untracked so it can't trip a false
+positive — the host monitor via `{t:peer-left}` (visible to the guest) and an OBS
+source via `{t:consumer-left}` to its slot occupant (§7; sources are hidden from
+guest rosters, EN-13). TURN is a NAT-traversal *packet* relay (encrypted DTLS-SRTP
+forwarded without inspection), so it is D-23-safe — not "media through the server."
 
 ### Codecs (D-39)
 
@@ -933,6 +936,10 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 
 {"t":"peer-joined","peer":{…}}                            // same per-recipient shape as a roster entry
 {"t":"peer-left","peerId":"<id>"}                         // string id (distinct key from peer-joined's object)
+{"t":"consumer-left","peerId":"src-<label>"}              // an OBS source consuming a guest departed → sent
+                                                          // ONLY to the slot's occupant so its D-38 watchdog
+                                                          // untracks the source pc; sources aren't in the
+                                                          // roster (EN-13), so this is their peer-left analogue
 {"t":"signal","from":"<peerId>","sdp"|"ice":…}            // relayed SDP/ICE
 {"t":"chat","from":"<peerId>","text":"…"}                 // relayed only (EN-20)
 

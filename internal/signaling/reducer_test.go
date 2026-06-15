@@ -190,6 +190,51 @@ func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
 	}
 }
 
+// D-38: when an OBS source departs from an OCCUPIED slot, the bound occupant (the guest whose
+// publisher served that source) gets a {t:consumer-left} so its connectivity watchdog untracks the
+// never-connected source pc — sources are non-participants, hidden from guests by visibleTo
+// (roster.go), so a guest gets NO peer-left for one. The notice carries only the source peer id the
+// guest already answered (no token) and goes ONLY to the occupant — not other guests or the host.
+func TestSourceLeaveNotifiesOccupantConsumerLeft(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.join("g2", "guest", "")
+	s.rebindSlot("cam-1", "g1") // g1 occupies cam-1, sourced by "src"
+
+	out := s.leave("src") // the OBS source disconnects
+
+	if cl, ok := firstFrameOfType(out, "g1", "consumer-left"); !ok || cl.PeerID != "src" {
+		t.Fatalf("occupant g1 must get consumer-left(src), got %+v", framesTo(out, "g1"))
+	}
+	if _, ok := firstFrameOfType(out, "g2", "consumer-left"); ok {
+		t.Fatalf("a non-occupant guest must NOT get consumer-left, got %+v", framesTo(out, "g2"))
+	}
+	if _, ok := firstFrameOfType(out, "host", "consumer-left"); ok {
+		t.Fatalf("the host must NOT get consumer-left, got %+v", framesTo(out, "host"))
+	}
+}
+
+// D-38: a source leaving an UNOCCUPIED slot notifies no one (pins the st.occupant != "" guard — there
+// is no guest publisher tracking that source pc, so there is nothing to untrack).
+func TestSourceLeaveUnoccupiedSlotNotifiesNoOne(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("g1", "guest", "")
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src") // attached, but the slot has no occupant
+
+	out := s.leave("src")
+
+	for _, to := range []PeerID{"g1", "host"} {
+		if _, ok := firstFrameOfType(out, to, "consumer-left"); ok {
+			t.Fatalf("no consumer-left expected (unoccupied slot), but %s got one: %+v", to, framesTo(out, to))
+		}
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {

@@ -299,9 +299,17 @@ function DeviceCheck() {
         room.on("peer-left", (f) => {
           peersRef.current = peersRef.current.filter((p) => p.id !== f.peerId);
           setPeers(peersRef.current);
+          // D-38: if the departed peer was a Publisher CONSUMER (the host monitor, peer "host"), drop
+          // its pc so the connectivity watchdog stops counting a never-connected consumer that left
+          // (a no-op for a mesh peer — the Publisher serves none — which mesh.sync below untracks).
+          publisher.dropConsumer(f.peerId);
           mesh.sync(selfIdRef.current, peersRef.current);
           syncThumbnails();
         });
+        // D-38: an OBS source consuming this guest departed (sources get no peer-left — they're hidden
+        // from guest rosters, EN-13). Drop its Publisher pc so the watchdog untracks it; the peer id is
+        // the same "src-<label>" the guest answered on the source's offer.
+        room.on("consumer-left", (f) => publisher.dropConsumer(f.peerId));
         room.on("streaming", (f) => setStreaming(!!f.active));
         // Host "bump quality now" (AD-21/D-34): restore our shed senders immediately, overriding the
         // slow recover hysteresis. If the pressure persists, the next sample re-degrades.
