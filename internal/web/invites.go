@@ -14,16 +14,21 @@ import (
 	"github.com/rock3r/guest-pass/internal/token"
 )
 
-// detailData backs the tabbed stream-detail page. The Invites tab is here; the read-only
-// Sources tab lands in PR-4 (EN-26). Live production controls (slot binding, screenshare
-// eligibility, mic/cam) are NEVER on this page — they live in the host-only greenroom
-// People controls (EN-23). Tab names the active section so the bar can highlight it.
+// detailData backs the tabbed stream-detail page (Invites + read-only Sources, EN-26).
+// Live production controls (slot binding, screenshare eligibility, mic/cam) are NEVER on
+// this page — they live in the host-only greenroom People controls (EN-23). Tab names the
+// active section so the bar can highlight it.
 type detailData struct {
 	StreamID    string
 	StreamTitle string
-	Tab         string // "invites"
-	Passes      []passRow
-	Issued      *issuedLink // set after create/reissue to reveal the fresh link once
+	Tab         string // "invites" | "sources"
+	// Invites tab
+	Passes []passRow
+	Issued *issuedLink // set after create/reissue to reveal the fresh link once
+	// Sources tab (read-only, EN-26)
+	Slots     []slotCard
+	RevealAll string // newline-joined freshly-minted OBS URLs for the copy-all block ("" if none)
+	HasReveal bool
 }
 
 // passRow is a guest pass as the invites table renders it (display-ready).

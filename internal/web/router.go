@@ -132,6 +132,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Get("/app/calendar", app.calendar)
 			hr.Post("/app/streams", app.createStream)
 			hr.Get("/app/streams/{id}", app.streamDetail)
+			hr.Get("/app/streams/{id}/sources", app.sourcesTab) // read-only Sources tab (EN-26)
 			hr.Get("/app/streams/{id}/edit", app.editStreamForm)
 			hr.Post("/app/streams/{id}", app.updateStream)
 			hr.Post("/app/streams/{id}/delete", app.deleteStream)

@@ -42,6 +42,54 @@ func (s *Store) CreateSlot(ctx context.Context, p CreateSlotParams) (*Slot, erro
 	return sl, nil
 }
 
+// SlotSpec is one desired slot in the host-global pool, with a caller-minted hashed token
+// (the store never does crypto, EN-5). Used by EnsureSlotPool.
+type SlotSpec struct {
+	Kind            string
+	Idx             *int64
+	SourceTokenHash string
+}
+
+// EnsureSlotPool idempotently provisions a host's slot pool (D-20): in a SINGLE transaction
+// it inserts every spec that does not already exist for the host and returns a parallel
+// slice marking which specs it actually inserted. Because the whole pool is decided and
+// written in one transaction on the single-writer connection (EN-11), two concurrent first
+// opens can't each create a different subset — the first opener inserts the full missing set
+// (and so reveals all those URLs) while the second sees them already present and inserts
+// none. Existing slots are never overwritten (the insert is ignored on the partial-unique
+// cam/singleton indexes). (SQLite `INSERT OR IGNORE`; the Postgres-portable form is
+// `INSERT ... ON CONFLICT DO NOTHING`.)
+func (s *Store) EnsureSlotPool(ctx context.Context, hostID string, specs []SlotSpec) ([]bool, error) {
+	tx, err := s.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ensuring slot pool: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful commit
+	inserted := make([]bool, len(specs))
+	for i, sp := range specs {
+		id, err := newID()
+		if err != nil {
+			return nil, err
+		}
+		res, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO slots (id, host_id, kind, idx, source_token_hash, epoch)
+			 VALUES (?, ?, ?, ?, ?, 0)`,
+			id, hostID, sp.Kind, sp.Idx, sp.SourceTokenHash)
+		if err != nil {
+			return nil, fmt.Errorf("ensuring slot pool: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("ensuring slot pool: %w", err)
+		}
+		inserted[i] = n > 0
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ensuring slot pool: %w", err)
+	}
+	return inserted, nil
+}
+
 // GetSlot returns the slot with the given id, or ErrNotFound.
 func (s *Store) GetSlot(ctx context.Context, id string) (*Slot, error) {
 	return scanSlot(s.reader.QueryRowContext(ctx, slotSelect+" WHERE id = ?", id))

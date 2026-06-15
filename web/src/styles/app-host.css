@@ -426,3 +426,85 @@ body.app {
 .muted {
   opacity: 0.5;
 }
+
+/* Read-only Sources tab (EN-26): per-slot reference cards, no editable controls. */
+.sources-intro {
+  opacity: 0.85;
+  max-width: 60ch;
+}
+
+.reveal-all {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.slot-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.slot-card {
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slot-title {
+  font-weight: 600;
+}
+
+.slot-onair {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  opacity: 0.7;
+}
+
+.slot-onair[data-onair="on-air"] {
+  background: #a3261c;
+  color: #fff;
+  border-color: #a3261c;
+  opacity: 1;
+}
+
+.slot-onair[data-onair="not-on-air"] {
+  opacity: 0.85;
+}
+
+.slot-occupant {
+  font-size: 0.9rem;
+}
+
+.slot-url-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.slot-manage a {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
