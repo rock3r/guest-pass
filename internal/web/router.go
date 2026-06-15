@@ -132,6 +132,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Live slot↔guest (re)bind from the greenroom People controls (D-20): persist +
 			// re-route /s/{slot} with no OBS edit (EN-3). Host-only (RequireHost), RF-2.
 			hr.Put("/api/passes/{id}/slot", api.putPassSlot)
+			// Host's persisted pass→slot bindings, so the greenroom can seed its picker on load and a
+			// pre-live (DB-only) selection survives a refresh / new tab (codex).
+			hr.Get("/api/passes/slot-bindings", api.listSlotBindings)
 
 			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).

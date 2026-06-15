@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -199,6 +200,38 @@ func TestBinding_PersistedBindingReplaysOnJoin(t *testing.T) {
 	defer gc.CloseNow()
 	if f := readFrameOfType(t, sc, "slot-rebind"); f.OccupantPeerID != pass.ID {
 		t.Fatalf("replayed slot-rebind occupant = %q, want the guest %q", f.OccupantPeerID, pass.ID)
+	}
+}
+
+// The greenroom seeds its picker from GET /api/passes/slot-bindings (codex): the host's persisted
+// pass→cam-slot bindings, so a pre-live (DB-only) selection survives a refresh. Host-only.
+func TestBinding_ListSlotBindings(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "list-bind", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	_, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	_, slot := h.seedCamSlot(t, host.ID, 1)
+	if err := h.store.AssignPassSlot(ctx, pass.ID, slot.ID); err != nil {
+		t.Fatalf("AssignPassSlot: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/api/passes/slot-bindings", nil)
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if m[pass.ID] != "cam-1" {
+		t.Fatalf("bindings = %v, want %s → cam-1", m, pass.ID)
 	}
 }
 

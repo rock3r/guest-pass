@@ -255,6 +255,34 @@ func (s *Store) RetiredPassIDsForStream(ctx context.Context, streamID string, no
 	return revoked, expired, nil
 }
 
+// HostBoundCamPasses returns the host's still-joinable passes bound to a cam slot, as a
+// pass-id → "cam-N" map. The greenroom seeds its picker from this on load, so a pre-live binding
+// (DB-only — not yet reflected in the live-occupancy roster) survives a refresh / new tab (codex).
+// Slots are host-global, so this spans all the host's streams.
+func (s *Store) HostBoundCamPasses(ctx context.Context, hostID string) (map[string]string, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
+		 WHERE sl.host_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)`,
+		hostID, SlotCam, PassRevoked, PassExpired)
+	if err != nil {
+		return nil, fmt.Errorf("listing host bound passes: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id string
+		var idx int64
+		if err := rows.Scan(&id, &idx); err != nil {
+			return nil, fmt.Errorf("scanning host bound pass: %w", err)
+		}
+		out[id] = "cam-" + strconv.FormatInt(idx, 10)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating host bound passes: %w", err)
+	}
+	return out, nil
+}
+
 // ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a
 // greenroom "unassign" (the live half is Room.Unbind).
 func (s *Store) ClearPassSlot(ctx context.Context, passID string) error {

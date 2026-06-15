@@ -201,6 +201,27 @@ function Greenroom() {
     };
   }, []);
 
+  // Seed picker overrides from the host's PERSISTED bindings on load (codex): a pre-live bind is
+  // DB-only and isn't in the live-occupancy roster, so without this it would vanish from the picker
+  // on a refresh / new tab. In-session overrides take precedence; once live, the matching roster
+  // values (and the session-live signal) reconcile these away.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/passes/slot-bindings")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((m) => {
+        if (active && m && typeof m === "object") {
+          setBoundOverrides((prev) => ({ ...m, ...prev }));
+        }
+      })
+      .catch(() => {
+        /* best-effort: the picker still works from live roster updates */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // bindSlot is the host-only People control (AC-6/D-20): (re)assign a guest to a cam slot (or
   // "" to unassign) over the REST endpoint. The server persists passes.slot_id AND live-re-routes
   // /s/{slot} with no OBS edit, then re-broadcasts the roster — so entry.boundSlot (and the

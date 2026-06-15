@@ -417,6 +417,62 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 	}
 }
 
+// A pre-live (DB-only) picker selection must survive a greenroom RELOAD (codex): the override is
+// in-memory, but the picker seeds from GET /api/passes/slot-bindings on load, so after a refresh
+// the binding (still in passes.slot_id) is shown again rather than snapping to Unassigned.
+func TestBinding_PreLiveSelectionSurvivesReload(t *testing.T) {
+	s := seedDeviceCheck(t) // NO session → the bind is DB-only
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 180*time.Second)
+	defer cancelDeadline()
+	guestCtx := rootCtx
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestCtx, s.base, s.rawToken, "A")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	picker := fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID)
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(picker, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render the picker: %v", err)
+	}
+
+	// Bind A → cam-1 pre-live; it sticks (override).
+	var ok bool
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+		const sel = document.querySelector(%q);
+		if (!sel) return false; sel.value = "cam-1"; sel.dispatchEvent(new Event('change',{bubbles:true})); return true;
+	})()`, picker), &ok)); err != nil || !ok {
+		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
+	}
+	onCam1 := fmt.Sprintf(`document.querySelector(%q).value === "cam-1"`, picker)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(onCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+		t.Fatalf("A's pre-live override did not stick: %v", err)
+	}
+
+	// RELOAD the greenroom: the in-memory override is gone, but the seed endpoint must restore it.
+	if err := chromedp.Run(hostCtx,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(picker, chromedp.ByQuery),
+		chromedp.Poll(onCam1, nil, chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("A's pre-live selection did not survive the reload (picker not cam-1): %v", err)
+	}
+}
+
 // A failed (re)bind must surface to the host, not be swallowed (codex, M4 PR-6). The greenroom
 // picker PUTs to a cam slot the host has not provisioned (only cam-1 is wired in the seed), so
 // the server answers 404 with no roster update — the controlled picker stays put AND the

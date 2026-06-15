@@ -127,6 +127,25 @@ func (a *apiServer) streamIsLive(ctx context.Context, hostID, streamID string) b
 	return err == nil && sess.StreamID == streamID
 }
 
+// listSlotBindings returns the host's persisted pass→cam-slot bindings (host-only, RequireHost), so
+// the greenroom can SEED its picker overrides on load — a pre-live binding is DB-only and isn't in
+// the live-occupancy roster, so without this it would vanish from the picker on a refresh / new tab
+// (codex). Spans all the host's streams (slots are host-global); the greenroom only renders the
+// connected ones.
+func (a *apiServer) listSlotBindings(w http.ResponseWriter, r *http.Request) {
+	host, ok := auth.HostFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	m, err := a.store.HostBoundCamPasses(r.Context(), host.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load bindings")
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
 // liveRebind re-routes the live room (if any) to put occupant in newLabel. It uses
 // RebindOrVacate (not Rebind): a connected occupant is bound (and the reducer vacates any other
 // cam slot it held — one cam slot per occupant), while an OFFLINE occupant leaves the slot
