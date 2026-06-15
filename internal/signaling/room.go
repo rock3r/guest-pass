@@ -486,13 +486,37 @@ const terminateBudget = 2 * time.Second
 // room goroutine, so a concurrent readLoop Leave for a now-removed conn is a no-op
 // (identity-checked).
 func (r *Room) Terminate(reason string) {
+	r.terminateWith(func(string) string { return reason })
+}
+
+// TerminateSession ends a host's live session: PARTICIPANTS (host/co-host/guests) get the terminal
+// reason (e.g. session-ended → "stream ended" screen), but OBS slot SOURCES get a RECOVERABLE
+// reconnect instead — they are host-global "wire OBS once" pages (EN-26/D-20) that must outlive the
+// session and re-attach to the next one, not be stranded on a terminal error screen (codex). The
+// caller (Hub.EndSession) closes the room after; the sources reconnect into the fresh one and show
+// a placeholder until the next session binds them.
+func (r *Room) TerminateSession(reason string) {
+	r.terminateWith(func(role string) string {
+		if isParticipant(role) {
+			return reason
+		}
+		return TerminateReconnect
+	})
+}
+
+// terminateWith broadcasts a {t:terminate} to every conn — the reason chosen PER ROLE by reasonFor
+// — with the per-peer budget (RF-16, a terminal frame must not be dropped), concurrent so the
+// total wait is ~one budget, then closes each socket. It marks the room draining first so a late
+// Join is refused. Blocks until the flush completes (or the room stops).
+func (r *Room) terminateWith(reasonFor func(role string) string) {
 	done := make(chan struct{})
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		st.terminating = true // refuse any late Join that arrives after this command
 		var wg sync.WaitGroup
 		for id, c := range conns {
+			reason := reasonFor(c.role)
 			wg.Add(1)
-			go func(c *peerConn) {
+			go func(c *peerConn, reason string) {
 				defer wg.Done()
 				t := time.NewTimer(terminateBudget)
 				defer t.Stop()
@@ -501,7 +525,7 @@ func (r *Room) Terminate(reason string) {
 				case <-t.C: // this peer is wedged; give up on it
 				}
 				close(c.out)
-			}(c)
+			}(c, reason)
 			delete(conns, id)
 		}
 		wg.Wait()

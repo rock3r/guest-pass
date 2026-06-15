@@ -84,7 +84,9 @@ func (h *Hub) EndSession(session, reason string) {
 	if r == nil {
 		return
 	}
-	r.Terminate(reason) // marks the room draining (Join refuses) + evicts peers, still discoverable
+	// Participants get the terminal reason (session-ended); host-global OBS sources get a
+	// recoverable reconnect so they outlive the session and re-attach to the next one (codex).
+	r.TerminateSession(reason) // marks the room draining (Join refuses), still discoverable
 	r.Close()
 	h.mu.Lock()
 	if h.rooms[session] == r { // don't drop a room a racing start already replaced

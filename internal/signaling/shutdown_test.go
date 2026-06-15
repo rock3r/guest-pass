@@ -81,6 +81,40 @@ func TestRoomClose_Idempotent(t *testing.T) {
 	r.Close() // must be a no-op, not a panic
 }
 
+// Ending a session must NOT strand the host-global OBS sources (codex P1): participants get the
+// terminal session-ended, but the "wire OBS once" slot source pages get a recoverable reconnect so
+// they re-attach to the next session instead of sitting on a terminal error screen.
+func TestRoomTerminateSession_SourcesRecoverable(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	defer r.Close()
+	guestOut := make(chan Frame, 8)
+	srcOut := make(chan Frame, 8)
+	r.Join(PeerID("g"), "guest", "", "", guestOut)
+	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", srcOut)
+
+	r.TerminateSession(TerminateSessionEnded)
+
+	if got := lastTerminateReason(guestOut); got != TerminateSessionEnded {
+		t.Fatalf("guest terminate reason = %q, want %q", got, TerminateSessionEnded)
+	}
+	if got := lastTerminateReason(srcOut); got != TerminateReconnect {
+		t.Fatalf("OBS source terminate reason = %q, want a recoverable %q (wire-once)", got, TerminateReconnect)
+	}
+}
+
+// lastTerminateReason drains ch (until the room closes it) and returns the reason of the terminate
+// frame it carried, or "" if none.
+func lastTerminateReason(ch chan Frame) string {
+	reason := ""
+	for f := range ch {
+		if f.T == "terminate" {
+			reason = f.Reason
+		}
+	}
+	return reason
+}
+
 func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	h := NewHub(nil, nil)
 	h.Shutdown("reconnect")
