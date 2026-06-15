@@ -2,11 +2,15 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -24,11 +28,18 @@ const camSlotCount = 8
 type slotCard struct {
 	Title       string
 	Label       string
+	SlotID      string // DB id, for the regenerate form action (host-only, not a secret)
 	URL         string
 	Revealed    bool
 	Occupant    string
 	HasOccupant bool
 	OnAir       string
+}
+
+// sourcesReveal carries the OBS URLs (label → full URL) freshly rotated by a regenerate, for
+// a one-time reveal on the redirected Sources GET (kept out of the URL via the reveal nonce).
+type sourcesReveal struct {
+	URLs map[string]string
 }
 
 // sourcesTab renders the read-only Sources tab (AC-4 / EN-26). It idempotently provisions
@@ -48,11 +59,25 @@ func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not load occupants", http.StatusInternalServerError)
 		return
 	}
-	pool, revealed, err := s.ensureSlotPool(r.Context(), host.ID)
+	pool, minted, err := s.ensureSlotPool(r.Context(), host.ID)
 	if err != nil {
 		http.Error(w, "could not provision slots", http.StatusInternalServerError)
 		return
 	}
+	// Build the set of OBS URLs to reveal once: those freshly minted on this open (first
+	// provisioning), plus any carried by a `?reveal=` nonce from a regenerate redirect (D-22).
+	revealedURLs := make(map[string]string, len(minted))
+	for label, raw := range minted {
+		revealedURLs[label] = s.slotURL(label, raw)
+	}
+	if v, ok := s.reveals.take(r.URL.Query().Get("reveal"), time.Now()); ok {
+		if sr, ok := v.(sourcesReveal); ok {
+			for label, url := range sr.URLs {
+				revealedURLs[label] = url
+			}
+		}
+	}
+
 	cards := make([]slotCard, 0, len(pool))
 	var revealLines []string
 	for _, sl := range pool {
@@ -60,14 +85,14 @@ func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
 			continue // host slot deferred to v1.1 (DEF-1)
 		}
 		label := slotLabel(sl)
-		c := slotCard{Title: slotTitle(sl), Label: label, OnAir: "status-unavailable"}
+		c := slotCard{Title: slotTitle(sl), Label: label, SlotID: sl.ID, OnAir: "status-unavailable"}
 		if name, has := occ[sl.ID]; has {
 			c.Occupant, c.HasOccupant = name, true
 		}
-		if raw, ok := revealed[label]; ok {
-			c.URL = s.baseURL + "/s/" + label + "?token=" + raw
+		if url, ok := revealedURLs[label]; ok {
+			c.URL = url
 			c.Revealed = true
-			revealLines = append(revealLines, c.URL)
+			revealLines = append(revealLines, url)
 		}
 		cards = append(cards, c)
 	}
@@ -191,4 +216,107 @@ func slotTitle(sl *store.Slot) string {
 	default:
 		return sl.Kind
 	}
+}
+
+// slotURL builds a slot's OBS source URL from its label and raw token.
+func (s *appServer) slotURL(label, raw string) string {
+	return s.baseURL + "/s/" + label + "?token=" + raw
+}
+
+// regenerateSlot rotates ONE slot's source token (D-22), invalidating the old OBS URL,
+// tearing down any live /s/{slot} subscription with a token-rotated terminate, and revealing
+// the fresh URL once (POST-redirect-GET, reveal nonce — never the token in the URL).
+func (s *appServer) regenerateSlot(w http.ResponseWriter, r *http.Request) {
+	host, st, ok := s.ownedStream(w, r)
+	if !ok {
+		return
+	}
+	slot, err := s.store.GetSlot(r.Context(), chi.URLParam(r, "slotId"))
+	if errors.Is(err, store.ErrNotFound) || (err == nil && slot.HostID != host.ID) {
+		http.Error(w, "slot not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "could not load slot", http.StatusInternalServerError)
+		return
+	}
+	label, url, err := s.rotateOne(r.Context(), host.ID, slot)
+	if err != nil {
+		http.Error(w, "could not regenerate slot", http.StatusInternalServerError)
+		return
+	}
+	s.redirectSourcesReveal(w, r, st.ID, map[string]string{label: url})
+}
+
+// regenerateAllSlots rotates EVERY slot's source token at once — the "my URLs leaked" panic
+// button (D-22). It mints all the new tokens up front and rotates them in ONE transaction
+// (RotateSlotTokens), so a mid-batch failure can never leave some slots on fresh, un-revealed
+// tokens; then it tears down each live source and reveals all the fresh URLs once.
+func (s *appServer) regenerateAllSlots(w http.ResponseWriter, r *http.Request) {
+	host, st, ok := s.ownedStream(w, r)
+	if !ok {
+		return
+	}
+	slots, err := s.store.ListSlotsByHost(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load slots", http.StatusInternalServerError)
+		return
+	}
+	newHashByID := make(map[string]string)
+	labelByID := make(map[string]string)
+	urls := make(map[string]string)
+	for _, sl := range slots {
+		if sl.Kind == store.SlotHost {
+			continue // host slot is unused this milestone (DEF-1)
+		}
+		raw, err := token.Mint()
+		if err != nil {
+			http.Error(w, "could not regenerate slots", http.StatusInternalServerError)
+			return
+		}
+		label := slotLabel(sl)
+		newHashByID[sl.ID] = s.hasher.Hash(raw)
+		labelByID[sl.ID] = label
+		urls[label] = s.slotURL(label, raw)
+	}
+	if err := s.store.RotateSlotTokens(r.Context(), newHashByID); err != nil {
+		http.Error(w, "could not regenerate slots", http.StatusInternalServerError)
+		return
+	}
+	// The hashes are all rotated (committed); now tear down each live source with token-rotated.
+	if s.hub != nil {
+		for _, label := range labelByID {
+			s.hub.TerminateSourceIfLive(host.ID, "src-"+signaling.PeerID(label))
+		}
+	}
+	s.redirectSourcesReveal(w, r, st.ID, urls)
+}
+
+// rotateOne mints a fresh token for slot, rotates the stored hash (old URL stops resolving,
+// EN-5), tears down any live OBS source on that slot (token-rotated), and returns the slot
+// label + the new full OBS URL to reveal once.
+func (s *appServer) rotateOne(ctx context.Context, hostID string, slot *store.Slot) (string, string, error) {
+	raw, err := token.Mint()
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.store.RotateSlotToken(ctx, slot.ID, s.hasher.Hash(raw)); err != nil {
+		return "", "", err
+	}
+	label := slotLabel(slot)
+	// Tear down a live /s/{slot} subscription authenticated with the now-dead token, if any.
+	if s.hub != nil {
+		s.hub.TerminateSourceIfLive(hostID, "src-"+signaling.PeerID(label))
+	}
+	return label, s.slotURL(label, raw), nil
+}
+
+// redirectSourcesReveal stores the rotated URLs for a one-time reveal and 303-redirects back
+// to the Sources tab with the nonce (POST-redirect-GET, so a refresh can't re-rotate).
+func (s *appServer) redirectSourcesReveal(w http.ResponseWriter, r *http.Request, streamID string, urls map[string]string) {
+	dest := "/app/streams/" + streamID + "/sources"
+	if nonce, err := s.reveals.put(sourcesReveal{URLs: urls}, time.Now()); err == nil {
+		dest += "?reveal=" + nonce
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }

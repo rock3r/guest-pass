@@ -90,6 +90,52 @@ func (s *Store) EnsureSlotPool(ctx context.Context, hostID string, specs []SlotS
 	return inserted, nil
 }
 
+// RotateSlotToken replaces a slot's source-token hash (D-22 "my URLs leaked"): the old hash
+// is overwritten so the previous OBS URL stops authenticating (one active token per slot,
+// EN-5), and the leak-detection metadata (last_used_at/last_source_ip) is cleared since it
+// described the now-dead token. The caller mints the new token and tears down any live
+// /s/{slot} subscription with a token-rotated terminate.
+func (s *Store) RotateSlotToken(ctx context.Context, slotID, newTokenHash string) error {
+	res, err := s.writer.ExecContext(ctx,
+		`UPDATE slots SET source_token_hash = ?, source_token_last_used_at = NULL,
+		 source_token_last_source_ip = NULL WHERE id = ?`,
+		newTokenHash, slotID)
+	if err != nil {
+		return fmt.Errorf("rotating slot token: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
+// RotateSlotTokens rotates several slots' source tokens in ONE transaction — the rotate-all
+// "my URLs leaked" panic (D-22). Either every hash is overwritten (all old URLs dead) or none
+// is, so a mid-batch failure never leaves some slots on fresh, un-revealed tokens. Each entry
+// must name an existing slot (ErrNotFound otherwise rolls the whole batch back).
+func (s *Store) RotateSlotTokens(ctx context.Context, newHashByID map[string]string) error {
+	tx, err := s.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("rotating slot tokens: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful commit
+	for id, hash := range newHashByID {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE slots SET source_token_hash = ?, source_token_last_used_at = NULL,
+			 source_token_last_source_ip = NULL WHERE id = ?`,
+			hash, id)
+		if err != nil {
+			return fmt.Errorf("rotating slot tokens: %w", err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("rotating slot tokens: %w", err)
+		} else if n == 0 {
+			return ErrNotFound
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("rotating slot tokens: %w", err)
+	}
+	return nil
+}
+
 // GetSlot returns the slot with the given id, or ErrNotFound.
 func (s *Store) GetSlot(ctx context.Context, id string) (*Slot, error) {
 	return scanSlot(s.reader.QueryRowContext(ctx, slotSelect+" WHERE id = ?", id))

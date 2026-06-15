@@ -332,6 +332,43 @@ func (r *Room) DeliverTo(id PeerID, f Frame) {
 	})
 }
 
+// RotateSource tears down an OBS source-page connection whose slot token was just rotated
+// (D-22 "my URLs leaked"). It frees the slot's source pointer (degrading its on-air to
+// unknown, EN-3) and tells the others (via leave), sends the source a TERMINAL
+// {t:terminate,token-rotated} so the page stops — not reconnect — and the host re-pastes the
+// fresh URL, then evicts the connection (the buffered terminate flushes through the single
+// writer before the socket closes). A no-op if no such source is connected (rotated while the
+// source was offline) or if the id isn't an OBS source — a participant is never terminated
+// here. Host authority is enforced at the web layer (RequireHost); this is the teardown only.
+func (r *Room) RotateSource(source PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		p := st.peers[source]
+		if p == nil || isParticipant(p.role) {
+			return
+		}
+		c := conns[source]
+		deliver(conns, st.leave(source)) // peer-left + roster to the OTHER peers (non-blocking, AD-12)
+		if c == nil {
+			return
+		}
+		delete(conns, source)
+		// The terminal token-rotated frame must NOT be silently dropped on a full queue (RF-16) —
+		// else the OBS page sees a bare close, treats it as transient, and reconnect-loops the dead
+		// token. Send it with a budget (like Terminate) in a goroutine — now the sole owner of
+		// c.out — so a wedged socket can't stall the room goroutine; a stuck peer is given up on and
+		// still closed.
+		go func() {
+			t := time.NewTimer(terminateBudget)
+			defer t.Stop()
+			select {
+			case c.out <- Frame{T: "terminate", Reason: TerminateTokenRotated}:
+			case <-t.C:
+			}
+			close(c.out)
+		}()
+	})
+}
+
 func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.rebindSlot(slot, occupant))

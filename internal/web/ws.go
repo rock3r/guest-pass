@@ -93,6 +93,16 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-validate a source token right before admitting it to the room (D-22): a panic rotation
+	// landing between the handshake and Join would otherwise let a now-dead token slip past the
+	// teardown (a resolve→Join TOCTOU). The full close — a per-session media grant gating join by
+	// generation — is v1.1 (AD-23/RF-3); this shuts the realistic window (spamming connects across
+	// the slow WS upgrade). A genuine rotation tells the source it was replaced so it stops (EN-9).
+	if id.isSource() && !h.resolver.sourceStillValid(ctx, r.URL.Query().Get("src")) {
+		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateTokenRotated})
+		return
+	}
+
 	out := make(chan signaling.Frame, 64)
 	// Enqueue the ICE join-ack BEFORE Join (AD-14): the buffered channel makes it the first
 	// frame the writer flushes, ahead of anything the room emits on join. The config is

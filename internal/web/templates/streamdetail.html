@@ -19,6 +19,10 @@ stream — the slot→guest binding re-routes live from the
 guests never see them. Editing who's in a slot, nameplates, and the quality ceiling all live in the
 <a href="/greenroom">greenroom</a>.</p>
 
+<form method="post" action="/app/streams/{{.Data.StreamID}}/sources/regenerate-all" class="rotate-all">
+<button type="submit" class="btn btn-danger">Regenerate all URLs (my URLs leaked)</button>
+</form>
+
 {{if .Data.HasReveal}}
 <div class="issued" role="status">
 <p><strong>Copy your OBS source URLs now</strong> — for security they're shown only once, at setup.
@@ -40,7 +44,12 @@ Lost them later? Regenerate the slot to get a fresh URL.</p>
 {{else}}
 <p class="slot-url-hidden muted">URL shown once at setup. Regenerate this slot to reveal a fresh URL.</p>
 {{end}}
-<p class="slot-manage"><a href="/greenroom">Manage in greenroom →</a></p>
+<div class="slot-actions">
+<a class="slot-manage" href="/greenroom">Manage in greenroom →</a>
+<form method="post" action="/app/streams/{{$.Data.StreamID}}/sources/slots/{{.SlotID}}/regenerate" class="inline-form">
+<button type="submit" class="btn btn-quiet">Regenerate URL</button>
+</form>
+</div>
 </li>
 {{end}}
 </ul>

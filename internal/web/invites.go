@@ -60,8 +60,10 @@ func (s *appServer) streamDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var issued *issuedLink
-	if il, ok := s.reveals.take(r.URL.Query().Get("reveal"), time.Now()); ok {
-		issued = &il
+	if v, ok := s.reveals.take(r.URL.Query().Get("reveal"), time.Now()); ok {
+		if il, ok := v.(issuedLink); ok {
+			issued = &il
+		}
 	}
 	s.renderDetail(w, r, host, st, issued)
 }

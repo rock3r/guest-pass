@@ -155,6 +155,16 @@ func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Req
 	return wsIdentity{session: slot.HostID, peer: "src-" + signaling.PeerID(label), role: role, slot: label}, nil
 }
 
+// sourceStillValid re-checks that a slot source token STILL resolves a slot — used to close
+// the resolve→Join window where a D-22 rotation could land after the handshake authenticated
+// but before the room admitted the source (a TOCTOU; the rotated hash no longer resolves). The
+// full close (a per-session media grant gating admission by token generation) is v1.1
+// (AD-23/RF-3). A token-family value is never logged (EN-16).
+func (wr *wsResolver) sourceStillValid(ctx context.Context, rawSrc string) bool {
+	_, err := wr.store.GetSlotBySourceTokenHash(ctx, wr.hasher.Hash(rawSrc))
+	return err == nil
+}
+
 // requireActiveHost loads a host live and rejects unless it is active (EN-6).
 func (wr *wsResolver) requireActiveHost(ctx context.Context, hostID string) *wsAuthError {
 	host, err := wr.store.GetHost(ctx, hostID)

@@ -127,5 +127,5 @@ const (
 	TerminateExpired      = "expired"       // TERMINAL — pass past its deadline
 	TerminateRevoked      = "revoked"       // TERMINAL — pass revoked
 	TerminateSessionEnded = "session-ended" // TERMINAL — host ended the stream (D-40; emitted in M4)
-	TerminateTokenRotated = "token-rotated" // TERMINAL — slot token rotated (D-22; emitted later)
+	TerminateTokenRotated = "token-rotated" // TERMINAL — slot token rotated (D-22; Room.RotateSource)
 )

@@ -45,6 +45,19 @@ func (h *Hub) Room(session string) *Room {
 	return r
 }
 
+// TerminateSourceIfLive terminates the OBS source peer in the host's LIVE room, if one
+// exists — WITHOUT spawning a room (a peek of the registry, not Room()). Backs D-22
+// slot-token rotation: rotating while no stream is live is a DB-only update with no source
+// to tear down, so this must not create an empty room as a side effect.
+func (h *Hub) TerminateSourceIfLive(session string, source PeerID) {
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r != nil {
+		r.RotateSource(source)
+	}
+}
+
 // Shutdown gracefully terminates every live room for a server drain (RF-21): each room
 // broadcasts a terminate frame with reason to its peers, then is stopped. The registry
 // is cleared so no new work is routed to a stopping room.
