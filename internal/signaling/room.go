@@ -259,20 +259,46 @@ func (r *Room) Kick(actor, target PeerID, invalidate func()) {
 // (NO rank check, unlike Kick) used when their passes are deleted with the stream, so orphaned,
 // pass-deleted sockets can't linger and carry into the host's next session (D-40). It reuses
 // leave() per peer (clears any slot + bumps the epoch + drops the roster entry + tells the
-// others), then delivers each a {t:terminate} and closes its socket — the buffered terminate
-// flushes through the single writer first. Peers not present are skipped.
+// others), then delivers each the TERMINAL frame with the per-peer budget (RF-16) — so a slow
+// guest still gets its reason instead of a bare socket close — and shuts its socket. Blocks until
+// the evictions flush (like Terminate), so the caller knows the peers are gone. Absent peers are
+// skipped.
 func (r *Room) EvictPeers(reason string, targets []PeerID) {
+	done := make(chan struct{})
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		var wg sync.WaitGroup
 		for _, target := range targets {
 			c := conns[target]
 			if c == nil {
 				continue // not connected — nothing to evict
 			}
-			deliver(conns, append(st.leave(target), outbound{to: target, frame: Frame{T: "terminate", Reason: reason}}))
+			// Tell the OTHERS the peer left (peer-left + roster, slot-unbound to a source); a slow
+			// RECIPIENT may drop one of those routine frames (AD-12) — non-terminal, so fine.
+			deliver(conns, st.leave(target))
 			delete(conns, target)
-			close(c.out)
+			// The TERMINAL frame must NOT be dropped like a routine one: budgeted blocking send,
+			// concurrent across targets so the total wait is ~one budget rather than the sum.
+			wg.Add(1)
+			go func(c *peerConn) {
+				defer wg.Done()
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case c.out <- Frame{T: "terminate", Reason: reason}:
+				case <-t.C: // genuinely wedged — give up; the socket still closes below
+				}
+				close(c.out)
+			}(c)
 		}
+		wg.Wait()
+		close(done)
 	})
+	// Block until the evictions flush (a stream delete should complete teardown before responding,
+	// not leave a window of half-evicted sockets). r.done guards a racing Close.
+	select {
+	case <-done:
+	case <-r.done:
+	}
 }
 
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each

@@ -41,6 +41,39 @@ func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	}
 }
 
+// TestRoomEvictPeers_DoesNotDropTerminate mirrors the Terminate guarantee for the SYSTEM eviction
+// path (codex): the terminal `revoked` frame must reach a slow peer (backed-up/unbuffered queue)
+// before its socket closes, not be dropped like a routine frame — else the browser sees a bare
+// close and follows the transient reconnect flow instead of the revoked teardown. An unbuffered
+// out with no reader makes a non-blocking deliver drop; the budgeted blocking send must still land
+// once a reader appears.
+func TestRoomEvictPeers_DoesNotDropTerminate(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	defer r.Close()
+
+	out := make(chan Frame) // unbuffered, no reader: a non-blocking send would drop the terminate
+	r.Join(PeerID("g"), "guest", "", "", out)
+
+	returned := make(chan struct{})
+	go func() { r.EvictPeers(TerminateRevoked, []PeerID{"g"}); close(returned) }()
+
+	// With no reader, the OLD non-blocking deliver would drop the terminate and EvictPeers would
+	// return at once. The budgeted blocking send must still be waiting after a grace period.
+	select {
+	case <-returned:
+		t.Fatal("EvictPeers returned without delivering the terminate (it was dropped)")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// A reader appears; the blocked terminal send proceeds with the revoked reason.
+	f := <-out
+	if f.T != "terminate" || f.Reason != TerminateRevoked {
+		t.Fatalf("delivered frame = %+v, want terminate:revoked", f)
+	}
+	<-returned
+}
+
 // A connection that resolved a room just before it started draining must not be admitted
 // after the terminate broadcast — Join refuses it so it can't strand itself.
 func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
