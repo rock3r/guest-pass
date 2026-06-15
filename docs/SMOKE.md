@@ -14,6 +14,22 @@ as smooth as possible:
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
+> ### Shortcut: don't hand-juggle the behavioral checks
+>
+> The **behavioral** gates here (multi-guest grid, **RF-8** detach, on-air, degradation) are
+> browser-automatable and don't need real humans/devices. To see them without juggling, run the
+> **headful driver** — it launches N fake-media guest tabs + the host greenroom + an OBS source tab,
+> binds a cam slot, and walks the flow on screen (a guest is forced off camera → the host tile **and**
+> the OBS source go black, then release restores them), saving a screenshot at each step:
+>
+> ```sh
+> scripts/smoke-drive.sh --guests 3       # headful; --headless for screenshots only
+> ```
+>
+> The `smoke.sh` tunnel harness + the manual checklist below are then only for the **physical**
+> residue a fake-media browser on one machine can't prove: the real **OBS app** (CEF) rendering,
+> real cross-network **NAT**, **Safari/mobile**, and **~6-guest capacity** on real hardware.
+
 > ### ⚠ Security: dev instance over a tunnel
 >
 > The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in `/auth/dev`
