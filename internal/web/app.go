@@ -155,7 +155,11 @@ func (s *appServer) deleteStream(w http.ResponseWriter, r *http.Request) {
 	}
 	// Deleting the LIVE stream must tear down its room too (D-40): the FK cascade drops the
 	// sessions row, but the host-scoped room + connected peers would otherwise linger and be
-	// reused by the host's next stream. Capture liveness BEFORE the delete (the cascade erases it).
+	// reused by the host's next stream. Hold the per-host binding lock across the liveness check,
+	// delete, and teardown so a concurrent goLive can't interleave (codex); capture liveness
+	// BEFORE the delete (the cascade erases the session row).
+	unlock := s.binds.lock(host.ID)
+	defer unlock()
 	wasLive, _ := s.sessionState(r.Context(), host.ID, st.ID)
 	if err := s.store.DeleteStream(r.Context(), st.ID); err != nil {
 		http.Error(w, "could not delete stream", http.StatusInternalServerError)

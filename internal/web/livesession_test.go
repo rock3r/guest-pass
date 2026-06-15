@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rock3r/guest-pass/internal/signaling"
@@ -206,6 +208,40 @@ func TestSession_DeleteLiveStreamTearsDownRoom(t *testing.T) {
 				t.Fatal("deleting the live stream must tear down its room")
 			}
 		})
+	}
+}
+
+// Concurrent go-live / end-session for one host stay race-free and convergent (codex): the
+// per-host binding lock serializes the DB mutation with the room teardown, so end can't clear the
+// session in a gap before its room is removed. Run under -race; the system ends in a clean state.
+func TestSession_ConcurrentGoLiveEndNoRace(t *testing.T) {
+	ctx := context.Background()
+	a := newAPIHarness(t)
+	host, cookie := a.host(t, "session-race")
+	x := a.createStream(t, cookie, "X")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		wg.Add(1)
+		path := "/app/streams/" + x + "/session/start"
+		if i%2 == 1 {
+			path = "/app/streams/" + x + "/session/end"
+		}
+		go func(path string) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.AddCookie(cookie)
+			a.h.ServeHTTP(httptest.NewRecorder(), req)
+		}(path)
+	}
+	wg.Wait()
+
+	// A final explicit end leaves the host with no active session — no corruption survived the storm.
+	endReq := httptest.NewRequest(http.MethodPost, "/app/streams/"+x+"/session/end", nil)
+	endReq.AddCookie(cookie)
+	a.h.ServeHTTP(httptest.NewRecorder(), endReq)
+	if _, err := a.store.ActiveSession(ctx, host.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after a concurrent start/end storm + final end, want no active session, got err=%v", err)
 	}
 }
 
