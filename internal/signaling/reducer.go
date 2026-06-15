@@ -477,6 +477,12 @@ func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	// D-38: the source loses its occupant, leaving that occupant's publisher with a stale source pc.
 	// Tell it the consumer is gone (same as bindSlot) — UNLESS it already left the room (the leave
 	// path vacates after removing the peer, so s.peers[prev] is nil and we skip the pointless notice).
+	// Known residual (accepted, self-healing): this notice carries no slot epoch, so a rapid
+	// unbind→rebind to the SAME occupant can let a stale consumer-left arrive AFTER the source's fresh
+	// offer and briefly close the rebound source pc — the source's ICE-restart then re-offers and the
+	// guest rebuilds it within seconds. Epoch-stamping the relayed source signals + this notice would
+	// remove it, at the cost of plumbing the core relay path; deferred as not worth that for a narrow,
+	// auto-recovering blip (the relaySignal source→occupant gate already blocks the stale-offer re-arm).
 	if prev != "" && s.peers[prev] != nil {
 		out = append(out, outbound{to: prev, frame: Frame{T: "consumer-left", PeerID: string(st.source)}})
 	}
