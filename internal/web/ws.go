@@ -122,16 +122,20 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Replay a guest's/co-host's persisted cam-slot binding as a live (re)bind (D-20/D-40): now
-	// that it is a room peer, Room.Rebind re-routes /s/{slot} to it — so a binding made before
+	// that it is a room peer, Room.ResumeBind re-routes /s/{slot} to it — so a binding made before
 	// OBS/guests connected, or surviving a reconnect, takes effect without the host re-binding.
 	// The binding is re-read HERE (not at the handshake), so a host PUT during the join window
-	// can't replay a stale label. The host's own greenroom (re)bind also flows through Rebind.
+	// can't replay a stale label. ResumeBind (not Rebind) is NON-displacing: an automatic replay
+	// must never knock a different live occupant off a slot. v1 runs one live session per host,
+	// but pass.slot_id isn't gated on which stream is live (session lifecycle is v1.1), so a guest
+	// of a non-live stream opening their link must not auto-hijack the on-air slot. The host's own
+	// greenroom (re)bind still displaces deliberately (putPassSlot → Rebind/RebindOrVacate).
 	if id.role == "guest" || id.role == "cohost" {
 		// Re-read + enqueue under the per-host binding lock so a concurrent host PUT can't make
 		// this replay route from a stale binding (the lock orders the room commands by DB commit).
 		unlock := h.binds.lock(id.session)
 		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer)); slot != "" {
-			room.Rebind(slot, id.peer)
+			room.ResumeBind(slot, id.peer)
 		}
 		unlock()
 	}

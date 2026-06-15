@@ -335,9 +335,15 @@ hashed):
   role-filtered roster carries a **host-only `boundSlot`** per participant (which cam
   slot they occupy) so the picker reflects the live assignment; it is stripped from
   co-host/guest projections (D-15). The persisted binding is **replayed as a live
-  rebind when the guest (re)connects** (the `/ws` join path issues `Room.Rebind` from
-  `passes.slot_id`), so a binding made before OBS/guests connect — or surviving a
-  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40).
+  rebind when the guest (re)connects** (the `/ws` join path issues `Room.ResumeBind`
+  from `passes.slot_id`), so a binding made before OBS/guests connect — or surviving a
+  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40). The
+  automatic replay is **non-displacing**: it only resumes into a free slot or
+  re-affirms the same peer, never knocking a different live occupant off-air. Only the
+  host's **explicit** greenroom (re)bind displaces. (v1 runs one live session per host
+  but has no runtime gate on which stream is live — session lifecycle is v1.1 — so a
+  guest of a non-live stream whose pass carries a stale binding must not auto-hijack the
+  on-air slot just by opening their link.)
 
 ### Slot-rebind protocol + slot epoch (EN-3)
 

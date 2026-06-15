@@ -117,6 +117,41 @@ func TestRebindEnforcesOneCamSlotPerOccupant(t *testing.T) {
 	}
 }
 
+// An automatic join-replay (resumeBind) must NEVER displace a different live occupant (codex):
+// v1 has no runtime gate on which stream is live, so a guest of a non-live stream whose pass
+// carries a stale cam-1 binding could otherwise hijack the on-air slot just by connecting. A
+// replay only resumes into a free slot or re-affirms the same peer; displacing stays an
+// explicit host action (rebindSlot).
+func TestResumeBindNeverDisplacesLiveOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("live", "guest", "") // the on-air guest
+	s.join("intruder", "guest", "")
+
+	s.rebindSlot("cam-1", "live")
+	if s.slot("cam-1").occupant != "live" {
+		t.Fatalf("cam-1 occupant = %q, want live", s.slot("cam-1").occupant)
+	}
+	// A replay for a DIFFERENT peer must be a no-op — the live occupant keeps the slot.
+	if out := s.resumeBind("cam-1", "intruder"); out != nil {
+		t.Fatalf("resumeBind into an occupied slot must not emit (no displacement), got %v", out)
+	}
+	if occ := s.slot("cam-1").occupant; occ != "live" {
+		t.Fatalf("replay displaced the live occupant of cam-1 (now %q) — must never auto-hijack", occ)
+	}
+
+	// Re-affirming the SAME peer is allowed (idempotent reconnect, D-40).
+	s.resumeBind("cam-1", "live")
+	if s.slot("cam-1").occupant != "live" {
+		t.Fatalf("same-peer resume must keep cam-1 bound, got %q", s.slot("cam-1").occupant)
+	}
+	// Resuming into a FREE slot binds (the normal pre-bind-then-connect path).
+	s.resumeBind("cam-2", "intruder")
+	if s.slot("cam-2").occupant != "intruder" {
+		t.Fatalf("resume into a free slot must bind, cam-2 occupant = %q", s.slot("cam-2").occupant)
+	}
+}
+
 // Binding the shared screenshare slot must NOT evict the occupant's camera (codex): the
 // one-cam-slot-per-occupant rule is scoped to cam slots, and the screen slot is independent —
 // a guest can be on-cam AND screensharing at once.

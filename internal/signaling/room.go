@@ -375,6 +375,15 @@ func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 	})
 }
 
+// ResumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a
+// different live occupant — see roomState.resumeBind. Used by the /ws join replay; the host's
+// explicit greenroom (re)bind still displaces via Rebind/RebindOrVacate.
+func (r *Room) ResumeBind(slot SlotID, occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.resumeBind(slot, occupant))
+	})
+}
+
 // RebindOrVacate binds the slot to occupant if it is connected, else VACATES the slot — so a
 // greenroom (re)bind whose new occupant is OFFLINE drops the slot to placeholder instead of
 // stranding the displaced prior occupant live (see rebindOrVacate).

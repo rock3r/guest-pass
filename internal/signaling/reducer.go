@@ -470,6 +470,20 @@ func (s *roomState) rebindOrVacate(sid SlotID, occupant PeerID) []outbound {
 	return s.unbindSlot(sid)
 }
 
+// resumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a
+// different live occupant. v1 runs one live session per host (EN-2), but the persisted binding
+// is keyed per-pass with no runtime "which stream is live" gate (session lifecycle is v1.1),
+// so a guest whose pass.slot_id was set for a NON-live stream could otherwise auto-replay into
+// and hijack the on-air slot. An automatic replay must only RESUME into a slot that is free or
+// already this peer's (idempotent reconnect, D-40); a held slot is left to its live occupant.
+// Displacing a slot occupant remains an explicit, host-initiated greenroom action (rebindSlot).
+func (s *roomState) resumeBind(sid SlotID, occupant PeerID) []outbound {
+	if st, ok := s.slots[sid]; ok && st.occupant != "" && st.occupant != occupant {
+		return nil // slot is live to a different peer — never auto-displace on a replay
+	}
+	return s.rebindSlot(sid, occupant)
+}
+
 // vacateOccupant clears any cam slot a peer currently occupies — the greenroom "unassign". It
 // keys on the LIVE occupancy the room owns, not a caller-supplied label, so a concurrent move
 // of the same guest between the caller's read and this call can't leave a stale slot bound.
