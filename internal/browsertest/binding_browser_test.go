@@ -130,6 +130,74 @@ func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 	}
 }
 
+// A DB-only (pre-live) picker selection must STICK across re-renders, not snap back (codex P2):
+// with no active session the bind persists but produces no roster frame (boundSlot is
+// live-occupancy derived), so the controlled <select> would reset to "" on the next grid
+// re-render unless the optimistic override holds the host's choice until Go live replays it.
+func TestBinding_PreLivePickerKeepsSelection(t *testing.T) {
+	s := seedDeviceCheck(t) // NO StartSession → the bind is DB-only (pre-live)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 200*time.Second)
+	defer cancelDeadline()
+	guestACtx := rootCtx
+	guestBCtx, cancelB := chromedp.NewContext(rootCtx)
+	defer cancelB()
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestACtx, s.base, s.rawToken, "A")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render guest A's slot picker: %v", err)
+	}
+
+	// Pick cam-1 for A pre-live: the PUT persists DB-only (no session → no reroute, no roster frame).
+	var ok bool
+	expr := fmt.Sprintf(`(() => {
+		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		if (!sel) return false;
+		sel.value = "cam-1";
+		sel.dispatchEvent(new Event('change', { bubbles: true }));
+		return true;
+	})()`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil || !ok {
+		t.Fatalf("set A's picker to cam-1: ok=%v err=%v", ok, err)
+	}
+
+	// Guest B joins → the grid re-renders, which RECONCILES A's controlled <select>. Without the
+	// override that reconciliation resets A's picker to "" (entry.boundSlot is still empty pre-live);
+	// with it, A stays on cam-1. Waiting for B's picker proves the re-render happened.
+	publishGuest(t, guestBCtx, s.base, s.rawTokenB, "B")
+	if err := chromedp.Run(hostCtx,
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passIDB), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest B did not render (no grid re-render to reconcile against): %v", err)
+	}
+
+	var aVal string
+	if err := chromedp.Run(hostCtx,
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value`, s.passID), &aVal),
+	); err != nil {
+		t.Fatalf("read A's picker value: %v", err)
+	}
+	if aVal != "cam-1" {
+		t.Fatalf("A's pre-live picker selection reverted to %q after a re-render — must stay cam-1", aVal)
+	}
+}
+
 // A failed (re)bind must surface to the host, not be swallowed (codex, M4 PR-6). The greenroom
 // picker PUTs to a cam slot the host has not provisioned (only cam-1 is wired in the seed), so
 // the server answers 404 with no roster update — the controlled picker stays put AND the

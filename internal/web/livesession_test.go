@@ -152,6 +152,63 @@ func TestSession_GoLiveReplaysPreLiveBindings(t *testing.T) {
 	}
 }
 
+// Deleting the live stream tears down its room too (codex P2/D-40): the FK cascade drops the
+// session row, so the live room must be terminated or it (and its peers) would linger into the
+// host's next stream. Covers both delete paths (app POST + API DELETE).
+func TestSession_DeleteLiveStreamTearsDownRoom(t *testing.T) {
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, tc := range []struct {
+		name   string
+		delete func(t *testing.T, base, streamID string, cookie *http.Cookie)
+	}{
+		{"app POST", func(t *testing.T, base, streamID string, cookie *http.Cookie) {
+			req, _ := http.NewRequest(http.MethodPost, base+"/app/streams/"+streamID+"/delete", nil)
+			req.AddCookie(cookie)
+			resp, err := noRedirect.Do(req)
+			if err != nil {
+				t.Fatalf("delete POST: %v", err)
+			}
+			_ = resp.Body.Close()
+		}},
+		{"API DELETE", func(t *testing.T, base, streamID string, cookie *http.Cookie) {
+			req, _ := http.NewRequest(http.MethodDelete, base+"/api/streams/"+streamID, nil)
+			req.AddCookie(cookie)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("delete API: %v", err)
+			}
+			_ = resp.Body.Close()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			h := newWSHarness(t, wsHarnessOpts{})
+			host, cookie := h.seedHost(t, "del-"+strings.ReplaceAll(tc.name, " ", ""), store.HostActive)
+			stream := h.seedStream(t, host.ID)
+			passRaw, _ := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+			if _, err := h.store.StartSession(ctx, stream.ID, host.ID); err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+
+			gc := h.dialOK(t, "pass="+passRaw, nil)
+			defer gc.CloseNow()
+			_ = wsReadFrame(t, gc)
+			if h.hub.RoomIfLive(host.ID) == nil {
+				t.Fatal("room should be live after the guest joined")
+			}
+
+			tc.delete(t, h.srv.URL, stream.ID, cookie)
+
+			if f := readFrameOfType(t, gc, "terminate"); f.Reason != signaling.TerminateSessionEnded {
+				t.Fatalf("terminate reason = %q, want %q", f.Reason, signaling.TerminateSessionEnded)
+			}
+			if h.hub.RoomIfLive(host.ID) != nil {
+				t.Fatal("deleting the live stream must tear down its room")
+			}
+		})
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

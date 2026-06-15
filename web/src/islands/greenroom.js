@@ -35,6 +35,12 @@ function Greenroom() {
   // entry.boundSlot (roster-driven), so a rejected PUT snaps the picker back AND shows why
   // (e.g. 404 when slots aren't provisioned yet — the host must open the Sources tab first).
   const [bindError, setBindError] = useState("");
+  // boundOverrides keeps a picker selection visible when the bind persisted but produced NO roster
+  // frame — i.e. a DB-only (pre-live) bind: boundSlot is derived from LIVE occupancy, so before the
+  // host goes live nothing updates entry.boundSlot and the controlled select would snap back. Keyed
+  // by pass id → the slot the host last successfully set (""=unassigned). The roster clears an entry
+  // once the authoritative live value catches up (e.g. on Go-live replay).
+  const [boundOverrides, setBoundOverrides] = useState({});
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -117,6 +123,20 @@ function Greenroom() {
       // This client's own rank drives which controls show (it can change live via demotion).
       const me = (f.peers || []).find((p) => p.self || p.id === f.self);
       if (me) setViewerRole(me.role);
+      // Release a local override once the roster carries a live binding for that pass (the
+      // authoritative value has caught up — e.g. Go-live replayed the DB binding). An empty
+      // roster boundSlot is left alone: it doesn't yet reflect a still-pending DB-only bind.
+      setBoundOverrides((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const p of f.peers || []) {
+          if (p.id in next && p.boundSlot) {
+            delete next[p.id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
       syncTiles();
       setState((s) => (s === "connecting" ? "live" : s));
     });
@@ -170,7 +190,19 @@ function Greenroom() {
     })
       .then(async (r) => {
         if (r.ok) {
-          setBindError(""); // success: the re-broadcast roster moves the picker
+          setBindError("");
+          // Reflect the persisted selection locally so a DB-only (pre-live) bind doesn't snap the
+          // picker back — the server echoes the new boundSlot ("" when unassigned). When live, the
+          // matching roster frame supersedes and clears this. Also drop any other pass's override
+          // that pointed at the same slot (this bind displaced it).
+          const body = await r.json().catch(() => ({}));
+          const newSlot = (body && body.boundSlot) || "";
+          setBoundOverrides((prev) => {
+            const next = { ...prev };
+            if (newSlot) for (const k of Object.keys(next)) if (next[k] === newSlot) delete next[k];
+            next[passId] = newSlot;
+            return next;
+          });
           return;
         }
         // A server-side rejection (404 unprovisioned, 400 bad slot, 5xx) returns no roster
@@ -218,7 +250,7 @@ function Greenroom() {
           tiles.map((t) => (
           <Tile
             key={t.id}
-            entry={t.entry}
+            entry={t.id in boundOverrides ? { ...t.entry, boundSlot: boundOverrides[t.id] } : t.entry}
             stream={t.stream}
             viewerRole={viewerRole}
             live={state === "live"}

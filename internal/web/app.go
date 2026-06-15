@@ -149,13 +149,20 @@ func (s *appServer) updateStream(w http.ResponseWriter, r *http.Request) {
 // deleteStream removes an owned stream (cascading to its passes/sessions, FK) and
 // redirects to the dashboard.
 func (s *appServer) deleteStream(w http.ResponseWriter, r *http.Request) {
-	_, st, ok := s.ownedStream(w, r)
+	host, st, ok := s.ownedStream(w, r)
 	if !ok {
 		return
 	}
+	// Deleting the LIVE stream must tear down its room too (D-40): the FK cascade drops the
+	// sessions row, but the host-scoped room + connected peers would otherwise linger and be
+	// reused by the host's next stream. Capture liveness BEFORE the delete (the cascade erases it).
+	wasLive, _ := s.sessionState(r.Context(), host.ID, st.ID)
 	if err := s.store.DeleteStream(r.Context(), st.ID); err != nil {
 		http.Error(w, "could not delete stream", http.StatusInternalServerError)
 		return
+	}
+	if wasLive && s.hub != nil {
+		s.hub.EndSession(host.ID, signaling.TerminateSessionEnded)
 	}
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
