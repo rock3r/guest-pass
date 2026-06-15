@@ -4,13 +4,15 @@ The chromedp suite proves protocol/plumbing, not the real transport (RF-7). This
 covers the **manual** gates that can't be automated, with a one-command harness to make them
 as smooth as possible:
 
-- **Real OBS-CEF media receive** — an actual OBS browser source renders a guest (AD-10 / RF-17).
-- **Multi-machine / real-network NAT traversal** — guests across separate networks exercise
-  real ICE (RF-7); STUN-only direct connects (D-38).
-- **~6-guest capacity + live degradation** — load the mesh and watch shedding/recovery (AD-21).
-- **RF-8 receiver-side suppression-lock enforcement** — a force really suppresses a guest on
-  air and on peers' tiles, independent of the guest's client.
-- **Safari / mobile guest** rendering (RF-7).
+- **Real OBS-CEF media receive + on-air** — an actual OBS browser source (CEF 127) renders a guest,
+  and bringing it on-program lights the on-air pill via the real OBS event (AD-10 / RF-17 / D-24).
+- **Multi-machine / real-network NAT traversal** — guests on separate networks connect over real
+  ICE. **STUN-only** (D-38): direct connect is the gate; a TURN relay is **out of scope for v1**.
+
+The behavioral checks (multi-guest grid, RF-8 detach, on-air *state*, degradation) are
+**browser-automated** — by the headful driver below and the chromedp suite in CI — so they need no
+real machines. **Out of scope for v1** (don't test here): mobile / non-Chrome incl. **Safari**, and
+**~6-guest capacity** (SPIKE-0 already proved encoder load on real hardware, AD-21).
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
@@ -29,10 +31,10 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 > What the driver does **not** cover: it renders the OBS source but never fires
 > `obsSourceActiveChanged`, so it does **not** exercise the **on-air pill**, and it injects no
 > shedding, so it does **not** exercise **degradation** — those are covered headless by the chromedp
-> suite (`onair_browser_test.go`, `degradation_browser_test.go`) in CI, not by this driver. And the
+> suite (`onair_browser_test.go`, `degradation_browser_test.go`) in CI, not by this driver. The only
 > **physical** residue a fake-media browser on one machine can't prove stays a manual pass (the
-> checklist below): the real **OBS app** (CEF) rendering + its real on-air event, real cross-network
-> **NAT**, **Safari/mobile**, and **~6-guest capacity** on real hardware.
+> checklist below): the real **OBS app** (CEF) rendering + its real on-air event, and real
+> cross-network **NAT** (STUN-only). (Mobile/non-Chrome and ~6-guest capacity are out of scope for v1.)
 
 > ### ⚠ Security: dev instance over a tunnel
 >
@@ -52,13 +54,13 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 ## Prerequisites
 
 - **Go** (the repo toolchain) and a checkout of this repo.
-- **A tunnel tool** so phones / other machines / Safari reach the loopback dev server over a
+- **A tunnel tool** so a second machine on another network reaches the loopback dev server over a
   secure origin (browser camera/mic require a secure context):
   - `cloudflared` — **recommended, no account needed**: `brew install cloudflared`
   - or `ngrok` — `brew install ngrok && ngrok config add-authtoken <token>`
-- **`qrencode`** (optional, for phone QR codes): `brew install qrencode`
-- **OBS ≥ 31 (CEF 127)** on a machine, for the real-OBS-CEF receive check.
-- A **second device** (phone on cellular is ideal) for the real-network / Safari checks.
+- **`qrencode`** (optional, for scannable guest-link QR codes): `brew install qrencode`
+- **OBS ≥ 31 (CEF 127)** on the host machine, for the real-OBS-CEF receive check.
+- A **second machine on a different network** for the real-network NAT check.
 
 ---
 
@@ -92,9 +94,9 @@ holder could impersonate that OBS source). The tunnel proxy refuses `/s/` for th
 
 ## Walkthrough
 
-1. **Guests join.** Open each guest link on a device/tab (scan the QR on phones), allow camera/mic,
-   click **Enter the greenroom**, wait for "your camera is live in the greenroom". The co-host link
-   joins as a co-host. Spread guests across machines/networks for the NAT checks.
+1. **Guests join.** Open each guest link in a Chrome tab (or on a second machine for the NAT check),
+   allow camera/mic, click **Enter the greenroom**, wait for "your camera is live in the greenroom".
+   The co-host link joins as a co-host.
 2. **Bind for OBS.** Press **Enter** in the `smoke.sh` terminal to bind every cam slot to its
    participant. **Do this before opening the greenroom** (next step): the bind connects briefly as
    the host (peer `host`), and one-connection-per-identity (EN-16) means it would kick an open
@@ -124,14 +126,9 @@ holder could impersonate that OBS source). The tunnel proxy refuses `/s/` for th
       guest's own pill); taking it off-program clears it; with no source the pill is
       "status-unavailable" (never asserted without a live signal).
 
-### 3. ~6-guest capacity + degradation (AD-21 / AC-15)
-- [ ] With ~6 guests connected, the mesh stays usable; tiles keep rendering.
-- [ ] Under CPU/bandwidth pressure, **degrading/recovering badges** appear on tiles (host + co-host
-      see all, read-only; a guest sees only its own).
-- [ ] The host **"Bump quality now"** control recovers shed senders immediately.
-
-### 4. RF-8 — suppression locks really suppress (D-13 / EN-7 / RF-8) ★ the new bit
-For a guest who is **on a bound OBS source** and **visible as a thumbnail** to other participants:
+### 3. RF-8 — suppression locks really suppress on real OBS + peers (D-13 / EN-7 / RF-8)
+The driver already proves this headless; this confirms it on the **real OBS-CEF output**. For a guest
+**on a bound OBS source** and **visible as a thumbnail** to other participants:
 - [ ] **Force-mute** the guest (from the host greenroom tile, or a co-host's guest-session tile):
   - [ ] their **OBS source goes silent** (audio track muted on air),
   - [ ] their **thumbnail on other participants** goes silent,
@@ -147,17 +144,16 @@ For a guest who is **on a bound OBS source** and **visible as a thumbnail** to o
 > automated browser tests; this manual pass confirms the same detach holds on the **real OBS-CEF
 > output** and **real peer browsers**.
 
-### 5. Backstage chat privacy (EN-20)
+### 4. Backstage chat privacy (EN-20)
 - [ ] Backstage chat relays between participants and shows the "not recorded — off the record"
       note. (It is never written to disk — that's the server-tested invariant; nothing to inspect.)
 
-### 6. Real-network / NAT (RF-7 / D-38)
-- [ ] A guest on a **different network** (e.g. phone on cellular) still connects and renders.
-- [ ] STUN-only: a guest behind **symmetric NAT / a locked firewall** may get the clear "your
-      network blocks peer-to-peer" message instead of a silent hang — **expected without TURN**.
-
-### 7. Safari / mobile (RF-7)
-- [ ] A guest on **Safari** and on a **phone** joins (via the tunnel link / QR) and renders.
+### 5. Real-network / NAT — STUN-only (RF-7 / D-38)
+- [ ] A guest on a **second machine on a different network** connects and renders — STUN gives the
+      reflexive candidates for a direct P2P path through the common cone-NAT types (the v1 gate).
+- [ ] A pair behind **symmetric NAT / a UDP-blocking firewall simply won't connect**: there is **no
+      TURN relay in v1** (D-38; TURN-as-relay is out of scope), and the friendly "blocks P2P" error
+      isn't built yet, so today it just fails. Test from ordinary networks (not both symmetric).
 
 ---
 
@@ -179,8 +175,9 @@ For a guest who is **on a bound OBS source** and **visible as a thumbnail** to o
 ## Notes
 
 - **Dev-only / STUN-only.** This harness mints a dev host session without Google and serves over a
-  tunnel for convenience; it is not a deployment. To exercise the **TURN relay** path (the ~10%
-  symmetric-NAT case), run a coturn and set `TURN_URL`/`TURN_SECRET` (see `DEPLOYMENT.md` §2, §9) —
-  out of scope for this STUN-only harness.
+  tunnel for convenience; it is not a deployment. **TURN relay is out of scope for v1** (D-38 —
+  STUN-only; the ~10–15% symmetric-NAT / locked-firewall pairs are an accepted, un-relayed
+  limitation). The TURN ICE-config plumbing exists (`TURN_URL`/`TURN_SECRET` + a coturn,
+  `DEPLOYMENT.md` §2/§9) but running a relay is not part of v1.
 - See `docs/TESTING.md` §5 for why these gates are manual, and `docs/ARCHITECTURE.md` (RF-8, §7)
   for the suppression-lock receiver-side contract this smoke confirms on real OBS + peers.
