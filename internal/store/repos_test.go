@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -134,6 +135,126 @@ func TestSlotRepo_OneCamPerIdx(t *testing.T) {
 	// A different idx is fine.
 	if _, err := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(2), SourceTokenHash: "c2"}); err != nil {
 		t.Fatalf("cam-2: %v", err)
+	}
+}
+
+// EnsureSlotPool backs idempotent Sources-tab provisioning (M4 PR-4): in one transaction it
+// inserts only the missing slots and reports which it inserted, never overwriting an
+// existing token — so re-opening the tab can't duplicate the pool or rotate tokens, and a
+// concurrent first open gets an all-or-none reveal.
+func TestSlotRepo_EnsurePoolIdempotent(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-ensure")
+
+	specs := []SlotSpec{
+		{Kind: SlotCam, Idx: i64(1), SourceTokenHash: "cam1-first"},
+		{Kind: SlotScreenshare, SourceTokenHash: "scr-first"},
+	}
+	ins, err := st.EnsureSlotPool(ctx, h.ID, specs)
+	if err != nil {
+		t.Fatalf("first EnsureSlotPool: %v", err)
+	}
+	if len(ins) != 2 || !ins[0] || !ins[1] {
+		t.Fatalf("first ensure inserted = %v, want both true", ins)
+	}
+
+	// A second ensure with NEW tokens is a no-op and keeps the originals (no overwrite).
+	ins, err = st.EnsureSlotPool(ctx, h.ID, []SlotSpec{
+		{Kind: SlotCam, Idx: i64(1), SourceTokenHash: "cam1-second"},
+		{Kind: SlotScreenshare, SourceTokenHash: "scr-second"},
+	})
+	if err != nil {
+		t.Fatalf("second EnsureSlotPool: %v", err)
+	}
+	if ins[0] || ins[1] {
+		t.Fatalf("second ensure inserted = %v, want both false (idempotent)", ins)
+	}
+	if _, err := st.GetSlotBySourceTokenHash(ctx, "cam1-first"); err != nil {
+		t.Fatalf("original cam token should still resolve: %v", err)
+	}
+	if _, err := st.GetSlotBySourceTokenHash(ctx, "cam1-second"); err == nil {
+		t.Fatal("ensure overwrote the existing slot's token")
+	}
+
+	// A mixed call inserts only the genuinely-missing slot.
+	ins, err = st.EnsureSlotPool(ctx, h.ID, []SlotSpec{
+		{Kind: SlotCam, Idx: i64(1), SourceTokenHash: "cam1-x"}, // exists → false
+		{Kind: SlotCam, Idx: i64(2), SourceTokenHash: "cam2"},   // new → true
+	})
+	if err != nil {
+		t.Fatalf("mixed EnsureSlotPool: %v", err)
+	}
+	if ins[0] || !ins[1] {
+		t.Fatalf("mixed ensure inserted = %v, want [false true]", ins)
+	}
+}
+
+// Concurrent first opens of the Sources tab must produce an all-or-none reveal: exactly one
+// caller inserts the whole missing pool (and reveals all its URLs) while the rest insert
+// nothing — never a split where each caller created a different subset (codex/Bugbot, M4
+// PR-4). Proven by running EnsureSlotPool from many goroutines at once.
+func TestSlotRepo_EnsurePoolConcurrentAllOrNone(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-concurrent")
+
+	const goroutines = 8
+	specs := func(tag string) []SlotSpec {
+		out := make([]SlotSpec, 0, 9)
+		for i := int64(1); i <= 8; i++ {
+			idx := i
+			out = append(out, SlotSpec{Kind: SlotCam, Idx: &idx, SourceTokenHash: fmt.Sprintf("%s-cam-%d", tag, i)})
+		}
+		return append(out, SlotSpec{Kind: SlotScreenshare, SourceTokenHash: tag + "-scr"})
+	}
+
+	type result struct {
+		anyInserted bool
+		count       int
+	}
+	results := make(chan result, goroutines)
+	start := make(chan struct{})
+	for g := 0; g < goroutines; g++ {
+		go func(tag string) {
+			<-start
+			ins, err := st.EnsureSlotPool(ctx, h.ID, specs(tag))
+			if err != nil {
+				results <- result{}
+				t.Errorf("EnsureSlotPool: %v", err)
+				return
+			}
+			r := result{}
+			for _, b := range ins {
+				if b {
+					r.anyInserted = true
+					r.count++
+				}
+			}
+			results <- r
+		}(fmt.Sprintf("g%d", g))
+	}
+	close(start)
+
+	winners, totalInserted := 0, 0
+	for i := 0; i < goroutines; i++ {
+		r := <-results
+		if r.anyInserted {
+			winners++
+			if r.count != 9 {
+				t.Fatalf("a winning open inserted %d slots, want all 9 (all-or-none)", r.count)
+			}
+		}
+		totalInserted += r.count
+	}
+	if winners != 1 {
+		t.Fatalf("%d opens reported inserts, want exactly 1 (all-or-none reveal)", winners)
+	}
+	if totalInserted != 9 {
+		t.Fatalf("total slots inserted = %d, want 9 (no duplicates, no split)", totalInserted)
+	}
+	if slots, _ := st.ListSlotsByHost(ctx, h.ID); len(slots) != 9 {
+		t.Fatalf("pool has %d slots after concurrent ensure, want 9", len(slots))
 	}
 }
 

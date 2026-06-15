@@ -8,7 +8,45 @@
 
 <nav class="tabs" aria-label="Stream sections">
 <a class="tab{{if eq .Data.Tab "invites"}} tab-active{{end}}" href="/app/streams/{{.Data.StreamID}}"{{if eq .Data.Tab "invites"}} aria-current="page"{{end}}>Invites</a>
+<a class="tab{{if eq .Data.Tab "sources"}} tab-active{{end}}" href="/app/streams/{{.Data.StreamID}}/sources"{{if eq .Data.Tab "sources"}} aria-current="page"{{end}}>Sources</a>
 </nav>
+
+{{if eq .Data.Tab "sources"}}
+<section class="sources">
+<p class="sources-intro">Wire each of these into OBS once as a browser source, then reuse them every
+stream — the slot→guest binding re-routes live from the
+<a href="/greenroom">greenroom People controls</a> with no OBS edit. These URLs are host-only;
+guests never see them. Editing who's in a slot, nameplates, and the quality ceiling all live in the
+<a href="/greenroom">greenroom</a>.</p>
+
+{{if .Data.HasReveal}}
+<div class="issued" role="status">
+<p><strong>Copy your OBS source URLs now</strong> — for security they're shown only once, at setup.
+Lost them later? Regenerate the slot to get a fresh URL.</p>
+<textarea class="issued-link reveal-all" readonly rows="9" aria-label="All OBS source URLs">{{.Data.RevealAll}}</textarea>
+</div>
+{{end}}
+
+<ul class="slot-list">
+{{range .Data.Slots}}
+<li class="slot-card">
+<div class="slot-head">
+<span class="slot-title">{{.Title}}</span>
+<span class="slot-onair" data-onair="{{.OnAir}}">on-air: {{.OnAir}}</span>
+</div>
+<div class="slot-occupant">Occupant: {{if .HasOccupant}}<strong>{{.Occupant}}</strong>{{else}}<span class="muted">empty</span>{{end}}</div>
+{{if .Revealed}}
+<label class="slot-url-label">OBS source URL<input class="issued-link" type="text" readonly value="{{.URL}}" aria-label="{{.Title}} OBS source URL"></label>
+{{else}}
+<p class="slot-url-hidden muted">URL shown once at setup. Regenerate this slot to reveal a fresh URL.</p>
+{{end}}
+<p class="slot-manage"><a href="/greenroom">Manage in greenroom →</a></p>
+</li>
+{{end}}
+</ul>
+</section>
+
+{{else}}
 
 {{if .Data.Issued}}
 <div class="issued" role="status">
@@ -62,5 +100,7 @@ Copy the link now; it won't be shown again:</p>
 </form>
 </section>
 </section>
+
+{{end}}
 </section>
 {{end}}

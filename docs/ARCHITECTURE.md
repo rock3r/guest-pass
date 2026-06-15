@@ -1106,8 +1106,17 @@ here; those are greenroom-only (EN-23). Invite actions: `POST /app/streams/{id}/
 re-rotates a token); the detail GET reveals the magic link **once** via that single-use
 nonce — the raw token is never stored (EN-5) and never rides the URL (the nonce is not
 the token). Re-issue rotates the token so the old link stops resolving **and clears the
-deadline** so the fresh link can't be born expired (PD-2/D-5). The Sources tab and
-settings surfaces hang off the same prefix as they land.
+deadline** so the fresh link can't be born expired (PD-2/D-5). `GET
+/app/streams/{id}/sources` is the **read-only Sources tab** (EN-26): it idempotently
+provisions the host-global slot pool on first open (cam 1–8 + the shared screenshare
+slot, D-20; the host slot is DEF-1) and renders per-slot cards (slot + current occupant
++ three-state on-air pill, defaulting to `status-unavailable` since the no-JS reference
+page carries no live WS, D-24). Each slot's permanent OBS URL is **revealed once**, at
+provisioning — the source token is stored hashed (EN-5) so it can't be re-derived;
+re-revealing is a regenerate (D-22, the rotation step). The cards carry **no editable
+controls** — binding, nameplate, and the quality ceiling all live in the host-only
+greenroom People controls, which each card links to (EN-23/EN-26). The settings surface
+hangs off the same prefix as it lands.
 No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
 `SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
 separate CSRF token is needed. After Google sign-in the host lands on `/app`.
