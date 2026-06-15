@@ -14,6 +14,26 @@ as smooth as possible:
 
 It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in a release build.
 
+> ### Shortcut: don't hand-juggle the multi-guest + RF-8 check
+>
+> To watch the **multi-guest grid + RF-8** flow without juggling, run the **headful driver** — it
+> launches N fake-media guest tabs + the host greenroom + an OBS source tab, binds a cam slot, and
+> drives it on screen: a **non-cooperating** guest (one that keeps sending) is forced off camera →
+> the host tile **and** the OBS source go black (genuinely consumer-side detach), then release
+> restores them. A screenshot is saved at each step:
+>
+> ```sh
+> scripts/smoke-drive.sh --guests 3       # headful; --headless for screenshots only
+> ```
+>
+> What the driver does **not** cover: it renders the OBS source but never fires
+> `obsSourceActiveChanged`, so it does **not** exercise the **on-air pill**, and it injects no
+> shedding, so it does **not** exercise **degradation** — those are covered headless by the chromedp
+> suite (`onair_browser_test.go`, `degradation_browser_test.go`) in CI, not by this driver. And the
+> **physical** residue a fake-media browser on one machine can't prove stays a manual pass (the
+> checklist below): the real **OBS app** (CEF) rendering + its real on-air event, real cross-network
+> **NAT**, **Safari/mobile**, and **~6-guest capacity** on real hardware.
+
 > ### ⚠ Security: dev instance over a tunnel
 >
 > The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in `/auth/dev`
