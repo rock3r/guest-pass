@@ -308,6 +308,34 @@ func TestOccupantLeaveDoesNotNotifyDepartedOccupant(t *testing.T) {
 	}
 }
 
+// D-38: a source's signals are relayed ONLY to its slot's CURRENT occupant. A stale source offer to a
+// PRIOR occupant (after a rebind/unbind) is dropped — so the prior occupant, which just dropped that
+// source's pc on {t:consumer-left}, can't recreate it from a late offer and re-arm the watchdog. A
+// non-source (mesh) relay is unaffected.
+func TestRelaySignalFromSourceOnlyReachesCurrentOccupant(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
+	s.rebindSlot("cam-1", "a")
+
+	if out := s.relaySignal("src", Frame{To: "a"}); len(out) != 1 || out[0].to != "a" {
+		t.Fatalf("a source signal to its current occupant must relay, got %+v", out)
+	}
+
+	s.rebindSlot("cam-1", "b") // rebind away from a
+	if out := s.relaySignal("src", Frame{To: "a"}); len(out) != 0 {
+		t.Fatalf("a stale source signal to the prior occupant must be dropped, got %+v", out)
+	}
+	if out := s.relaySignal("src", Frame{To: "b"}); len(out) != 1 || out[0].to != "b" {
+		t.Fatalf("a source signal to the new occupant must relay, got %+v", out)
+	}
+	if out := s.relaySignal("a", Frame{To: "b"}); len(out) != 1 || out[0].to != "b" {
+		t.Fatalf("a non-source (mesh) relay must be unaffected by the source gate, got %+v", out)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {

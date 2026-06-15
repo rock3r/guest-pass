@@ -176,8 +176,11 @@ consumer that *stops consuming* the guest before connecting is untracked so it
 can't trip a false positive — the host monitor via `{t:peer-left}` (visible to the
 guest), and an OBS source via `{t:consumer-left}` to its slot occupant when the
 source leaves OR its slot is unbound / rebound away (§7; sources are hidden from
-guest rosters, EN-13). TURN is a NAT-traversal *packet* relay (encrypted DTLS-SRTP
-forwarded without inspection), so it is D-23-safe — not "media through the server."
+guest rosters, EN-13). The server also relays a source's signals **only to its
+slot's current occupant**, so a stale post-unbind offer can't recreate the dropped
+pc on the prior occupant. TURN is a NAT-traversal *packet* relay (encrypted
+DTLS-SRTP forwarded without inspection), so it is D-23-safe — not "media through
+the server."
 
 ### Codecs (D-39)
 

@@ -552,7 +552,26 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	if _, ok := s.peers[to]; !ok {
 		return nil
 	}
+	// A source page's signals are valid only for its slot's CURRENT occupant. After an unbind/rebind a
+	// source can still emit a stale offer/ICE toward the PRIOR occupant before it processes the slot
+	// change; relaying that would let the prior occupant recreate a dead source pc — re-arming the D-38
+	// watchdog even after its {t:consumer-left}. Drop a source→non-occupant signal (a source only ever
+	// negotiates its bound occupant; the occupant→source direction is unaffected).
+	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
+		return nil
+	}
 	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
+}
+
+// sourceServes reports whether source is the OBS source of a slot whose CURRENT occupant is occupant
+// (the only peer a source legitimately negotiates with). A source attached to no slot serves no one.
+func (s *roomState) sourceServes(source, occupant PeerID) bool {
+	for _, st := range s.slots {
+		if st.source == source {
+			return st.occupant == occupant
+		}
+	}
+	return false
 }
 
 // relayChat broadcasts a backstage chat message to every greenroom PARTICIPANT, including the
