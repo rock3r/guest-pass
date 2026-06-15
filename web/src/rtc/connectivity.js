@@ -117,6 +117,14 @@ export class ConnectivityWatch {
       this._timer = undefined;
       if (this._stopped || everConnected || this._blocked) return;
       if (this._pcs.size === 0) return; // nothing is being attempted — never a false positive
+      // Known limitation: a Publisher consumer (host monitor / OBS source) that connects-then-departs
+      // before ICE is not individually untracked — those consumers aren't in the guest's roster, so
+      // there is no client-side "consumer gone" signal (only mesh peers get peer-left/_drop). A
+      // departed never-connected consumer can keep _pcs non-empty and, if it was the only one, trip a
+      // rare/narrow false positive that Retry clears. A precise fix needs a signaling-level departure
+      // notice (a server change, out of scope here); a pc-state heuristic is rejected because it
+      // can't tell "network blocked" from "consumer left" without risking the worse failure — NOT
+      // warning a genuinely blocked guest. The common case (persistent host/OBS consumers) is correct.
       this._blocked = true;
       this._flaggedBlocked = true;
       this._expose();

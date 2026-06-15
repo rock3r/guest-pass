@@ -196,6 +196,12 @@ function DeviceCheck() {
   // dropped socket auto-retries (pubState → "reconnecting"), and a TERMINAL {t:terminate} routes to
   // the matching error screen. setup() re-wires a fresh Publisher + mesh + handlers on each (re)connect.
   function startPublishing() {
+    // (Re)starting a publishing session means we are connecting until the new socket opens. Reset
+    // pubState so a RE-entry (e.g. Retry from the network-blocked screen) doesn't inherit a stale
+    // "live" from the prior attempt — ReconnectingSession.close() runs teardown but never fires
+    // onState, so without this the live-gated send helpers + GuestSession could act on a socket that
+    // is still CONNECTING and throw on WebSocket.send (the "never live before the WS is up" invariant).
+    setPubState("connecting");
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
