@@ -22,6 +22,11 @@ type detailData struct {
 	StreamID    string
 	StreamTitle string
 	Tab         string // "invites" | "sources"
+	// Live-session state (EN-2/D-20): SessionLive is true when THIS stream is the host's active
+	// session; OtherStreamLive is true when the host is live for a DIFFERENT stream (so the page
+	// explains the one-live-at-a-time rule instead of offering a "Go live" that would 409).
+	SessionLive     bool
+	OtherStreamLive bool
 	// Invites tab
 	Passes []passRow
 	Issued *issuedLink // set after create/reissue to reveal the fresh link once
@@ -93,9 +98,13 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 	for _, p := range passes {
 		rows = append(rows, toPassRow(p, now))
 	}
+	live, otherLive := s.sessionState(r.Context(), host.ID, st.ID)
 	s.rd.render(w, r, "streamdetail.html", pageData{
 		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name},
-		Data: detailData{StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued},
+		Data: detailData{
+			StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued,
+			SessionLive: live, OtherStreamLive: otherLive,
+		},
 	})
 }
 

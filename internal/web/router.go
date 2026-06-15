@@ -147,6 +147,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Get("/app/streams/{id}/edit", app.editStreamForm)
 			hr.Post("/app/streams/{id}", app.updateStream)
 			hr.Post("/app/streams/{id}/delete", app.deleteStream)
+			// Go live / end session (EN-2/D-20): the host declares which stream is live, gating the
+			// /ws join-replay to that stream's guests. One live session per host.
+			hr.Post("/app/streams/{id}/session/start", app.goLive)
+			hr.Post("/app/streams/{id}/session/end", app.endSession)
 			// Invites tab (EN-23): guest list + invite form (name/email/role only) +
 			// inline role edit + re-issue + revoke. No live production controls here.
 			hr.Post("/app/streams/{id}/passes", app.createInvite)

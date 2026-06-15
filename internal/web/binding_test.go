@@ -177,6 +177,10 @@ func TestBinding_PersistedBindingReplaysOnJoin(t *testing.T) {
 	if err := h.store.AssignPassSlot(context.Background(), pass.ID, slot.ID); err != nil {
 		t.Fatalf("AssignPassSlot: %v", err)
 	}
+	// The host goes live for THIS stream so the join-replay is in-scope (EN-2/D-20).
+	if _, err := h.store.StartSession(context.Background(), stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
 
 	// The OBS source connects FIRST: no occupant in the room yet → slot-unbound.
 	sc := h.dialOK(t, "src="+srcRaw, http.Header{"Origin": {"null"}})
@@ -190,6 +194,48 @@ func TestBinding_PersistedBindingReplaysOnJoin(t *testing.T) {
 	defer gc.CloseNow()
 	if f := readFrameOfType(t, sc, "slot-rebind"); f.OccupantPeerID != pass.ID {
 		t.Fatalf("replayed slot-rebind occupant = %q, want the guest %q", f.OccupantPeerID, pass.ID)
+	}
+}
+
+// The join-replay is gated on the active session's stream (codex P1): guestBoundSlot — the
+// resolver the /ws join calls to decide what to replay — returns a label ONLY when the binding's
+// stream is the host's LIVE one. A guest of an upcoming (non-live) stream whose pass carries a
+// preassigned cam slot must resolve to "" (no replay), so opening their link mid-show can't
+// hijack the host-global on-air pool. Testing the resolver directly keeps the gate deterministic.
+func TestBinding_ReplayGatedByActiveSession(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "replay-gate", store.HostActive)
+	live := h.seedStream(t, host.ID)  // the stream the host actually goes live for
+	other := h.seedStream(t, host.ID) // an upcoming, NON-live stream
+	_, otherPass := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+	_, slot := h.seedCamSlot(t, host.ID, 1)
+
+	if err := h.store.AssignPassSlot(ctx, otherPass.ID, slot.ID); err != nil {
+		t.Fatalf("AssignPassSlot: %v", err)
+	}
+	wr := &wsResolver{store: h.store}
+
+	// No live session yet → nothing replays.
+	if got := wr.guestBoundSlot(ctx, otherPass.ID, host.ID); got != "" {
+		t.Fatalf("no live session: guestBoundSlot = %q, want \"\"", got)
+	}
+	// Host goes live for a DIFFERENT stream → the non-live-stream guest still must not replay.
+	if _, err := h.store.StartSession(ctx, live.ID, host.ID); err != nil {
+		t.Fatalf("StartSession(live): %v", err)
+	}
+	if got := wr.guestBoundSlot(ctx, otherPass.ID, host.ID); got != "" {
+		t.Fatalf("non-live stream guest replayed cam-1 (%q) — must be gated out", got)
+	}
+	// Switch the live session to the guest's stream → now the binding is in-scope and replays.
+	if err := h.store.EndActiveSession(ctx, host.ID); err != nil {
+		t.Fatalf("EndActiveSession: %v", err)
+	}
+	if _, err := h.store.StartSession(ctx, other.ID, host.ID); err != nil {
+		t.Fatalf("StartSession(other): %v", err)
+	}
+	if got := wr.guestBoundSlot(ctx, otherPass.ID, host.ID); got != "cam-1" {
+		t.Fatalf("guest of the live stream should replay cam-1, got %q", got)
 	}
 }
 

@@ -134,7 +134,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		// Re-read + enqueue under the per-host binding lock so a concurrent host PUT can't make
 		// this replay route from a stale binding (the lock orders the room commands by DB commit).
 		unlock := h.binds.lock(id.session)
-		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer)); slot != "" {
+		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
 			room.ResumeBind(slot, id.peer)
 		}
 		unlock()

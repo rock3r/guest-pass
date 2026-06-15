@@ -337,13 +337,22 @@ hashed):
   co-host/guest projections (D-15). The persisted binding is **replayed as a live
   rebind when the guest (re)connects** (the `/ws` join path issues `Room.ResumeBind`
   from `passes.slot_id`), so a binding made before OBS/guests connect — or surviving a
-  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40). The
-  automatic replay is **non-displacing**: it only resumes into a free slot or
+  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40). Two guards
+  keep the replay safe: it is **gated on the host's active session** — it fires only when
+  the binding's stream is the one the host went live for (see **Live session**), so a
+  guest of a non-live stream opening their link can't auto-bind into the host-global pool;
+  and it is **non-displacing** — even in-scope it only resumes into a free slot or
   re-affirms the same peer, never knocking a different live occupant off-air. Only the
-  host's **explicit** greenroom (re)bind displaces. (v1 runs one live session per host
-  but has no runtime gate on which stream is live — session lifecycle is v1.1 — so a
-  guest of a non-live stream whose pass carries a stale binding must not auto-hijack the
-  on-air slot just by opening their link.)
+  host's **explicit** greenroom (re)bind displaces.
+
+#### Live session (EN-2/D-20)
+
+The host declares **which stream is live** from its detail page (**Go live** / **End
+session**), opening a row in `sessions` (`status = active`, one per host via the partial
+unique index — concurrent shows are v1.1). The active session's `stream_id` is the runtime
+answer to "which of my streams is live" and gates the join-replay above; ending the session
+(or going live for another stream) closes it. The session row is a thin durable audit — live
+roster/lock/epoch state stays in-memory (AD-3).
 
 ### Slot-rebind protocol + slot epoch (EN-3)
 

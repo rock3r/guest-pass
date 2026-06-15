@@ -331,6 +331,23 @@ body.app {
   gap: 12px;
   flex-wrap: wrap;
 }
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* Live-session indicator (EN-2/D-20): the host's one live show. */
+.live-pill {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a3271f;
+  white-space: nowrap;
+}
+.live-note {
+  font-size: 0.8rem;
+  color: var(--muted, #555);
+}
 
 .tabs {
   display: flex;

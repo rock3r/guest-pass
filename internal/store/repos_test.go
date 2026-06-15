@@ -495,6 +495,63 @@ func TestPassRepo_RebindClearsRetiredSlotBinding(t *testing.T) {
 	}
 }
 
+// Session lifecycle (EN-2/D-20): a host goes live for one stream at a time. StartSession opens
+// the active session; ActiveSession reports it; a second concurrent StartSession is rejected
+// (one-live-per-host); EndActiveSession closes it and frees the host to go live again.
+func TestSessionRepo_Lifecycle(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-session")
+	other := seedHost(t, st, "host-session-other")
+	x, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "X"})
+	y, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Y"})
+	foreign, _ := st.CreateStream(ctx, CreateStreamParams{HostID: other.ID, Title: "F"})
+
+	if _, err := st.ActiveSession(ctx, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no session yet: want ErrNotFound, got %v", err)
+	}
+
+	// StartSession refuses a stream that isn't the host's (RF-2), without leaking it.
+	if _, err := st.StartSession(ctx, foreign.ID, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign stream: want ErrNotFound, got %v", err)
+	}
+
+	sess, err := st.StartSession(ctx, x.ID, h.ID)
+	if err != nil {
+		t.Fatalf("StartSession(x): %v", err)
+	}
+	if sess.Status != SessionActive || sess.StreamID != x.ID || sess.EndedAt != nil {
+		t.Fatalf("started session = %+v, want active on x with no ended_at", sess)
+	}
+	got, err := st.ActiveSession(ctx, h.ID)
+	if err != nil || got.StreamID != x.ID {
+		t.Fatalf("ActiveSession = %+v / %v, want x", got, err)
+	}
+
+	// One live session per host: a second StartSession while one is active is rejected.
+	if _, err := st.StartSession(ctx, y.ID, h.ID); !errors.Is(err, ErrSessionAlreadyLive) {
+		t.Fatalf("second StartSession: want ErrSessionAlreadyLive, got %v", err)
+	}
+
+	// End frees the host; ActiveSession reports none and a fresh StartSession succeeds.
+	if err := st.EndActiveSession(ctx, h.ID); err != nil {
+		t.Fatalf("EndActiveSession: %v", err)
+	}
+	if _, err := st.ActiveSession(ctx, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after end: want ErrNotFound, got %v", err)
+	}
+	// End again is an idempotent no-op (nothing live).
+	if err := st.EndActiveSession(ctx, h.ID); err != nil {
+		t.Fatalf("EndActiveSession (idempotent): %v", err)
+	}
+	if _, err := st.StartSession(ctx, y.ID, h.ID); err != nil {
+		t.Fatalf("StartSession(y) after end: %v", err)
+	}
+	if got, _ := st.ActiveSession(ctx, h.ID); got.StreamID != y.ID {
+		t.Fatalf("active session now = %+v, want y", got)
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {

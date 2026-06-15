@@ -59,6 +59,8 @@ type wsStore interface {
 	GetPassByTokenHash(ctx context.Context, tokenHash string) (*store.Pass, error)
 	GetSlot(ctx context.Context, id string) (*store.Slot, error)
 	GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) (*store.Slot, error)
+	// ActiveSession gates the join-replay on which of the host's streams is currently live (EN-2).
+	ActiveSession(ctx context.Context, hostID string) (*store.Session, error)
 	RecordSlotTokenUse(ctx context.Context, slotID, sourceIP string) error
 	// SetPassStatus backs a kick's token invalidation (D-25): revoking the target's pass so a
 	// reconnect is refused at the handshake (passJoinable → false).
@@ -141,12 +143,20 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 
 // guestBoundSlot re-reads a guest's persisted cam-slot binding (passes.slot_id resolved to its
 // label) at REPLAY time — AFTER Join, not at the handshake — so a host PUT during the join
-// window can't make the replay route from a stale binding. Returns "" for an unbound guest, a
-// non-cam binding, or any lookup miss (best-effort: a miss just means no replay).
-func (wr *wsResolver) guestBoundSlot(ctx context.Context, passID string) signaling.SlotID {
+// window can't make the replay route from a stale binding. It returns a label ONLY when the
+// binding's stream is the host's currently-LIVE session (EN-2/D-20): the slot pool is host-global
+// and the room host-scoped, so without this gate a guest of a non-live stream whose pass carries
+// a (legitimately) preassigned slot could auto-bind into the on-air pool just by opening their
+// link. Returns "" for an unbound guest, a non-cam binding, a guest of a non-live stream, no live
+// session, or any lookup miss (best-effort: a miss just means no replay).
+func (wr *wsResolver) guestBoundSlot(ctx context.Context, passID, hostID string) signaling.SlotID {
 	pass, err := wr.store.GetPass(ctx, passID)
 	if err != nil || pass.SlotID == nil {
 		return ""
+	}
+	sess, err := wr.store.ActiveSession(ctx, hostID)
+	if err != nil || sess.StreamID != pass.StreamID {
+		return "" // host not live, or this guest belongs to a stream that isn't the live one
 	}
 	slot, err := wr.store.GetSlot(ctx, *pass.SlotID)
 	if err != nil || slot.Kind != store.SlotCam {
