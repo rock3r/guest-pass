@@ -552,6 +552,48 @@ func TestSessionRepo_Lifecycle(t *testing.T) {
 	}
 }
 
+// BoundCamPassesForStream (the Go-live replay source) excludes passes past their expires_at
+// DEADLINE, not just status-retired ones (codex): a guest can connect pre-live and cross its
+// deadline before Go live (status still "sent"), and such a no-longer-joinable invite must not be
+// replayed onto an OBS slot. Mirrors passJoinable.
+func TestPassRepo_BoundCamPassesExcludesDeadlineExpired(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-bound-exp")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	cam1, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-be-1"})
+	cam2, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(2), SourceTokenHash: "src-be-2"})
+
+	past := time.Now().Unix() - 3600
+	expired, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "exp", Status: PassSent, ExpiresAt: &past})
+	live, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "liv", Status: PassSent}) // no deadline
+	if err := st.AssignPassSlot(ctx, expired.ID, cam1.ID); err != nil {
+		t.Fatalf("assign expired: %v", err)
+	}
+	if err := st.AssignPassSlot(ctx, live.ID, cam2.ID); err != nil {
+		t.Fatalf("assign live: %v", err)
+	}
+
+	bound, err := st.BoundCamPassesForStream(ctx, stream.ID)
+	if err != nil {
+		t.Fatalf("BoundCamPassesForStream: %v", err)
+	}
+	for _, b := range bound {
+		if b.PassID == expired.ID {
+			t.Fatalf("a deadline-expired pass (%s) must not be replayed onto %s", b.PassID, b.SlotLabel)
+		}
+	}
+	var sawLive bool
+	for _, b := range bound {
+		if b.PassID == live.ID && b.SlotLabel == "cam-2" {
+			sawLive = true
+		}
+	}
+	if !sawLive {
+		t.Fatalf("the still-joinable pass should be replayed onto cam-2, got %+v", bound)
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {

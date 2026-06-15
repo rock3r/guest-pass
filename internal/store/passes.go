@@ -165,15 +165,19 @@ type BoundCamPass struct {
 	SlotLabel string // "cam-1".."cam-8"
 }
 
-// BoundCamPassesForStream lists the stream's still-active passes bound to a cam slot, each with
+// BoundCamPassesForStream lists the stream's still-JOINABLE passes bound to a cam slot, each with
 // its "cam-N" label. On Go live the handler replays these into the now-live room so a guest who
 // connected BEFORE the session started (its join-replay was gated off, any pre-live bind DB-only)
-// gets bound without the host re-picking. Retired passes are excluded (they can't be live peers).
+// gets bound without the host re-picking. It mirrors passJoinable: revoked/expired-by-status AND
+// passes past their expires_at DEADLINE are excluded — a guest can connect pre-live and then cross
+// its deadline before Go live (status still "sent"), and such a no-longer-joinable invite must not
+// be replayed onto an OBS slot (codex).
 func (s *Store) BoundCamPassesForStream(ctx context.Context, streamID string) ([]BoundCamPass, error) {
 	rows, err := s.reader.QueryContext(ctx,
 		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
-		 WHERE p.stream_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)`,
-		streamID, SlotCam, PassRevoked, PassExpired)
+		 WHERE p.stream_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)
+		   AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+		streamID, SlotCam, PassRevoked, PassExpired, time.Now().Unix())
 	if err != nil {
 		return nil, fmt.Errorf("listing bound cam passes: %w", err)
 	}
