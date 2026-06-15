@@ -422,6 +422,7 @@ func (s *roomState) sourceLockFrames(target PeerID) []outbound {
 // the roster (occupancy changed, so both the old and new occupant's folded onAir move).
 func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	st := s.slot(sid)
+	prev := st.occupant // before reassignment, for the consumer-left notice below
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = occupant
@@ -429,13 +430,22 @@ func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	if st.source == "" {
 		return nil
 	}
+	var out []outbound
+	// D-38: the source is moving to a new occupant, so the PRIOR occupant's publisher is left with a
+	// (possibly never-connected) pc to this source that it gets no peer-left for (sources aren't in
+	// guest rosters, EN-13). Tell the prior occupant the consumer is gone so its watchdog untracks it
+	// and can't trip a false network-blocked. Skip a no-op re-bind (same occupant, e.g. a reconnect)
+	// and a prior occupant that already left the room (its publisher is closing; the leave path owns it).
+	if prev != "" && prev != occupant && s.peers[prev] != nil {
+		out = append(out, outbound{to: prev, frame: Frame{T: "consumer-left", PeerID: string(st.source)}})
+	}
 	// Send the binding, then the new occupant's authoritative lock kinds (RF-8): a (re)bind to a
 	// locked occupant detaches the locked track at once, and a rebind to a fresh occupant clears any
 	// stale lock view the source held for the previous occupant (empty kinds → re-enable all).
-	return []outbound{
-		{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}},
-		{to: st.source, frame: s.occupantLocksFrame(sid, st)},
-	}
+	return append(out,
+		outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}},
+		outbound{to: st.source, frame: s.occupantLocksFrame(sid, st)},
+	)
 }
 
 // rebindSlot binds (or re-binds) a slot to an occupant and re-broadcasts the roster so the
@@ -455,6 +465,7 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 // into the roster.
 func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	st := s.slot(sid)
+	prev := st.occupant // before clearing, for the consumer-left notice below
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = ""
@@ -462,7 +473,20 @@ func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	if st.source == "" {
 		return nil
 	}
-	return []outbound{{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}}}
+	var out []outbound
+	// D-38: the source loses its occupant, leaving that occupant's publisher with a stale source pc.
+	// Tell it the consumer is gone (same as bindSlot) — UNLESS it already left the room (the leave
+	// path vacates after removing the peer, so s.peers[prev] is nil and we skip the pointless notice).
+	// Known residual (accepted, self-healing): this notice carries no slot epoch, so a rapid
+	// unbind→rebind to the SAME occupant can let a stale consumer-left arrive AFTER the source's fresh
+	// offer and briefly close the rebound source pc — the source's ICE-restart then re-offers and the
+	// guest rebuilds it within seconds. Epoch-stamping the relayed source signals + this notice would
+	// remove it, at the cost of plumbing the core relay path; deferred as not worth that for a narrow,
+	// auto-recovering blip (the relaySignal source→occupant gate already blocks the stale-offer re-arm).
+	if prev != "" && s.peers[prev] != nil {
+		out = append(out, outbound{to: prev, frame: Frame{T: "consumer-left", PeerID: string(st.source)}})
+	}
+	return append(out, outbound{to: st.source, frame: Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}})
 }
 
 // unbindSlot clears a slot and re-broadcasts the roster so the freed occupant's folded on-air
@@ -534,7 +558,26 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	if _, ok := s.peers[to]; !ok {
 		return nil
 	}
+	// A source page's signals are valid only for its slot's CURRENT occupant. After an unbind/rebind a
+	// source can still emit a stale offer/ICE toward the PRIOR occupant before it processes the slot
+	// change; relaying that would let the prior occupant recreate a dead source pc — re-arming the D-38
+	// watchdog even after its {t:consumer-left}. Drop a source→non-occupant signal (a source only ever
+	// negotiates its bound occupant; the occupant→source direction is unaffected).
+	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
+		return nil
+	}
 	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
+}
+
+// sourceServes reports whether source is the OBS source of a slot whose CURRENT occupant is occupant
+// (the only peer a source legitimately negotiates with). A source attached to no slot serves no one.
+func (s *roomState) sourceServes(source, occupant PeerID) bool {
+	for _, st := range s.slots {
+		if st.source == source {
+			return st.occupant == occupant
+		}
+	}
+	return false
 }
 
 // relayChat broadcasts a backstage chat message to every greenroom PARTICIPANT, including the

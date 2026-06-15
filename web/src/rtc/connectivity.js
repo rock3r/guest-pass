@@ -117,13 +117,13 @@ export class ConnectivityWatch {
       this._timer = undefined;
       if (this._stopped || everConnected || this._blocked) return;
       if (this._pcs.size === 0) return; // nothing is being attempted — never a false positive
-      // A Publisher consumer that connects-then-departs before ICE IS untracked, so it no longer keeps
-      // _pcs non-empty: the host monitor via the roster {t:peer-left} (it's visible to the guest), an
-      // OBS source via the server's {t:consumer-left} to its slot occupant (sources are hidden from
-      // guest rosters, EN-13, so they get this analogue) — both routed to Publisher.dropConsumer.
-      // Residual (narrow, Retry-cleared): a never-connected source that is REBOUND away (not closed)
-      // within the window isn't notified — the everConnected guard already exempts any consumer that
-      // DID connect, so this is far rarer than the connects-then-closes case now handled.
+      // A Publisher consumer that stops consuming this guest before ICE IS untracked, so it no longer
+      // keeps _pcs non-empty: the host monitor via the roster {t:peer-left} (it's visible to the
+      // guest), and an OBS source via the server's {t:consumer-left} to its slot occupant — whether the
+      // source leaves, OR the slot is unbound / rebound away from this occupant (sources are hidden
+      // from guest rosters, EN-13, so {t:consumer-left} is their analogue). All routed to
+      // Publisher.dropConsumer. So reaching here means a consumer is genuinely still trying and none
+      // ever connected — a real blocked network, not a stale/departed pc.
       this._blocked = true;
       this._flaggedBlocked = true;
       this._expose();
