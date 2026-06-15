@@ -85,6 +85,22 @@ func (h *Hub) EndSession(session, reason string) {
 	}
 }
 
+// EvictIfLive evicts the named peers from the host's live room (if any) with a terminal reason —
+// a system teardown when their passes are deleted (stream delete), so the deleted stream's guests
+// don't linger in the host-scoped room. No-op when no room is live or no targets are given; it
+// never spawns a room (peek, not Room()).
+func (h *Hub) EvictIfLive(session, reason string, targets []PeerID) {
+	if len(targets) == 0 {
+		return
+	}
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r != nil {
+		r.EvictPeers(reason, targets)
+	}
+}
+
 // Shutdown gracefully terminates every live room for a server drain (RF-21): each room
 // broadcasts a terminate frame with reason to its peers, then is stopped. The registry
 // is cleared so no new work is routed to a stopping room.

@@ -245,6 +245,58 @@ func TestSession_ConcurrentGoLiveEndNoRace(t *testing.T) {
 	}
 }
 
+// Deleting a NON-live stream whose guests already connected (pre-live: the room spawned before
+// Go live) must evict those peers (codex P2): their passes are cascade-deleted, so the orphaned
+// sockets would otherwise linger in the host-scoped room and carry into the next session. They get
+// the terminal revoked teardown. Covers both delete paths.
+func TestSession_DeletePreLiveStreamEvictsPeers(t *testing.T) {
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, tc := range []struct {
+		name   string
+		delete func(t *testing.T, base, streamID string, cookie *http.Cookie)
+	}{
+		{"app POST", func(t *testing.T, base, streamID string, cookie *http.Cookie) {
+			req, _ := http.NewRequest(http.MethodPost, base+"/app/streams/"+streamID+"/delete", nil)
+			req.AddCookie(cookie)
+			resp, err := noRedirect.Do(req)
+			if err != nil {
+				t.Fatalf("delete POST: %v", err)
+			}
+			_ = resp.Body.Close()
+		}},
+		{"API DELETE", func(t *testing.T, base, streamID string, cookie *http.Cookie) {
+			req, _ := http.NewRequest(http.MethodDelete, base+"/api/streams/"+streamID, nil)
+			req.AddCookie(cookie)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("delete API: %v", err)
+			}
+			_ = resp.Body.Close()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newWSHarness(t, wsHarnessOpts{})
+			host, cookie := h.seedHost(t, "delprelive-"+strings.ReplaceAll(tc.name, " ", ""), store.HostActive)
+			stream := h.seedStream(t, host.ID)
+			passRaw, _ := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+			// NO StartSession: the guest connects pre-live, which still spawns the host-scoped room.
+			gc := h.dialOK(t, "pass="+passRaw, nil)
+			defer gc.CloseNow()
+			_ = wsReadFrame(t, gc)
+			if h.hub.RoomIfLive(host.ID) == nil {
+				t.Fatal("pre-live guest should have spawned the room")
+			}
+
+			tc.delete(t, h.srv.URL, stream.ID, cookie)
+
+			// The pre-live guest is evicted with the terminal revoked reason (its invite is gone).
+			if f := readFrameOfType(t, gc, "terminate"); f.Reason != signaling.TerminateRevoked {
+				t.Fatalf("evicted guest terminate reason = %q, want %q", f.Reason, signaling.TerminateRevoked)
+			}
+		})
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

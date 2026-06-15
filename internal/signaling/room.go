@@ -255,6 +255,26 @@ func (r *Room) Kick(actor, target PeerID, invalidate func()) {
 	})
 }
 
+// EvictPeers tears the named peers out of the room with a terminal reason — a SYSTEM teardown
+// (NO rank check, unlike Kick) used when their passes are deleted with the stream, so orphaned,
+// pass-deleted sockets can't linger and carry into the host's next session (D-40). It reuses
+// leave() per peer (clears any slot + bumps the epoch + drops the roster entry + tells the
+// others), then delivers each a {t:terminate} and closes its socket — the buffered terminate
+// flushes through the single writer first. Peers not present are skipped.
+func (r *Room) EvictPeers(reason string, targets []PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		for _, target := range targets {
+			c := conns[target]
+			if c == nil {
+				continue // not connected — nothing to evict
+			}
+			deliver(conns, append(st.leave(target), outbound{to: target, frame: Frame{T: "terminate", Reason: reason}}))
+			delete(conns, target)
+			close(c.out)
+		}
+	})
+}
+
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
 // provided (non-nil) modality updates and, on a real change, every viewer's roster
 // re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber

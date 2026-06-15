@@ -91,6 +91,38 @@ func (s *appServer) replayBindingsLocked(ctx context.Context, hostID, streamID s
 	}
 }
 
+// streamPeerIDs collects a stream's pass ids (its guests' room peer ids) so a delete can evict any
+// that are connected. Read BEFORE the delete, since the FK cascade erases the passes. Best-effort:
+// a read miss returns nil (the sockets drop on their own).
+func streamPeerIDs(ctx context.Context, st *store.Store, streamID string) []signaling.PeerID {
+	passes, err := st.ListPassesByStream(ctx, streamID)
+	if err != nil {
+		return nil
+	}
+	out := make([]signaling.PeerID, 0, len(passes))
+	for _, p := range passes {
+		out = append(out, signaling.PeerID(p.ID))
+	}
+	return out
+}
+
+// teardownDeletedStream removes the deleted stream's live footprint from the host-scoped room so
+// nothing carries into the host's next session (D-40): if the deleted stream WAS the live session,
+// the whole room is torn down (session-ended); otherwise only that stream's (possibly pre-live)
+// guest peers are evicted (revoked), leaving any other stream's live session untouched. Call AFTER
+// the delete, with peers collected before it. Host-global slot sources aren't pass peers, so they
+// are never caught here.
+func teardownDeletedStream(hub *signaling.Hub, hostID string, wasLive bool, peers []signaling.PeerID) {
+	if hub == nil {
+		return
+	}
+	if wasLive {
+		hub.EndSession(hostID, signaling.TerminateSessionEnded)
+		return
+	}
+	hub.EvictIfLive(hostID, signaling.TerminateRevoked, peers)
+}
+
 // sessionState reports whether streamID is the host's live session, and whether the host is live
 // for some OTHER stream. A read miss (not live) or transient error both surface as "not live" so
 // the page falls back to offering "Go live" rather than blocking on a degraded read.

@@ -161,13 +161,12 @@ func (s *appServer) deleteStream(w http.ResponseWriter, r *http.Request) {
 	unlock := s.binds.lock(host.ID)
 	defer unlock()
 	wasLive, _ := s.sessionState(r.Context(), host.ID, st.ID)
+	peers := streamPeerIDs(r.Context(), s.store, st.ID) // collect BEFORE the cascade erases the passes
 	if err := s.store.DeleteStream(r.Context(), st.ID); err != nil {
 		http.Error(w, "could not delete stream", http.StatusInternalServerError)
 		return
 	}
-	if wasLive && s.hub != nil {
-		s.hub.EndSession(host.ID, signaling.TerminateSessionEnded)
-	}
+	teardownDeletedStream(s.hub, host.ID, wasLive, peers)
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 

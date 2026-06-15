@@ -225,11 +225,22 @@ function Greenroom() {
           /* non-JSON body: keep the generic message */
         }
         setBindError(msg);
+        rollbackPicker();
       })
       .catch(() => {
         // fetch only rejects on a network/transport failure; the binding is unchanged.
         setBindError("Couldn't reach the server to update the slot.");
+        rollbackPicker();
       });
+  }
+
+  // rollbackPicker forces a grid re-render so a rejected pick reverts to the authoritative
+  // entry.boundSlot. setBindError alone is a no-op when the SAME message is already shown (e.g.
+  // every unprovisioned slot returns the same 404), and then Preact wouldn't reconcile the
+  // controlled <select> back — leaving the invalid choice on screen (codex). A fresh tiles array
+  // ref guarantees the render.
+  function rollbackPicker() {
+    setTiles((ts) => [...ts]);
   }
 
   return (
