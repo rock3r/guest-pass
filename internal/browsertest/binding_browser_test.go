@@ -347,6 +347,76 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 	}
 }
 
+// A pre-live (DB-only) picker override must clear on Go live when the pass was unassigned from
+// another client in the meantime (codex P2): no live command carries a pre-live unassign, so the
+// override would otherwise keep showing the old slot while OBS sits on the placeholder. Going live
+// broadcasts session-live, which drops all overrides and reconciles to the authoritative roster.
+func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
+	s := seedDeviceCheck(t) // NO session yet → the bind is DB-only (override)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 180*time.Second)
+	defer cancelDeadline()
+	guestCtx := rootCtx
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestCtx, s.base, s.rawToken, "A")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render the guest picker: %v", err)
+	}
+
+	// Pre-live bind A → cam-1 (override); it sticks.
+	var ok bool
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		if (!sel) return false; sel.value = "cam-1"; sel.dispatchEvent(new Event('change',{bubbles:true})); return true;
+	})()`, s.passID), &ok)); err != nil || !ok {
+		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
+	}
+	aCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+		t.Fatalf("A's pre-live override did not stick: %v", err)
+	}
+
+	// Out-of-band UNASSIGN A (DB-only, no live command/roster), then go live.
+	unassign, _ := http.NewRequest(http.MethodPut, s.base+"/api/passes/"+s.passID+"/slot", strings.NewReader(`{"slot":""}`))
+	unassign.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: s.hostCookie})
+	unassign.Header.Set("Content-Type", "application/json")
+	if resp, err := (&http.Client{}).Do(unassign); err != nil {
+		t.Fatalf("out-of-band unassign: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	goLive, _ := http.NewRequest(http.MethodPost, s.base+"/app/streams/"+s.streamID+"/session/start", nil)
+	goLive.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: s.hostCookie})
+	if resp, err := noRedirect.Do(goLive); err != nil {
+		t.Fatalf("go-live: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	// Going live (session-live) must drop the stale override: A's picker returns to Unassigned.
+	aUnassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
+		t.Fatalf("A's stale override survived Go live after an out-of-band unassign: %v", err)
+	}
+}
+
 // A failed (re)bind must surface to the host, not be swallowed (codex, M4 PR-6). The greenroom
 // picker PUTs to a cam slot the host has not provisioned (only cam-1 is wired in the seed), so
 // the server answers 404 with no roster update — the controlled picker stays put AND the

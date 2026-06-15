@@ -577,6 +577,21 @@ func (s *roomState) recoverQuality() []outbound {
 	return out
 }
 
+// sessionLive notifies the host that its session just went live (D-40). A greenroom that was open
+// BEFORE Go live drops its optimistic pre-live slot overrides on this signal and reconciles to the
+// now-authoritative roster (the Go-live replay's live bindings), so a pass unassigned/displaced
+// elsewhere before Go live can't keep showing its stale slot (codex). It is broadcast AFTER the
+// replay, so the authoritative roster frames land first. Host-only: only the host has the picker.
+func (s *roomState) sessionLive() []outbound {
+	var out []outbound
+	for pid, p := range s.peers {
+		if p.role == "host" {
+			out = append(out, outbound{to: pid, frame: Frame{T: "session-live"}})
+		}
+	}
+	return out
+}
+
 // relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
 // The sdp/ice payloads are opaque (json.RawMessage) and relayed byte-for-byte; the server
 // never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice} —

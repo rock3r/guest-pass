@@ -152,6 +152,13 @@ function Greenroom() {
       syncTiles();
       setState((s) => (s === "connecting" ? "live" : s));
     });
+    room.on("session-live", () => {
+      // The host's session just went live: the roster now carries the authoritative live bindings,
+      // so drop ALL optimistic pre-live overrides. A pass unassigned/displaced from another client
+      // before Go live would otherwise keep showing its stale slot while OBS shows the placeholder
+      // (codex). Sent after the replay, so entry.boundSlot is already authoritative.
+      setBoundOverrides((prev) => (Object.keys(prev).length ? {} : prev));
+    });
     room.on("peer-joined", (f) => {
       upsert(f.peer);
       syncTiles();

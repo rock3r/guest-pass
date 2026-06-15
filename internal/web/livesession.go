@@ -41,6 +41,14 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 	// live, but now that THIS stream is on-air a non-live-stream guest must not remain in the room
 	// (isolation, codex). The admission gate refuses new such joins; this clears existing ones.
 	s.evictOtherStreamStragglersLocked(r.Context(), host.ID, st.ID)
+	// Tell a greenroom that was open BEFORE Go live to drop its optimistic pre-live slot overrides
+	// and reconcile to the now-authoritative roster (codex) — sent AFTER the replay so the live
+	// bindings land first.
+	if s.hub != nil {
+		if room := s.hub.RoomIfLive(host.ID); room != nil {
+			room.NotifySessionLive()
+		}
+	}
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)
 }
 

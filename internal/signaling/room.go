@@ -330,6 +330,15 @@ func (r *Room) RecoverQuality() {
 	})
 }
 
+// NotifySessionLive tells the host's greenroom (if connected) that the session went live, so it
+// drops optimistic pre-live slot overrides and reconciles to the authoritative roster — see
+// roomState.sessionLive.
+func (r *Room) NotifySessionLive() {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.sessionLive())
+	})
+}
+
 // Force applies a suppression force (force-mute/force-no-cam/force-no-share) from actor onto
 // target's modality (D-13/EN-7). Authority is enforced server-side against current rank — a
 // guest's or peer's attempt is a no-op. Modality is mic | cam | share.
