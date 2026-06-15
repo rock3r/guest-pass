@@ -262,8 +262,9 @@ func (s *Store) RetiredPassIDsForStream(ctx context.Context, streamID string, no
 func (s *Store) HostBoundCamPasses(ctx context.Context, hostID string) (map[string]string, error) {
 	rows, err := s.reader.QueryContext(ctx,
 		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
-		 WHERE sl.host_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)`,
-		hostID, SlotCam, PassRevoked, PassExpired)
+		 WHERE sl.host_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)
+		   AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+		hostID, SlotCam, PassRevoked, PassExpired, time.Now().Unix())
 	if err != nil {
 		return nil, fmt.Errorf("listing host bound passes: %w", err)
 	}

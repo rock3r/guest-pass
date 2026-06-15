@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -215,6 +216,14 @@ func TestBinding_ListSlotBindings(t *testing.T) {
 	if err := h.store.AssignPassSlot(ctx, pass.ID, slot.ID); err != nil {
 		t.Fatalf("AssignPassSlot: %v", err)
 	}
+	// A pass bound to cam-2 but PAST its expires_at deadline (status still "sent") must be excluded
+	// from the seed — passJoinable/BoundCamPassesForStream/Sources all treat it as retired (codex).
+	past := time.Now().Add(-time.Hour).Unix()
+	_, expired := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, &past)
+	_, cam2 := h.seedCamSlot(t, host.ID, 2)
+	if err := h.store.AssignPassSlot(ctx, expired.ID, cam2.ID); err != nil {
+		t.Fatalf("AssignPassSlot(expired): %v", err)
+	}
 
 	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/api/passes/slot-bindings", nil)
 	req.AddCookie(cookie)
@@ -232,6 +241,9 @@ func TestBinding_ListSlotBindings(t *testing.T) {
 	}
 	if m[pass.ID] != "cam-1" {
 		t.Fatalf("bindings = %v, want %s → cam-1", m, pass.ID)
+	}
+	if _, ok := m[expired.ID]; ok {
+		t.Fatalf("a deadline-expired pass must not be seeded, got %v", m)
 	}
 }
 
