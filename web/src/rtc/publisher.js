@@ -23,6 +23,12 @@ export class Publisher {
     this.onUntrack = onUntrack || (() => {});
     /** @type {Record<string, RTCPeerConnection>} */
     this.pcs = {};
+    // ICE seen for an id with no pc yet: either a new consumer's candidate that raced ahead of its
+    // offer, or stale trickle from a consumer that just departed. Buffered by sender and replayed when
+    // an offer opens the pc; cleared on drop/close. Holding it here (not in a pc) means a departed
+    // source that never re-offers can't materialize a connection that would re-arm the D-38 watchdog.
+    /** @type {Record<string, RTCIceCandidateInit[]>} */
+    this._earlyIce = {};
   }
 
   /**
@@ -64,16 +70,23 @@ export class Publisher {
     if (this.closed) return; // a late frame after teardown must not spawn a new connection
     let pc = this.pcs[f.from];
     if (!pc) {
-      // Only a consumer's OFFER opens a connection. A consumer always offers first (ICE only trickles
-      // afterwards, and the Publisher answers — it never receives answers), so a frame from an UNKNOWN
-      // id that isn't an offer is stale: e.g. late ICE from a source that just departed (after its
-      // {t:consumer-left}, or mid source-token rotation). Ignoring it prevents resurrecting a
-      // never-connectable pc that would re-arm the D-38 watchdog and re-trip the false network-blocked
-      // screen this guards against (the dropped consumer stays dropped until a genuine new offer).
+      // A connection is opened (and watched) ONLY by a consumer's OFFER. Bare ICE for an unknown id is
+      // either a new consumer's candidate that raced ahead of its offer (PeerLink starts ICE gathering
+      // at setLocalDescription, before it sends the offer) OR stale trickle from a consumer that just
+      // departed (after {t:consumer-left} / mid source-token rotation). BUFFER it by sender without
+      // creating or tracking a pc: a genuine offer below replays it, while a departed source that never
+      // re-offers can't re-arm the D-38 watchdog (the buffer is dropped on dropConsumer / close). The
+      // Publisher only answers, so a non-offer SDP (an answer) for an unknown id is likewise ignored.
+      if (f.ice) {
+        if (!this._earlyIce[f.from]) this._earlyIce[f.from] = [];
+        this._earlyIce[f.from].push(f.ice);
+        return;
+      }
       if (!f.sdp || f.sdp.type !== "offer") return;
       pc = new RTCPeerConnection({ iceServers: this.room.iceServers });
       /** @type {RTCIceCandidateInit[]} */
-      pc._pendingIce = [];
+      pc._pendingIce = this._earlyIce[f.from] || []; // replay ICE that raced ahead of this offer
+      delete this._earlyIce[f.from];
       this.pcs[f.from] = pc;
       pc.onicecandidate = (e) => {
         if (e.candidate) this.room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON() });
@@ -121,6 +134,7 @@ export class Publisher {
    * @param {string} id the departed consumer's peer id
    */
   dropConsumer(id) {
+    delete this._earlyIce[id]; // discard any buffered pre-offer ICE for the departed consumer
     const pc = this.pcs[id];
     if (!pc) return;
     pc.close();
@@ -136,5 +150,6 @@ export class Publisher {
       this.onUntrack(id);
     }
     this.pcs = {};
+    this._earlyIce = {};
   }
 }
