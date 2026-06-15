@@ -45,6 +45,15 @@ func (h *Hub) Room(session string) *Room {
 	return r
 }
 
+// RoomIfLive returns the host's live room, or nil WITHOUT spawning one — a peek of the
+// registry, not Room(). Backs control actions (slot (re)bind, D-20) that are DB-only when no
+// stream is live: binding a guest to a slot with no live room must not create an empty room.
+func (h *Hub) RoomIfLive(session string) *Room {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rooms[session]
+}
+
 // TerminateSourceIfLive terminates the OBS source peer in the host's LIVE room, if one
 // exists — WITHOUT spawning a room (a peek of the registry, not Room()). Backs D-22
 // slot-token rotation: rotating while no stream is live is a DB-only update with no source

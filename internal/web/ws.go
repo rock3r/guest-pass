@@ -39,15 +39,16 @@ type wsHandler struct {
 	resolver *wsResolver
 	inflight *sync.WaitGroup // nil-safe; lets a graceful drain wait for terminate flush (RF-21)
 	ice      ICEConfigurer   // per-peer ICE join-ack (AD-14); nil = no ICE servers offered
+	binds    *bindingLocks   // serialize the join-replay with the host's binding PUTs (D-20)
 	log      *slog.Logger
 }
 
 // newWSHandler builds the handler, defaulting the logger so the hot path never nil-panics.
-func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, logger *slog.Logger) *wsHandler {
+func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, binds *bindingLocks, logger *slog.Logger) *wsHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, log: logger}
+	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, binds: binds, log: logger}
 }
 
 func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,21 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		// reconnect and close; we never registered, so there's no writer to drain.
 		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
 		return
+	}
+
+	// Replay a guest's/co-host's persisted cam-slot binding as a live (re)bind (D-20/D-40): now
+	// that it is a room peer, Room.Rebind re-routes /s/{slot} to it — so a binding made before
+	// OBS/guests connected, or surviving a reconnect, takes effect without the host re-binding.
+	// The binding is re-read HERE (not at the handshake), so a host PUT during the join window
+	// can't replay a stale label. The host's own greenroom (re)bind also flows through Rebind.
+	if id.role == "guest" || id.role == "cohost" {
+		// Re-read + enqueue under the per-host binding lock so a concurrent host PUT can't make
+		// this replay route from a stale binding (the lock orders the room commands by DB commit).
+		unlock := h.binds.lock(id.session)
+		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer)); slot != "" {
+			room.Rebind(slot, id.peer)
+		}
+		unlock()
 	}
 
 	// Single writer goroutine (EN-12): the ONLY place this socket is written. It ends when

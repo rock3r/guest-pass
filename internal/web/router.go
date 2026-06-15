@@ -54,6 +54,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r := chi.NewRouter()
 	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
 
+	// One per-host slot-binding lock shared by the /ws join-replay and the binding API, so a
+	// host's binding ops are serialized across both surfaces (D-20).
+	binds := newBindingLocks()
+
 	r.Get("/", rd.landing)
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
@@ -79,7 +83,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	if wsReady {
 		resolver := &wsResolver{auth: cfg.Auth, hasher: cfg.Hasher, store: cfg.Store}
-		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, cfg.Logger)
+		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, binds, cfg.Logger)
 		r.Group(func(wr chi.Router) {
 			if cfg.WSRateLimiter != nil { // per-IP reconnect throttle (D-36)
 				wr.Use(cfg.WSRateLimiter.Middleware(ClientIP))
@@ -114,7 +118,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// Host JSON API + guest magic-link page. Registered only when persistence and the
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
-		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd}
+		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds}
 		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub}
 
 		r.Group(func(hr chi.Router) {
@@ -125,6 +129,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Delete("/api/streams/{id}", api.deleteStream)
 			hr.Get("/api/streams/{id}/passes", api.listPasses)
 			hr.Post("/api/streams/{id}/passes", api.createPass)
+			// Live slot↔guest (re)bind from the greenroom People controls (D-20): persist +
+			// re-route /s/{slot} with no OBS edit (EN-3). Host-only (RequireHost), RF-2.
+			hr.Put("/api/passes/{id}/slot", api.putPassSlot)
 
 			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).

@@ -91,7 +91,8 @@ type RosterEntry struct {
 	RttMs      int           `json:"rttMs,omitempty"`
 	Degraded   *DegradedView `json:"degraded,omitempty"`
 	Locks      []LockView    `json:"locks,omitempty"`
-	Self       bool          `json:"self,omitempty"` // true only on the recipient's own entry in its projection
+	BoundSlot  string        `json:"boundSlot,omitempty"` // HOST-ONLY: the cam slot this participant occupies live (e.g. "cam-1"), for the greenroom People controls (D-15/D-20); stripped from non-host projections
+	Self       bool          `json:"self,omitempty"`      // true only on the recipient's own entry in its projection
 }
 
 // LockView is a suppression lock as seen in a roster entry (D-13/EN-7). applierRank tells

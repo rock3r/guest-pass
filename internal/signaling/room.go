@@ -375,9 +375,27 @@ func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 	})
 }
 
+// RebindOrVacate binds the slot to occupant if it is connected, else VACATES the slot — so a
+// greenroom (re)bind whose new occupant is OFFLINE drops the slot to placeholder instead of
+// stranding the displaced prior occupant live (see rebindOrVacate).
+func (r *Room) RebindOrVacate(slot SlotID, occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.rebindOrVacate(slot, occupant))
+	})
+}
+
 func (r *Room) Unbind(slot SlotID) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.unbindSlot(slot))
+	})
+}
+
+// VacateOccupant clears any cam slot the peer occupies (the greenroom "unassign"), keyed on the
+// room's own live occupancy rather than a caller label — so a concurrent move of the same guest
+// can't strand a stale slot bound (see vacateOccupant).
+func (r *Room) VacateOccupant(occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.vacateOccupant(occupant))
 	})
 }
 

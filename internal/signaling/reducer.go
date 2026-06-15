@@ -150,6 +150,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 		return out
 	}
 	entry := s.entryFor(p)
+	// peer-joined sends ONE entry to recipients of every rank, so it must not carry the
+	// host-only BoundSlot (rosterFor does the per-rank strip; this single-entry path can't). A
+	// fresh joiner holds no slot anyway — the binding arrives via the host's roster on rebind.
+	entry.BoundSlot = ""
 	for pid, rp := range s.peers {
 		if pid == id || !isParticipant(rp.role) {
 			continue // only participants receive peer-joined; never echo to the joiner
@@ -436,8 +440,48 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 	if _, ok := s.peers[occupant]; !ok {
 		return nil
 	}
-	out := s.bindSlot(sid, occupant)
+	var out []outbound
+	// One cam slot per occupant (D-20): vacate any OTHER cam slot this occupant already holds
+	// before binding, so a move / re-bind / concurrent double-bind can never leave the guest
+	// live in two OBS sources while the DB stores only the last slot.
+	for other, st := range s.slots {
+		if other != sid && st.occupant == occupant && isCamSlot(other) {
+			out = append(out, s.vacateSlot(other)...)
+		}
+	}
+	out = append(out, s.bindSlot(sid, occupant)...)
 	return append(out, s.rebroadcastRoster()...)
+}
+
+// rebindOrVacate binds sid to occupant when occupant is a connected peer, otherwise VACATES
+// the slot. Used for a greenroom (re)bind whose new occupant may be OFFLINE: a plain rebind
+// no-ops when the occupant can't receive media (EN-3), which would leave the slot's PRIOR
+// occupant live while the DB already names the new one. Vacating instead drops the slot to a
+// placeholder (D-24) — never the displaced guest — so live and the DB agree. The occupant is
+// (re)bound for real once it connects (the /ws join replays passes.slot_id).
+func (s *roomState) rebindOrVacate(sid SlotID, occupant PeerID) []outbound {
+	if _, ok := s.peers[occupant]; ok {
+		return s.rebindSlot(sid, occupant)
+	}
+	return s.unbindSlot(sid)
+}
+
+// vacateOccupant clears any cam slot a peer currently occupies — the greenroom "unassign". It
+// keys on the LIVE occupancy the room owns, not a caller-supplied label, so a concurrent move
+// of the same guest between the caller's read and this call can't leave a stale slot bound.
+func (s *roomState) vacateOccupant(occupant PeerID) []outbound {
+	var out []outbound
+	freed := false
+	for sid, st := range s.slots {
+		if st.occupant == occupant && isCamSlot(sid) {
+			out = append(out, s.vacateSlot(sid)...)
+			freed = true
+		}
+	}
+	if freed {
+		out = append(out, s.rebroadcastRoster()...)
+	}
+	return out
 }
 
 // vacateSlot is the core of clearing a slot (kick / leave / unbind): degrade stale on-air,

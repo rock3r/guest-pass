@@ -55,7 +55,9 @@ func (e *wsAuthError) Error() string { return e.reason }
 type wsStore interface {
 	GetHost(ctx context.Context, id string) (*store.Host, error)
 	GetStream(ctx context.Context, id string) (*store.Stream, error)
+	GetPass(ctx context.Context, id string) (*store.Pass, error)
 	GetPassByTokenHash(ctx context.Context, tokenHash string) (*store.Pass, error)
+	GetSlot(ctx context.Context, id string) (*store.Slot, error)
 	GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) (*store.Slot, error)
 	RecordSlotTokenUse(ctx context.Context, slotID, sourceIP string) error
 	// SetPassStatus backs a kick's token invalidation (D-25): revoking the target's pass so a
@@ -135,6 +137,23 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 		name = *pass.Name
 	}
 	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
+}
+
+// guestBoundSlot re-reads a guest's persisted cam-slot binding (passes.slot_id resolved to its
+// label) at REPLAY time — AFTER Join, not at the handshake — so a host PUT during the join
+// window can't make the replay route from a stale binding. Returns "" for an unbound guest, a
+// non-cam binding, or any lookup miss (best-effort: a miss just means no replay).
+func (wr *wsResolver) guestBoundSlot(ctx context.Context, passID string) signaling.SlotID {
+	pass, err := wr.store.GetPass(ctx, passID)
+	if err != nil || pass.SlotID == nil {
+		return ""
+	}
+	slot, err := wr.store.GetSlot(ctx, *pass.SlotID)
+	if err != nil || slot.Kind != store.SlotCam {
+		return ""
+	}
+	label, _ := slotLabelRole(slot)
+	return label
 }
 
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {

@@ -586,16 +586,17 @@ func TestPassRepo_OneActiveOccupantPerSlot(t *testing.T) {
 	if err := st.AssignPassSlot(ctx, p1.ID, slot.ID); err != nil {
 		t.Fatalf("assign p1: %v", err)
 	}
-	// A second active pass in the same (stream, slot) violates the partial unique index.
-	if err := st.AssignPassSlot(ctx, p2.ID, slot.ID); err == nil {
-		t.Fatal("expected unique-index violation for second active occupant, got nil")
-	}
-	// Revoking p1 frees the slot for p2 (index excludes revoked/expired).
-	if err := st.SetPassStatus(ctx, p1.ID, PassRevoked); err != nil {
-		t.Fatalf("revoke p1: %v", err)
-	}
+	// Assigning a second active pass to the same (stream, slot) DISPLACES the first (the DoD
+	// "swap a slot occupant"), atomically — so at most one active occupant remains (RF-2) and the
+	// partial unique index is never violated.
 	if err := st.AssignPassSlot(ctx, p2.ID, slot.ID); err != nil {
-		t.Fatalf("assign p2 after revoke: %v", err)
+		t.Fatalf("swap assign p2: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, p2.ID); got.SlotID == nil || *got.SlotID != slot.ID {
+		t.Fatalf("p2 not bound to the slot after swap: %v", got.SlotID)
+	}
+	if got, _ := st.GetPass(ctx, p1.ID); got.SlotID != nil {
+		t.Fatalf("p1 not displaced by the swap: %v", got.SlotID)
 	}
 }
 

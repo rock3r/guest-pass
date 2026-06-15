@@ -104,9 +104,12 @@ func (s *Store) ListPassesByStream(ctx context.Context, streamID string) ([]*Pas
 	return out, nil
 }
 
-// AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host
-// invariant: the slot must belong to the pass's stream's host. The DB additionally
-// enforces at-most-one active occupant per (stream, slot) via a partial unique index.
+// AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host invariant
+// (the slot must belong to the pass's stream's host) and cam-only. Binding onto a slot another
+// active guest holds DISPLACES them — the prior occupant's binding is cleared and the new one
+// assigned in ONE transaction (the DoD "swap a slot occupant"), so a failure can never leave
+// the displaced guest unbound while the new bind is lost. The partial unique index on
+// (stream, slot) backstops the at-most-one-occupant invariant.
 func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error {
 	pass, err := s.GetPass(ctx, passID)
 	if err != nil {
@@ -126,9 +129,36 @@ func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error
 	if slot.Kind != SlotCam {
 		return ErrSlotNotCam
 	}
-	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET slot_id = ? WHERE id = ?", slotID, passID)
+	tx, err := s.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("assigning slot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful commit
+	// Displace any OTHER active occupant of this (stream, slot) so the single-occupant index frees up.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE passes SET slot_id = NULL WHERE stream_id = ? AND slot_id = ? AND id != ? AND status NOT IN (?, ?)`,
+		stream.ID, slotID, passID, PassRevoked, PassExpired); err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, "UPDATE passes SET slot_id = ? WHERE id = ?", slotID, passID)
+	if err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	if err := errIfNoRows(res); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	return nil
+}
+
+// ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a
+// greenroom "unassign" (the live half is Room.Unbind).
+func (s *Store) ClearPassSlot(ctx context.Context, passID string) error {
+	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET slot_id = NULL WHERE id = ?", passID)
+	if err != nil {
+		return fmt.Errorf("clearing pass slot: %w", err)
 	}
 	return errIfNoRows(res)
 }

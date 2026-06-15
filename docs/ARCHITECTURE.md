@@ -324,6 +324,20 @@ hashed):
   (D-19) + nameplate, and the stream-wide **quality ceiling** all live in the
   greenroom's **host-only People tab** (EN-23/EN-26). Co-hosts never see slot URLs
   or quality controls (D-15).
+- **Slot→guest binding lives in the greenroom People controls** (host-only): a
+  per-guest slot picker (M4) calls `PUT /api/passes/{id}/slot` (`{"slot":"cam-1"}`
+  to bind, `""` to unassign). The handler persists `passes.slot_id` AND, if a stream
+  is live, re-routes `/s/{slot}` by bumping the slot epoch (`Room.Rebind`) — so the
+  host **swaps an occupant with no OBS edit** (EN-3). Same-host + at-most-one-occupant
+  enforced (RF-2): reassigning an occupied slot **displaces** the prior occupant
+  (their binding cleared + on-air degraded) in **one transaction** (so a swap can't
+  leave the displaced guest unbound while the new bind is lost). The host's
+  role-filtered roster carries a **host-only `boundSlot`** per participant (which cam
+  slot they occupy) so the picker reflects the live assignment; it is stripped from
+  co-host/guest projections (D-15). The persisted binding is **replayed as a live
+  rebind when the guest (re)connects** (the `/ws` join path issues `Room.Rebind` from
+  `passes.slot_id`), so a binding made before OBS/guests connect — or surviving a
+  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40).
 
 ### Slot-rebind protocol + slot epoch (EN-3)
 

@@ -153,6 +153,21 @@ function Greenroom() {
     };
   }, []);
 
+  // bindSlot is the host-only People control (AC-6/D-20): (re)assign a guest to a cam slot (or
+  // "" to unassign) over the REST endpoint. The server persists passes.slot_id AND live-re-routes
+  // /s/{slot} with no OBS edit, then re-broadcasts the roster — so entry.boundSlot (and the
+  // picker) reflect the new assignment. Same-origin fetch carries the host cookie; CSRF is the
+  // SameSite=Lax cookie (a cross-site request can't send it) + connect-src 'self'.
+  function bindSlot(passId, slot) {
+    fetch(`/api/passes/${encodeURIComponent(passId)}/slot`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot }),
+    }).catch(() => {
+      /* a transient failure leaves the binding unchanged; the host can retry */
+    });
+  }
+
   return (
     <div class="greenroom" data-state={state}>
       <div class="gr-toolbar">
@@ -188,6 +203,7 @@ function Greenroom() {
             onRelease={(m) => roomRef.current?.send({ t: "release", peerId: t.id, kind: m })}
             onRole={(role) => roomRef.current?.send({ t: "role", peerId: t.id, role })}
             onDismissHand={() => roomRef.current?.send({ t: "hand", peerId: t.id, raised: false })}
+            onBindSlot={(slot) => bindSlot(t.id, slot)}
           />
           ))
         )}

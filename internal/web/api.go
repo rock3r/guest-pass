@@ -12,6 +12,7 @@ import (
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -23,6 +24,8 @@ type apiServer struct {
 	mailer  mail.Mailer
 	baseURL string
 	rd      *renderer
+	hub     *signaling.Hub // live slot (re)bind re-route (D-20); may be nil (minimal config)
+	binds   *bindingLocks  // serialize a host's slot-binding ops with the /ws join-replay (D-20)
 }
 
 // --- response DTOs (never expose token hashes or raw tokens) ---

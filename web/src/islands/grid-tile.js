@@ -24,6 +24,40 @@ const LOCK_COPY = {
   share: "Screen share stopped by host",
 };
 
+// The addressable cam slots a guest can be bound to (D-20/D-33): the host wires OBS once per
+// slot, then assigns/reassigns occupants live with no OBS edit (EN-3).
+const CAM_SLOTS = ["cam-1", "cam-2", "cam-3", "cam-4", "cam-5", "cam-6", "cam-7", "cam-8"];
+
+/**
+ * SlotPicker is the host-only People control that (re)binds a guest to a cam slot (D-20/AC-6).
+ * Selecting a slot PUTs /api/passes/{id}/slot (via onBindSlot); the server persists the binding
+ * and live-re-routes /s/{slot}, then re-broadcasts the roster so entry.boundSlot — and this
+ * select — reflect the new assignment. Host-only: boundSlot is stripped from non-host rosters.
+ * @param {{entry:any, live:boolean, onBindSlot:(slot:string)=>void}} props
+ * @returns {import("preact").VNode}
+ */
+function SlotPicker({ entry, live, onBindSlot }) {
+  return (
+    <label class="gr-slotbind">
+      <span class="gr-slotbind-label">OBS slot</span>
+      <select
+        class="gr-slot"
+        data-guest={entry.id}
+        disabled={!live}
+        value={entry.boundSlot || ""}
+        onChange={(e) => onBindSlot(/** @type {HTMLSelectElement} */ (e.currentTarget).value)}
+      >
+        <option value="">Unassigned</option>
+        {CAM_SLOTS.map((s) => (
+          <option key={s} value={s}>
+            {s.replace("cam-", "Cam ")}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /**
  * onAirLabel maps the three-state on-air to its pill copy (D-24). status-unavailable means no live
  * OBS signal — never asserted as on/off.
@@ -104,10 +138,10 @@ function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismi
  * Tile renders one participant's P2P video plus its roster-driven status chrome and moderation
  * controls. The stream attaches via an effect so a re-render (e.g. an on-air change) never reloads
  * the <video>. The Reconnect control forces an ICE restart for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void}} props
+ * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand }) {
+export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   useEffect(() => {
@@ -142,6 +176,7 @@ export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onFo
           ✋ Hand raised
         </span>
       ) : null}
+      {viewerRole === "host" && onBindSlot ? <SlotPicker entry={entry} live={live} onBindSlot={onBindSlot} /> : null}
       <Controls
         entry={entry}
         viewerRole={viewerRole}

@@ -139,3 +139,25 @@
 .gr-degraded[data-degraded^="recovering"] {
   color: #1f6a3a;
 }
+
+/* Host-only slot picker (People controls, AC-6/D-20): (re)assign a guest to a cam slot. */
+.gr-slotbind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.gr-slotbind-label {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.gr-slot {
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
