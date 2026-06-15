@@ -124,3 +124,77 @@ func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 		t.Fatal("OBS source page reloaded across the rebind — AC-6 requires re-route with NO reload/OBS edit")
 	}
 }
+
+// A failed (re)bind must surface to the host, not be swallowed (codex, M4 PR-6). The greenroom
+// picker PUTs to a cam slot the host has not provisioned (only cam-1 is wired in the seed), so
+// the server answers 404 with no roster update — the controlled picker stays put AND the
+// .gr-binderr alert tells the host why (open the Sources tab first). Without surfacing, the
+// host sees a silent no-op and can't tell the bind failed.
+func TestBinding_FailedBindSurfacesError(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 180*time.Second)
+	defer cancelDeadline()
+	guestCtx := rootCtx
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestCtx, s.base, s.rawToken, "A")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render the guest slot picker: %v", err)
+	}
+
+	// Bind to cam-2, which the seed never provisioned → 404.
+	var ok bool
+	expr := fmt.Sprintf(`(() => {
+		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		if (!sel) return false;
+		sel.value = "cam-2";
+		sel.dispatchEvent(new Event('change', { bubbles: true }));
+		return true;
+	})()`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil {
+		t.Fatalf("bind to unprovisioned cam-2 via picker: %v", err)
+	}
+	if !ok {
+		t.Fatal("slot picker not found")
+	}
+
+	// The host must see the error alert (server 404 message is surfaced, not swallowed).
+	var msg string
+	if err := chromedp.Run(hostCtx,
+		chromedp.WaitVisible(`.gr-binderr`, chromedp.ByQuery),
+		chromedp.Text(`.gr-binderr`, &msg, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("a failed bind did not surface an error to the host: %v", err)
+	}
+	if msg == "" {
+		t.Fatal("the bind-error alert rendered empty — the host has no idea why the bind failed")
+	}
+
+	// The picker must NOT have stuck on cam-2 (no roster update happened); it snaps back.
+	var pickerVal string
+	if err := chromedp.Run(hostCtx,
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value`, s.passID), &pickerVal),
+	); err != nil {
+		t.Fatalf("read picker value: %v", err)
+	}
+	if pickerVal == "cam-2" {
+		t.Fatal("the picker stuck on the rejected slot — a failed bind must not appear to succeed")
+	}
+}

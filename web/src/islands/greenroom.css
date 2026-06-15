@@ -120,8 +120,17 @@
    room-level "bump quality now" control. Functional-first (D-B). */
 .gr-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 10px;
+}
+/* Surfaced slot (re)bind failure (AC-6): e.g. binding to an unprovisioned cam slot. */
+.gr-binderr {
+  margin: 0;
+  margin-right: auto;
+  font-size: 0.8rem;
+  color: #a3271f;
 }
 .gr-recover {
   font: inherit;

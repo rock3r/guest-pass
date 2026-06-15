@@ -454,6 +454,44 @@ func TestPassRepo_SetRoleAndReissue(t *testing.T) {
 	}
 }
 
+// Re-issue clears slot_id so a previously-bound-then-retired pass can't resurrect a stale slot
+// binding and collide with whoever now holds that slot (codex, M4 PR-6): the partial unique
+// index excludes retired rows, so without the clear, re-issuing would re-enter the index and
+// conflict with the active occupant.
+func TestPassRepo_ReissueClearsStaleSlotBinding(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-reissue-slot")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-reissue"})
+
+	a, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "a-tok"})
+	b, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "b-tok"})
+
+	// Bind A to cam-1, revoke A (slot_id retained but A excluded from the active index), then
+	// bind B to cam-1 — B is now the active occupant; A keeps a STALE slot_id.
+	if err := st.AssignPassSlot(ctx, a.ID, slot.ID); err != nil {
+		t.Fatalf("assign a: %v", err)
+	}
+	if err := st.SetPassStatus(ctx, a.ID, PassRevoked); err != nil {
+		t.Fatalf("revoke a: %v", err)
+	}
+	if err := st.AssignPassSlot(ctx, b.ID, slot.ID); err != nil {
+		t.Fatalf("assign b: %v", err)
+	}
+
+	// Re-issuing A must SUCCEED (not collide with B) and leave A unbound.
+	if err := st.ReissuePass(ctx, a.ID, "a-tok-2"); err != nil {
+		t.Fatalf("re-issuing a previously-bound-then-revoked pass should not conflict: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
+		t.Fatalf("re-issue must clear the stale slot binding, got %v", got.SlotID)
+	}
+	if got, _ := st.GetPass(ctx, b.ID); got.SlotID == nil || *got.SlotID != slot.ID {
+		t.Fatalf("B's binding must be untouched, got %v", got.SlotID)
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {

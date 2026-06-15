@@ -31,6 +31,10 @@ function Greenroom() {
   // moderation controls the viewer may use. The /greenroom host is "host"; the grid is reused for
   // a co-host in the guest-session (PR-11).
   const [viewerRole, setViewerRole] = useState("host");
+  // bindError surfaces a failed slot (re)bind to the host: the picker is controlled by
+  // entry.boundSlot (roster-driven), so a rejected PUT snaps the picker back AND shows why
+  // (e.g. 404 when slots aren't provisioned yet — the host must open the Sources tab first).
+  const [bindError, setBindError] = useState("");
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -163,9 +167,27 @@ function Greenroom() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slot }),
-    }).catch(() => {
-      /* a transient failure leaves the binding unchanged; the host can retry */
-    });
+    })
+      .then(async (r) => {
+        if (r.ok) {
+          setBindError(""); // success: the re-broadcast roster moves the picker
+          return;
+        }
+        // A server-side rejection (404 unprovisioned, 400 bad slot, 5xx) returns no roster
+        // update, so the controlled picker stays put; tell the host why it didn't move.
+        let msg = "Couldn't update the slot.";
+        try {
+          const body = await r.json();
+          if (body && body.error) msg = body.error;
+        } catch (_) {
+          /* non-JSON body: keep the generic message */
+        }
+        setBindError(msg);
+      })
+      .catch(() => {
+        // fetch only rejects on a network/transport failure; the binding is unchanged.
+        setBindError("Couldn't reach the server to update the slot.");
+      });
   }
 
   return (
@@ -181,6 +203,11 @@ function Greenroom() {
         >
           Bump quality now
         </button>
+        {bindError ? (
+          <p class="gr-binderr" role="alert">
+            {bindError}
+          </p>
+        ) : null}
       </div>
       <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
         {tiles.length === 0 ? (

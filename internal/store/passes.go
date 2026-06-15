@@ -231,11 +231,15 @@ func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
 // "sent" state, stamping sent_at (PD-2). The previous hash is overwritten, so the old link
 // stops resolving — one active token per pass (EN-5). It also CLEARS expires_at so the
 // fresh link can't be born already-expired (D-5: re-issuing an expired pass mints a fresh,
-// usable token); a later expiry-derivation pass re-stamps a deadline. The rest of the row's
-// history (opened_at/accepted_at) is kept (same row).
+// usable token); a later expiry-derivation pass re-stamps a deadline. It also CLEARS slot_id:
+// a re-issued invite starts unbound, so re-activating a previously-bound-then-retired pass
+// can't resurrect a stale slot binding and collide with whoever now holds that slot (the
+// partial unique index excludes retired rows, so the stale binding would otherwise re-enter
+// the index on re-issue and conflict). The rest of the row's history (opened_at/accepted_at)
+// is kept (same row); the host re-binds in the greenroom if needed.
 func (s *Store) ReissuePass(ctx context.Context, id, newTokenHash string) error {
 	res, err := s.writer.ExecContext(ctx,
-		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL WHERE id = ?",
+		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL, slot_id = NULL WHERE id = ?",
 		newTokenHash, PassSent, time.Now().Unix(), id)
 	if err != nil {
 		return fmt.Errorf("reissuing pass: %w", err)
