@@ -20,6 +20,15 @@ type putPassSlotRequest struct {
 	Slot string `json:"slot"`
 }
 
+// putPassSlotResponse echoes the resulting binding. Live reports whether the change also
+// re-routed the LIVE room (true) or was persisted DB-only because the stream isn't live (false):
+// the greenroom picker keeps a local override ONLY for a DB-only bind — a live bind is reflected
+// by the authoritative roster, so holding an override there could leak past a later unbind (codex).
+type putPassSlotResponse struct {
+	BoundSlot string `json:"boundSlot"`
+	Live      bool   `json:"live"`
+}
+
 // putPassSlot is the live slot↔guest (re)bind (AC-6, the DoD core): it persists the binding
 // to passes.slot_id AND, if a stream is live, re-routes /s/{slot} by bumping the slot epoch
 // (Room.Rebind) — so the host swaps a slot's occupant with NO OBS edit (EN-3). Host-only
@@ -59,7 +68,7 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 		if live {
 			a.liveUnbind(host.ID, pass.ID)
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"boundSlot": ""})
+		writeJSON(w, http.StatusOK, putPassSlotResponse{BoundSlot: "", Live: live})
 		return
 	}
 
@@ -96,7 +105,7 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 	if live {
 		a.liveRebind(host.ID, newLabel, pass.ID)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"boundSlot": newLabel})
+	writeJSON(w, http.StatusOK, putPassSlotResponse{BoundSlot: newLabel, Live: live})
 }
 
 // streamIsLive reports whether streamID is the host's currently-live session (EN-2/D-20). The

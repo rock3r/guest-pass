@@ -191,18 +191,28 @@ function Greenroom() {
       .then(async (r) => {
         if (r.ok) {
           setBindError("");
-          // Reflect the persisted selection locally so a DB-only (pre-live) bind doesn't snap the
-          // picker back — the server echoes the new boundSlot ("" when unassigned). When live, the
-          // matching roster frame supersedes and clears this. Also drop any other pass's override
-          // that pointed at the same slot (this bind displaced it).
           const body = await r.json().catch(() => ({}));
           const newSlot = (body && body.boundSlot) || "";
-          setBoundOverrides((prev) => {
-            const next = { ...prev };
-            if (newSlot) for (const k of Object.keys(next)) if (next[k] === newSlot) delete next[k];
-            next[passId] = newSlot;
-            return next;
-          });
+          if (body && body.live) {
+            // A LIVE bind: the authoritative roster already carries the new boundSlot, so keep NO
+            // override — holding one would mask a later unassign/displace whose roster reports "".
+            // Drop any stale override for this pass (e.g. one left from an earlier DB-only bind).
+            setBoundOverrides((prev) => {
+              if (!(passId in prev)) return prev;
+              const next = { ...prev };
+              delete next[passId];
+              return next;
+            });
+          } else {
+            // A DB-only (pre-live) bind produces no roster frame, so reflect the persisted selection
+            // locally (""=unassigned). Drop any other pass's override on the same slot (displacement).
+            setBoundOverrides((prev) => {
+              const next = { ...prev };
+              if (newSlot) for (const k of Object.keys(next)) if (next[k] === newSlot) delete next[k];
+              next[passId] = newSlot;
+              return next;
+            });
+          }
           return;
         }
         // A server-side rejection (404 unprovisioned, 400 bad slot, 5xx) returns no roster

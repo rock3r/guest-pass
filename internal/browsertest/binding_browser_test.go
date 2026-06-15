@@ -5,6 +5,8 @@ package browsertest
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +197,77 @@ func TestBinding_PreLivePickerKeepsSelection(t *testing.T) {
 	}
 	if aVal != "cam-1" {
 		t.Fatalf("A's pre-live picker selection reverted to %q after a re-render — must stay cam-1", aVal)
+	}
+}
+
+// A LIVE bind must NOT leave a stale local override that masks a later unbind from elsewhere
+// (codex P2): a live bind is reflected by the authoritative roster, so the picker keeps no
+// override for it — when another tab/actor unassigns the slot, the roster's boundSlot:"" must move
+// the picker back to Unassigned. (Pre-live DB-only binds still keep an override; that's a separate
+// path, covered by TestBinding_PreLivePickerKeepsSelection.)
+func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if _, err := s.store.StartSession(context.Background(), s.streamID, s.hostID); err != nil {
+		t.Fatalf("StartSession: %v", err) // LIVE → the picker bind does a live reroute (response live:true)
+	}
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 180*time.Second)
+	defer cancelDeadline()
+	guestCtx := rootCtx
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestCtx, s.base, s.rawToken, "A")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render the guest slot picker: %v", err)
+	}
+
+	// Bind A → cam-1 via the picker (live reroute), and wait until the roster moves the picker to it.
+	var ok bool
+	expr := fmt.Sprintf(`(() => {
+		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		if (!sel) return false;
+		sel.value = "cam-1";
+		sel.dispatchEvent(new Event('change', { bubbles: true }));
+		return true;
+	})()`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil || !ok {
+		t.Fatalf("bind cam-1 via picker: ok=%v err=%v", ok, err)
+	}
+	onCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(onCam1, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
+		t.Fatalf("picker did not reflect the live bind to cam-1: %v", err)
+	}
+
+	// Unassign A from ELSEWHERE (another tab/actor): an out-of-band PUT carrying the host cookie.
+	// The live unbind broadcasts a roster with boundSlot:"" — which the picker must honor.
+	req, _ := http.NewRequest(http.MethodPut, s.base+"/api/passes/"+s.passID+"/slot", strings.NewReader(`{"slot":""}`))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: s.hostCookie})
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("out-of-band unassign: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	// The picker must move back to Unassigned — a stale override must not keep showing cam-1.
+	unassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(unassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
+		t.Fatalf("picker kept showing cam-1 after a live unbind elsewhere — stale override masked the roster: %v", err)
 	}
 }
 
