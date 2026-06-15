@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
@@ -32,15 +33,21 @@ func (s *appServer) goLive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not go live", http.StatusInternalServerError)
 		return
 	}
+	// The session row is committed; the room reconciliation below MUST NOT be abandoned if the
+	// host's POST is canceled/disconnects — otherwise a straggler from another stream would linger
+	// in the now-live room and pre-live bindings wouldn't replay. Detach from the request's
+	// cancellation (keeping its values) with a short timeout (codex).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
 	// Reconcile an already-spawned room with the persisted bindings now that the session is live
 	// (D-40): a guest that connected BEFORE Go live had its join-replay gated off and any pre-live
 	// picker bind was DB-only, so bind them now. ResumeBind is non-displacing and no-ops for a peer
 	// that isn't connected.
-	s.replayBindingsLocked(r.Context(), host.ID, st.ID)
+	s.replayBindingsLocked(ctx, host.ID, st.ID)
 	// Evict any pre-live straggler from a DIFFERENT stream: it was admitted while no session was
 	// live, but now that THIS stream is on-air a non-live-stream guest must not remain in the room
 	// (isolation, codex). The admission gate refuses new such joins; this clears existing ones.
-	s.evictOtherStreamStragglersLocked(r.Context(), host.ID, st.ID)
+	s.evictOtherStreamStragglersLocked(ctx, host.ID, st.ID)
 	// Tell a greenroom that was open BEFORE Go live to drop its optimistic pre-live slot overrides
 	// and reconcile to the now-authoritative roster (codex) — sent AFTER the replay so the live
 	// bindings land first.
