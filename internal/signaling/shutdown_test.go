@@ -71,6 +71,16 @@ func TestHubEndSession_RoomDiscoverableUntilTerminated(t *testing.T) {
 	}
 }
 
+// Room.Close must be idempotent (codex): a server drain (Shutdown) can race a host ending/deleting
+// the live stream, and both teardown paths hold the same Room — a second raw close(r.done) would
+// panic "close of closed channel" and crash the process instead of draining cleanly.
+func TestRoomClose_Idempotent(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	r.Close()
+	r.Close() // must be a no-op, not a panic
+}
+
 func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	h := NewHub(nil, nil)
 	h.Shutdown("reconnect")

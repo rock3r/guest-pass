@@ -26,11 +26,12 @@ type roomCmd func(*roomState, map[PeerID]*peerConn)
 // table; every mutation arrives as a roomCmd. No locks on room state. A nil lockStore
 // disables suppression-lock persistence (AD-22) — used by the pure transport tests.
 type Room struct {
-	id    string
-	cmds  chan roomCmd
-	done  chan struct{}
-	locks LockPersistence
-	log   *slog.Logger
+	id        string
+	cmds      chan roomCmd
+	done      chan struct{}
+	closeOnce sync.Once // guards done against a double Close (drain racing an end-session, codex)
+	locks     LockPersistence
+	log       *slog.Logger
 }
 
 func newRoom(id string, locks LockPersistence, log *slog.Logger) *Room {
@@ -513,4 +514,4 @@ func (r *Room) Terminate(reason string) {
 }
 
 // Close stops the room goroutine.
-func (r *Room) Close() { close(r.done) }
+func (r *Room) Close() { r.closeOnce.Do(func() { close(r.done) }) }
