@@ -129,6 +129,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).
 			hr.Get("/app", app.dashboard)
+			hr.Get("/app/calendar", app.calendar)
 			hr.Post("/app/streams", app.createStream)
 			hr.Get("/app/streams/{id}/edit", app.editStreamForm)
 			hr.Post("/app/streams/{id}", app.updateStream)

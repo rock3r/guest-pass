@@ -1092,8 +1092,10 @@ prefix, all behind `RequireHost` (EN-6, so pending/suspended hosts are gated). T
 dashboard is `GET /app` (lists the host's streams + the create form); stream
 create/edit/delete are server-rendered forms — `POST /app/streams`,
 `GET /app/streams/{id}/edit`, `POST /app/streams/{id}`, `POST /app/streams/{id}/delete`
-— that mutate then redirect (POST-redirect-GET). The calendar, stream-detail
-(Invites/Sources tabs), and settings surfaces hang off the same prefix as they land.
+— that mutate then redirect (POST-redirect-GET). `GET /app/calendar` is a read-only
+month + agenda view of the host's scheduled streams (keyed by `scheduled_at`,
+`?month=YYYY-MM`; recurring control hidden, D-8). The stream-detail (Invites/Sources
+tabs) and settings surfaces hang off the same prefix as they land.
 No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
 `SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
 separate CSRF token is needed. After Google sign-in the host lands on `/app`.
