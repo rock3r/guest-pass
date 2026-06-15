@@ -11,6 +11,7 @@
 <a class="app-brand" href="/app">GuestPass</a>
 <nav class="app-links" aria-label="Host navigation">
 <a href="/app"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
+<a href="/app/calendar"{{if eq .Nav "calendar"}} aria-current="page"{{end}}>Calendar</a>
 </nav>
 <div class="app-account">
 {{if .Host}}<span class="app-host">{{.Host.Name}}</span>{{end}}

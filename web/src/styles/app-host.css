@@ -214,3 +214,111 @@ body.app {
   color: #a3261c;
   font-weight: 600;
 }
+
+/* Calendar — read-only month grid + agenda (D-8; recurring control deliberately absent). */
+.cal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cal-month {
+  font-weight: 700;
+  min-width: 9ch;
+  text-align: center;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin: 16px 0 28px;
+}
+
+.cal-weekday {
+  font-weight: 600;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.cal-cell {
+  min-height: 84px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 4px 6px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cal-empty {
+  border-style: dashed;
+  opacity: 0.4;
+  background: transparent;
+}
+
+.cal-today {
+  border-width: 2px;
+  border-color: var(--accent);
+}
+
+.cal-day {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.cal-event {
+  font-size: 0.78rem;
+  text-decoration: none;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 5px;
+  padding: 1px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda {
+  border-top: 1px solid var(--ink);
+  padding-top: 18px;
+}
+
+.agenda-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agenda-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.agenda-when {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  min-width: 18ch;
+}
+
+.agenda-title {
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}

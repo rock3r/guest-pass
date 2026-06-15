@@ -1,0 +1,40 @@
+{{define "content"}}
+<section class="cal">
+<div class="cal-head">
+<h1>Calendar</h1>
+<div class="cal-nav">
+<a class="btn btn-quiet" href="/app/calendar?month={{.Data.PrevMonth}}">← Prev</a>
+<span class="cal-month">{{.Data.MonthLabel}}</span>
+<a class="btn btn-quiet" href="/app/calendar?month={{.Data.NextMonth}}">Next →</a>
+</div>
+</div>
+
+<div class="cal-grid" aria-label="{{.Data.MonthLabel}}">
+<div class="cal-weekday">Mon</div><div class="cal-weekday">Tue</div><div class="cal-weekday">Wed</div><div class="cal-weekday">Thu</div><div class="cal-weekday">Fri</div><div class="cal-weekday">Sat</div><div class="cal-weekday">Sun</div>
+{{range .Data.Weeks}}{{range .}}
+<div class="cal-cell{{if not .InMonth}} cal-empty{{end}}{{if .IsToday}} cal-today{{end}}">
+{{if .InMonth}}<span class="cal-day">{{.Day}}</span>
+{{range .Streams}}<a class="cal-event status-{{.Status}}" href="/app/streams/{{.ID}}/edit" title="{{.Title}}">{{.Title}}</a>{{end}}
+{{end}}
+</div>
+{{end}}{{end}}
+</div>
+
+<section class="agenda">
+<h2>Scheduled streams</h2>
+{{if .Data.Agenda}}
+<ul class="agenda-list">
+{{range .Data.Agenda}}
+<li class="agenda-item">
+<span class="agenda-when">{{.When}}</span>
+<a class="agenda-title" href="/app/streams/{{.ID}}/edit">{{.Title}}</a>
+<span class="stream-status status-{{.Status}}">{{.Status}}</span>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="dash-empty">No scheduled streams yet.</p>
+{{end}}
+</section>
+</section>
+{{end}}
