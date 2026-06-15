@@ -186,6 +186,33 @@ func (s *Store) MarkPassOpened(ctx context.Context, id string) (bool, error) {
 	return n > 0, nil
 }
 
+// SetPassRole updates a pass's role (guest|cohost). Role is an invitation attribute,
+// editable from the host's invites tab and also live in the greenroom via promote/demote
+// (D-15). The caller validates the role value against the allowed set.
+func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
+	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET role = ? WHERE id = ?", role, id)
+	if err != nil {
+		return fmt.Errorf("setting pass role: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
+// ReissuePass rotates a pass's magic-link token to newTokenHash and returns it to the
+// "sent" state, stamping sent_at (PD-2). The previous hash is overwritten, so the old link
+// stops resolving — one active token per pass (EN-5). It also CLEARS expires_at so the
+// fresh link can't be born already-expired (D-5: re-issuing an expired pass mints a fresh,
+// usable token); a later expiry-derivation pass re-stamps a deadline. The rest of the row's
+// history (opened_at/accepted_at) is kept (same row).
+func (s *Store) ReissuePass(ctx context.Context, id, newTokenHash string) error {
+	res, err := s.writer.ExecContext(ctx,
+		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL WHERE id = ?",
+		newTokenHash, PassSent, time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("reissuing pass: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
 // DeletePass removes a pass.
 func (s *Store) DeletePass(ctx context.Context, id string) error {
 	res, err := s.writer.ExecContext(ctx, "DELETE FROM passes WHERE id = ?", id)

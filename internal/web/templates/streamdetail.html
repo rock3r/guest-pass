@@ -1,0 +1,66 @@
+{{define "content"}}
+<section class="detail">
+<p class="back-link"><a href="/app">← Back to streams</a></p>
+<div class="detail-head">
+<h1>{{.Data.StreamTitle}}</h1>
+<a class="btn btn-quiet" href="/app/streams/{{.Data.StreamID}}/edit">Edit stream</a>
+</div>
+
+<nav class="tabs" aria-label="Stream sections">
+<a class="tab{{if eq .Data.Tab "invites"}} tab-active{{end}}" href="/app/streams/{{.Data.StreamID}}"{{if eq .Data.Tab "invites"}} aria-current="page"{{end}}>Invites</a>
+</nav>
+
+{{if .Data.Issued}}
+<div class="issued" role="status">
+<p>Invite for <strong>{{.Data.Issued.Email}}</strong>
+{{if .Data.Issued.Delivered}}has been emailed.{{else}}was created, but the email could not be delivered — share this link manually.{{end}}
+Copy the link now; it won't be shown again:</p>
+<input class="issued-link" type="text" readonly value="{{.Data.Issued.Link}}" aria-label="Guest magic link">
+</div>
+{{end}}
+
+<section class="invites">
+<h2>Invites</h2>
+{{if .Data.Passes}}
+<table class="invite-table">
+<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Data.Passes}}
+<tr>
+<td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
+<td>{{.Email}}</td>
+<td>
+<form method="post" action="/app/streams/{{$.Data.StreamID}}/passes/{{.ID}}/role" class="role-form">
+<select name="role" aria-label="Role">
+<option value="guest"{{if not .IsCohost}} selected{{end}}>Guest</option>
+<option value="cohost"{{if .IsCohost}} selected{{end}}>Co-host</option>
+</select>
+<button type="submit" class="btn btn-quiet">Update</button>
+</form>
+</td>
+<td><span class="stream-status">{{.Status}}</span></td>
+<td>{{if .Expiry}}{{.Expiry}}{{else}}<span class="muted">—</span>{{end}}</td>
+<td class="invite-actions">
+<form method="post" action="/app/streams/{{$.Data.StreamID}}/passes/{{.ID}}/reissue" class="inline-form"><button type="submit" class="btn btn-quiet">Re-issue</button></form>
+<form method="post" action="/app/streams/{{$.Data.StreamID}}/passes/{{.ID}}/revoke" class="inline-form"><button type="submit" class="btn btn-danger"{{if .Retired}} disabled{{end}}>Revoke</button></form>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="dash-empty">No invites yet — invite your first guest below.</p>
+{{end}}
+
+<section class="invite-create">
+<h3>Invite a guest</h3>
+<form method="post" action="/app/streams/{{.Data.StreamID}}/passes" class="stream-form">
+<label>Name<input type="text" name="name" maxlength="120" autocomplete="off"></label>
+<label>Email<input type="email" name="email" required maxlength="200" autocomplete="off"></label>
+<label>Role<select name="role"><option value="guest">Guest</option><option value="cohost">Co-host</option></select></label>
+<button type="submit" class="btn btn-primary">Send invite</button>
+</form>
+</section>
+</section>
+</section>
+{{end}}

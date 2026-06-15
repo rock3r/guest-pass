@@ -322,3 +322,107 @@ body.app {
   color: var(--ink);
   text-decoration: none;
 }
+
+/* Stream detail + Invites tab. */
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--ink);
+  margin: 12px 0 20px;
+}
+
+.tab {
+  padding: 8px 14px;
+  text-decoration: none;
+  color: var(--ink);
+  opacity: 0.75;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+
+.tab-active {
+  opacity: 1;
+  font-weight: 600;
+  border-color: var(--ink);
+  background: #fff;
+}
+
+.issued {
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+}
+
+.issued-link {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  padding: 8px 10px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.invite-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 24px;
+}
+
+.invite-table th,
+.invite-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  vertical-align: middle;
+}
+
+.invite-table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.role-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+
+.role-form select,
+.invite-create select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.invite-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.invite-create {
+  border-top: 1px solid var(--ink);
+  padding-top: 18px;
+}
+
+.muted {
+  opacity: 0.5;
+}

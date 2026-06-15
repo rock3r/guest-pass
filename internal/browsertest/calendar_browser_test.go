@@ -55,9 +55,10 @@ func TestHostApp_CalendarRendersScheduledStreams(t *testing.T) {
 		if !strings.Contains(agendaText, "Season Premiere") {
 			t.Fatalf("agenda missing the scheduled stream; got %q", agendaText)
 		}
-		wantHref := "/app/streams/" + stream.ID + "/edit"
-		if !strings.Contains(eventHref, wantHref) {
-			t.Fatalf("calendar event href = %q, want it to link to %q", eventHref, wantHref)
+		// Links to the stream detail page (PR-3) — not the edit form (which is a sub-route).
+		wantHref := "/app/streams/" + stream.ID
+		if !strings.HasSuffix(eventHref, wantHref) {
+			t.Fatalf("calendar event href = %q, want it to link to the detail page %q", eventHref, wantHref)
 		}
 		// Recurring/repeat is hidden in v1 (D-8): no such control anywhere on the page.
 		low := strings.ToLower(bodyText)

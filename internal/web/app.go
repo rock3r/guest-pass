@@ -10,7 +10,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/store"
+	"github.com/rock3r/guest-pass/internal/token"
 )
 
 // appServer renders the host's day-to-day app shell — the dashboard and stream CRUD now,
@@ -21,8 +23,12 @@ import (
 // carries it (auth/session.go), so no separate CSRF token is needed. Every route is
 // mounted behind RequireHost, which gates pending/suspended hosts (EN-6).
 type appServer struct {
-	store *store.Store
-	rd    *renderer
+	store   *store.Store
+	rd      *renderer
+	hasher  *token.Hasher // magic-link token hashing for the invites tab (EN-5)
+	mailer  mail.Mailer   // invite delivery
+	baseURL string        // absolute origin for building magic links
+	reveals *revealStore  // one-time post-redirect reveal of a just-minted magic link
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
