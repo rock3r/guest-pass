@@ -199,3 +199,48 @@ func TestGoogleOAuth_CompleteLogin_UnverifiedRejected(t *testing.T) {
 		t.Fatal("unverified login must not create a host or set a session")
 	}
 }
+
+// An ACTIVE host lands on the configured success URL (the host-app dashboard, /app).
+func TestGoogleOAuth_CompleteLogin_ActiveHostLandsOnSuccessURL(t *testing.T) {
+	up := &fakeUpserter{bySub: map[string]*store.Host{
+		"sub-a": {ID: "ha", GoogleSub: "sub-a", Status: store.HostActive},
+	}}
+	g := newGoogle(t, up, LoginPolicy{SignupMode: config.SignupModeOpen})
+	g.successURL = "/app"
+	g.fetch = &fakeFetcher{info: &userInfo{Sub: "sub-a", Email: "a@example.com", EmailVerified: true}}
+
+	rec := httptest.NewRecorder()
+	g.completeLogin(rec, httptest.NewRequest(http.MethodGet, "/", nil), &oauth2.Token{AccessToken: "x"})
+
+	if loc := rec.Header().Get("Location"); loc != "/app" {
+		t.Fatalf("active host post-login Location = %q, want /app", loc)
+	}
+}
+
+// A PENDING or SUSPENDED host has a valid session but is gated out of the host-app
+// dashboard (RequireHost → 403, EN-6). Post-login must send them to the public landing
+// ("/"), not dead-end on a bare forbidden page (Cursor Bugbot, M4 PR-1).
+func TestGoogleOAuth_CompleteLogin_NonActiveHostLandsOnLanding(t *testing.T) {
+	for _, status := range []string{store.HostPending, store.HostSuspended} {
+		up := &fakeUpserter{bySub: map[string]*store.Host{
+			"sub-n": {ID: "hn", GoogleSub: "sub-n", Status: status},
+		}}
+		g := newGoogle(t, up, LoginPolicy{SignupMode: config.SignupModeOpen})
+		g.successURL = "/app"
+		g.fetch = &fakeFetcher{info: &userInfo{Sub: "sub-n", Email: "n@example.com", EmailVerified: true}}
+
+		rec := httptest.NewRecorder()
+		g.completeLogin(rec, httptest.NewRequest(http.MethodGet, "/", nil), &oauth2.Token{AccessToken: "x"})
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("status %q: code = %d, want 302", status, rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "/" {
+			t.Fatalf("status %q: post-login Location = %q, want / (not the gated dashboard)", status, loc)
+		}
+		// A session is still issued — they are a real host, just not active yet.
+		if sessionCookieFromRec(rec) == nil {
+			t.Fatalf("status %q: expected a session cookie even for a non-active host", status)
+		}
+	}
+}
