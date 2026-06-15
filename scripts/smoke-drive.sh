@@ -29,7 +29,8 @@ cd "$REPO_ROOT"
 SHOTS="$REPO_ROOT/.smoke/drive-shots"
 
 export SMOKE_DRIVE=1 SMOKE_GUESTS="$GUESTS" SMOKE_WATCH_SEC="$WATCH" SMOKE_SHOTS="$SHOTS"
-[[ "$HEADLESS" == 1 ]] && export SMOKE_HEADLESS=1
+# Set/clear explicitly so an inherited SMOKE_HEADLESS can't force headless on a headful run.
+if [[ "$HEADLESS" == 1 ]]; then export SMOKE_HEADLESS=1; else unset SMOKE_HEADLESS; fi
 
 echo "headful smoke driver: $GUESTS guests → grid / RF-8 / on-air, screenshots in $SHOTS"
 echo "(builds the frontend, launches the browsers, drives the flow, then holds the windows ${WATCH}s)"

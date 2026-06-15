@@ -43,6 +43,14 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 		t.Skip("headful smoke driver — set SMOKE_DRIVE=1 (or run scripts/smoke-drive.sh)")
 	}
 	headful := os.Getenv("SMOKE_HEADLESS") == ""
+	watch := envInt("SMOKE_WATCH_SEC", 45)
+	// Every guest/host/OBS browser must outlive the whole run, including the headful watch hold, so
+	// size the per-browser deadline = active-flow budget + the watch period (a fixed deadline could
+	// otherwise cancel guest 1's context mid-watch on a long SMOKE_WATCH_SEC or slow P2P).
+	browserTTL := 240 * time.Second
+	if headful {
+		browserTTL += time.Duration(watch) * time.Second
+	}
 	n := envInt("SMOKE_GUESTS", 3)
 	if n < 1 {
 		n = 1
@@ -60,23 +68,32 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 
 	// 1) Every guest publishes from its OWN fake-media browser (kept alive for the whole run).
 	for i, raw := range s.rawTokens {
-		gctx := driveBrowser(t, headful, 180*time.Second)
-		if err := chromedp.Run(gctx,
-			chromedp.Navigate(s.base+"/p/"+raw),
+		gctx := driveBrowser(t, headful, browserTTL)
+		acts := []chromedp.Action{
+			chromedp.Navigate(s.base + "/p/" + raw),
 			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
 			chromedp.Click(`.dc-start`, chromedp.ByQuery),
 			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
 			chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
 			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
 			chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
-		); err != nil {
+		}
+		// Guest 1 is the RF-8 target: make it NON-cooperating (a WS wrapper strips its own self-locks,
+		// so it keeps SENDING after a force) — then the host tile + OBS source going black genuinely
+		// proves CONSUMER-side detach, not the publisher stopping at source. (Inject before navigate.)
+		noncoop := ""
+		if i == 0 {
+			acts = append([]chromedp.Action{injectScript(nonCooperatingPublisherJS)}, acts...)
+			noncoop = " (non-cooperating — RF-8 target)"
+		}
+		if err := chromedp.Run(gctx, acts...); err != nil {
 			t.Fatalf("guest %d publish: %v", i+1, err)
 		}
-		t.Logf("  guest %d live", i+1)
+		t.Logf("  guest %d live%s", i+1, noncoop)
 	}
 
 	// 2) OBS source page (a browser tab) subscribed to cam-1 — unbound for now (placeholder).
-	obs := driveBrowser(t, headful, 180*time.Second)
+	obs := driveBrowser(t, headful, browserTTL)
 	if err := chromedp.Run(obs,
 		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
 		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
@@ -99,7 +116,7 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 	shot(t, obs, shotsDir, "01-obs-rendering")
 
 	// 4) Host greenroom (now the live host connection) renders every guest tile over P2P.
-	host := driveBrowser(t, headful, 180*time.Second)
+	host := driveBrowser(t, headful, browserTTL)
 	setCookie := chromedp.ActionFunc(func(ctx context.Context) error {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
@@ -154,7 +171,6 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 
 	t.Logf("✅ smoke driver passed. Screenshots in %s", shotsDir)
 	if headful {
-		watch := envInt("SMOKE_WATCH_SEC", 45)
 		t.Logf("holding the windows open for %ds so you can watch (SMOKE_WATCH_SEC) …", watch)
 		time.Sleep(time.Duration(watch) * time.Second)
 	}
