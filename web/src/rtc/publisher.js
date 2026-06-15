@@ -11,11 +11,16 @@ export class Publisher {
   /**
    * @param {import("./room.js").Room} room
    * @param {MediaStream} stream the local camera/mic stream to publish
+   * @param {(pc: RTCPeerConnection, id: string) => void} [onPc] notified when a consumer pc is
+   *   created, so the guest can watch it for connectivity (D-38 network-blocked detection).
+   * @param {(id: string) => void} [onUntrack] notified when a consumer pc is torn down.
    */
-  constructor(room, stream) {
+  constructor(room, stream, onPc, onUntrack) {
     this.room = room;
     this.stream = stream;
     this.closed = false;
+    this.onPc = onPc || (() => {});
+    this.onUntrack = onUntrack || (() => {});
     /** @type {Record<string, RTCPeerConnection>} */
     this.pcs = {};
   }
@@ -66,6 +71,7 @@ export class Publisher {
       pc.onicecandidate = (e) => {
         if (e.candidate) this.room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON() });
       };
+      this.onPc(pc, f.from); // watch this consumer connection for D-38 network-blocked detection
     }
     if (f.sdp) {
       await pc.setRemoteDescription(f.sdp);
@@ -101,7 +107,10 @@ export class Publisher {
   /** Close all consumer connections (the local stream is owned by the caller). */
   close() {
     this.closed = true;
-    for (const id of Object.keys(this.pcs)) this.pcs[id].close();
+    for (const id of Object.keys(this.pcs)) {
+      this.pcs[id].close();
+      this.onUntrack(id);
+    }
     this.pcs = {};
   }
 }

@@ -162,10 +162,18 @@ For one guest, the consumers (peers) are:
 | BYO-TURN | opt-in | GuestPass accepts a TURN config (`TURN_URL` + `TURN_SECRET`) at host and/or operator level and feeds it to ICE. Must be **publicly reachable** (UPnP / port-forward / public IP). |
 
 **Known limitation + required UX:** with no TURN, the ~8–15% behind symmetric NAT /
-restrictive firewalls cannot connect. Surface a clear **"your network blocks
-peer-to-peer"** guest error (suggest a different network / hotspot) — never a
-silent hang. TURN is a NAT-traversal *packet* relay (encrypted DTLS-SRTP forwarded
-without inspection), so it is D-23-safe — not "media through the server."
+restrictive firewalls cannot connect. The guest client detects this and shows a
+clear **"your network blocks peer-to-peer"** screen — suggesting a different
+network / phone hotspot, with a **Retry** back to the device-check preview — rather
+than a silent hang behind a false "you're live". **Detection (client-side,
+`ConnectivityWatch`):** once the guest is publishing and the first consumer/peer
+connection is created (someone is actually trying), a watchdog (~20 s) flags
+*network-blocked* iff **no** tracked P2P connection has **ever** reached
+`connected`. The "ever connected" guard scopes this to the **initial** can't-connect
+case: a guest that reaches anyone is never warned, and a later mid-session drop is
+the existing reconnecting path (see *Connection resilience*), not this screen. TURN
+is a NAT-traversal *packet* relay (encrypted DTLS-SRTP forwarded without
+inspection), so it is D-23-safe — not "media through the server."
 
 ### Codecs (D-39)
 
@@ -1158,6 +1166,12 @@ Shared by the app entry; a trimmed subset by the OBS entry.
 - **`getStats()` health sampling** — the principled signal feeding the degradation
   ladder (D-33) and per-guest health UI: `qualityLimitationReason`, framerate,
   bitrate, loss, RTT, `used_turn`. There is **no pre-flight speed test** (D-12).
+- a **`ConnectivityWatch`** — the D-38 network-blocked watchdog. It watches the
+  guest's own publish + mesh connections; if none ever reaches `connected` within
+  the window (and one was being attempted), it flags *network-blocked* so the island
+  replaces the false "you're live" with the actionable screen (see §3 NAT traversal
+  for the detection contract). Initial-connect only; the "ever connected" guard
+  means a guest that reaches anyone is never warned.
 
 ### Build — esbuild as a Go library (AD-7 / EN-13)
 

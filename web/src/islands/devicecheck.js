@@ -4,6 +4,7 @@ import { Publisher } from "../rtc/publisher.js";
 import { ReconnectingSession, TERMINAL_REASONS } from "../rtc/session.js";
 import { MeshManager, isMeshRole } from "../rtc/mesh.js";
 import { DegradationController } from "../rtc/degradation.js";
+import { ConnectivityWatch } from "../rtc/connectivity.js";
 import { FORCE_FRAME } from "./grid-tile.js";
 import { GuestSession } from "./guest-session.js";
 
@@ -43,6 +44,12 @@ function DeviceCheck() {
   // global "we're live" broadcast reflection. Both are read-only reflections, never asserted.
   const [onAir, setOnAir] = useState("status-unavailable");
   const [streaming, setStreaming] = useState(false);
+  // netBlocked is the D-38 "your network blocks peer-to-peer" state: set when the connectivity
+  // watchdog sees the guest is publishing with a consumer/peer trying, yet NO P2P connection ever
+  // establishes (symmetric NAT / UDP-blocking firewall on a STUN-only v1). It takes render
+  // precedence over the in-session view so the guest gets a clear screen instead of a false
+  // "you're live" silent hang. Cleared on recovery (a pc connects after) or the Retry action.
+  const [netBlocked, setNetBlocked] = useState(false);
   // lockedMods are this guest's currently force-suppressed modalities (mic|cam|share), read from
   // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
   // (RF-8); the guest-session renders the visible "muted/hidden by host" notice from these.
@@ -85,6 +92,8 @@ function DeviceCheck() {
   const meshRef = useRef(null);
   /** @type {{current: import("../rtc/degradation.js").DegradationController|null}} */
   const degRef = useRef(null);
+  /** @type {{current: import("../rtc/connectivity.js").ConnectivityWatch|null}} */
+  const watchRef = useRef(null);
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -187,14 +196,40 @@ function DeviceCheck() {
   // dropped socket auto-retries (pubState → "reconnecting"), and a TERMINAL {t:terminate} routes to
   // the matching error screen. setup() re-wires a fresh Publisher + mesh + handlers on each (re)connect.
   function startPublishing() {
+    // (Re)starting a publishing session means we are connecting until the new socket opens. Reset
+    // pubState so a RE-entry (e.g. Retry from the network-blocked screen) doesn't inherit a stale
+    // "live" from the prior attempt — ReconnectingSession.close() runs teardown but never fires
+    // onState, so without this the live-gated send helpers + GuestSession could act on a socket that
+    // is still CONNECTING and throw on WebSocket.send (the "never live before the WS is up" invariant).
+    setPubState("connecting");
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
-        const publisher = new Publisher(room, /** @type {MediaStream} */ (streamRef.current));
+        // D-38 network-blocked watchdog: watch every consumer/peer pc this guest creates. On a
+        // STUN-only path behind symmetric NAT / a UDP-blocking firewall NONE ever connects, so the
+        // guest would otherwise sit on a false "you're live" — surface the network-blocked screen
+        // instead. onRecovered clears it if a connection eventually comes through (a slow network).
+        const watch = new ConnectivityWatch({
+          onBlocked: () => setNetBlocked(true),
+          onRecovered: () => setNetBlocked(false),
+        });
+        watchRef.current = watch;
+        const publisher = new Publisher(
+          room,
+          /** @type {MediaStream} */ (streamRef.current),
+          (pc, id) => watch.track(pc, "pub:" + id),
+          (id) => watch.untrack("pub:" + id),
+        );
         pubRef.current = publisher;
         // The backstage mesh (D-10): one bidirectional P2P link to each other guest/co-host for the
         // thumbnails. The Publisher serves the one-way consumers (host monitor, OBS sources).
-        const mesh = new MeshManager(room, () => streamRef.current, syncThumbnails);
+        const mesh = new MeshManager(
+          room,
+          () => streamRef.current,
+          syncThumbnails,
+          (pc, id) => watch.track(pc, "mesh:" + id),
+          (id) => watch.untrack("mesh:" + id),
+        );
         meshRef.current = mesh;
         // Route each relayed signal by the sender's roster role: a guest/co-host (not us) is a mesh
         // peer; the host or an OBS source consumes us over the Publisher. Deterministic-offerer mesh
@@ -295,6 +330,7 @@ function DeviceCheck() {
         // reflected on-air + "we're live" + own-degradation state rather than assert stale values
         // (D-24). A reconnect re-arms all of it from the fresh roster + replay.
         if (degRef.current) degRef.current.stop();
+        if (watchRef.current) watchRef.current.stop();
         if (pubRef.current) pubRef.current.close();
         if (meshRef.current) meshRef.current.close();
         setThumbnails([]);
@@ -367,6 +403,19 @@ function DeviceCheck() {
     if (meshRef.current) meshRef.current.reconnect(id);
   }
 
+  // retryNetwork is the network-blocked screen's Retry (D-38): tear down the publishing session (the
+  // session close() runs teardown → stops the watch + closes the dead pcs) and return to the
+  // device-check preview, so the guest can switch networks (Wi-Fi → phone hotspot) and re-enter. The
+  // camera stays live for the preview, and POST /enter is idempotent, so re-entering just re-publishes.
+  function retryNetwork() {
+    if (sessionRef.current) {
+      sessionRef.current.close();
+      sessionRef.current = null;
+    }
+    setNetBlocked(false);
+    setPhase("preview");
+  }
+
   // A TERMINAL terminate (EN-9) ends the session for good — route to the matching error screen and
   // never reconnect. Checked before the phase screens so it wins over the in-session view.
   if (terminated) {
@@ -378,6 +427,29 @@ function DeviceCheck() {
       <div class="gs-terminal" data-terminal={terminated}>
         <h2 class="gs-terminal-title">{copy.title}</h2>
         <p class="gs-terminal-body">{copy.body}</p>
+      </div>
+    );
+  }
+
+  // D-38: the guest's network blocks P2P (no media connection ever formed). This wins over the
+  // entered/GuestSession view so the false "you're live" is replaced with a clear, actionable screen
+  // — never a silent hang. Retry returns to the device-check preview to switch networks and re-enter.
+  if (netBlocked) {
+    return (
+      <div class="dc-netblocked">
+        <p class="dc-netblocked-kicker">Can't connect</p>
+        <h2 class="dc-netblocked-title">Your network blocks peer-to-peer video</h2>
+        <p class="dc-netblocked-body">
+          GuestPass connects you directly to the room, but this network is blocking that. Try a
+          different Wi-Fi network, or switch to your phone's hotspot, then rejoin.
+        </p>
+        <p class="dc-netblocked-note">
+          Common on locked corporate or campus networks, VPNs, or strict firewalls. A phone hotspot
+          almost always works.
+        </p>
+        <button type="button" class="dc-netblocked-retry" onClick={retryNetwork}>
+          Retry
+        </button>
       </div>
     );
   }
