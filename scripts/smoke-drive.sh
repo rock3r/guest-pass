@@ -35,7 +35,10 @@ if [[ "$HEADLESS" == 1 ]]; then export SMOKE_HEADLESS=1; else unset SMOKE_HEADLE
 
 echo "headful smoke driver: $GUESTS guests → multi-guest grid + RF-8, screenshots in $SHOTS"
 echo "(builds the frontend, launches the browsers, drives the flow, then holds the windows ${WATCH}s)"
-go test -tags browser -run TestSmokeDrive_MultiGuest ./internal/browsertest/ -v -count=1 -timeout 20m
+# Derive the go-test timeout from the watch hold + a generous flow budget (build + guests + flow),
+# so a long --watch isn't killed by a fixed -timeout before the watch window completes.
+GO_TIMEOUT=$((WATCH + 900))
+go test -tags browser -run TestSmokeDrive_MultiGuest ./internal/browsertest/ -v -count=1 -timeout "${GO_TIMEOUT}s"
 
 echo "screenshots: $SHOTS"
 command -v open >/dev/null 2>&1 && open "$SHOTS" 2>/dev/null || true
