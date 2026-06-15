@@ -123,15 +123,27 @@ function Greenroom() {
       // This client's own rank drives which controls show (it can change live via demotion).
       const me = (f.peers || []).find((p) => p.self || p.id === f.self);
       if (me) setViewerRole(me.role);
-      // Release a local override once the roster carries a live binding for that pass (the
-      // authoritative value has caught up — e.g. Go-live replayed the DB binding). An empty
-      // roster boundSlot is left alone: it doesn't yet reflect a still-pending DB-only bind.
+      // Release a local (pre-live DB-only) override once the authoritative roster makes it stale:
+      //  - the pass left the room, or
+      //  - the pass is now itself live-bound (its own boundSlot is set — e.g. Go-live replay), or
+      //  - a DIFFERENT peer now holds the override's slot (a displacement — another tab/the API
+      //    rebound that slot to someone else; codex).
+      // A still-free slot with the pass not yet live-bound is left as a pending pre-live selection.
       setBoundOverrides((prev) => {
+        if (!Object.keys(prev).length) return prev;
+        const ownBound = {}; // peer id -> its live boundSlot ("" if none); presence = in roster
+        const holder = {}; // slot -> the peer id live-bound to it
+        for (const p of f.peers || []) {
+          ownBound[p.id] = p.boundSlot || "";
+          if (p.boundSlot) holder[p.boundSlot] = p.id;
+        }
         let changed = false;
         const next = { ...prev };
-        for (const p of f.peers || []) {
-          if (p.id in next && p.boundSlot) {
-            delete next[p.id];
+        for (const pid of Object.keys(next)) {
+          const slot = next[pid];
+          const stale = !(pid in ownBound) || ownBound[pid] || (slot && holder[slot] && holder[slot] !== pid);
+          if (stale) {
+            delete next[pid];
             changed = true;
           }
         }

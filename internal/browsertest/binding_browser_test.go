@@ -271,6 +271,82 @@ func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
 	}
 }
 
+// A pre-live (DB-only) picker override must clear when a DIFFERENT peer is later bound into that
+// slot (codex P2): otherwise the host keeps seeing the displaced guest on a slot that now belongs
+// to someone else. Pre-live bind A→cam-1 (override) → out-of-band rebind cam-1 to B (displaces A)
+// → Go live replays B onto cam-1 → A's picker must drop back to Unassigned, not stay on cam-1.
+func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
+	s := seedDeviceCheck(t) // NO session yet → the first bind is DB-only (override)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 200*time.Second)
+	defer cancelDeadline()
+	guestACtx := rootCtx
+	guestBCtx, cancelB := chromedp.NewContext(rootCtx)
+	defer cancelB()
+	hostCtx, cancelHost := chromedp.NewContext(rootCtx)
+	defer cancelHost()
+
+	publishGuest(t, guestACtx, s.base, s.rawToken, "A")
+	publishGuest(t, guestBCtx, s.base, s.rawTokenB, "B")
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passIDB), chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("greenroom did not render both guest pickers: %v", err)
+	}
+
+	// Pre-live bind A → cam-1 via the picker (DB-only → local override); it sticks to cam-1.
+	var ok bool
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		if (!sel) return false; sel.value = "cam-1"; sel.dispatchEvent(new Event('change',{bubbles:true})); return true;
+	})()`, s.passID), &ok)); err != nil || !ok {
+		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
+	}
+	aCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+		t.Fatalf("A's pre-live override did not stick to cam-1: %v", err)
+	}
+
+	// Out-of-band, rebind cam-1 to B (displaces A in the DB; A's override lingers locally), then go
+	// live — the replay routes cam-1 to B, and the roster (B on cam-1) must clear A's stale override.
+	host := &http.Client{}
+	bindB, _ := http.NewRequest(http.MethodPut, s.base+"/api/passes/"+s.passIDB+"/slot", strings.NewReader(`{"slot":"cam-1"}`))
+	bindB.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: s.hostCookie})
+	bindB.Header.Set("Content-Type", "application/json")
+	if resp, err := host.Do(bindB); err != nil {
+		t.Fatalf("out-of-band bind B: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	goLive, _ := http.NewRequest(http.MethodPost, s.base+"/app/streams/"+s.streamID+"/session/start", nil)
+	goLive.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: s.hostCookie})
+	if resp, err := noRedirect.Do(goLive); err != nil {
+		t.Fatalf("go-live: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	// A's picker must drop to Unassigned (its override cleared by the displacement), not stay cam-1.
+	aUnassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
+		t.Fatalf("A's stale override survived B being bound into cam-1: %v", err)
+	}
+}
+
 // A failed (re)bind must surface to the host, not be swallowed (codex, M4 PR-6). The greenroom
 // picker PUTs to a cam slot the host has not provisioned (only cam-1 is wired in the seed), so
 // the server answers 404 with no roster update — the controlled picker stays put AND the
