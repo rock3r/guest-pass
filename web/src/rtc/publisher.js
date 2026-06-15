@@ -64,6 +64,13 @@ export class Publisher {
     if (this.closed) return; // a late frame after teardown must not spawn a new connection
     let pc = this.pcs[f.from];
     if (!pc) {
+      // Only a consumer's OFFER opens a connection. A consumer always offers first (ICE only trickles
+      // afterwards, and the Publisher answers — it never receives answers), so a frame from an UNKNOWN
+      // id that isn't an offer is stale: e.g. late ICE from a source that just departed (after its
+      // {t:consumer-left}, or mid source-token rotation). Ignoring it prevents resurrecting a
+      // never-connectable pc that would re-arm the D-38 watchdog and re-trip the false network-blocked
+      // screen this guards against (the dropped consumer stays dropped until a genuine new offer).
+      if (!f.sdp || f.sdp.type !== "offer") return;
       pc = new RTCPeerConnection({ iceServers: this.room.iceServers });
       /** @type {RTCIceCandidateInit[]} */
       pc._pendingIce = [];
