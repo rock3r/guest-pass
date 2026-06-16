@@ -225,6 +225,7 @@ function DeviceCheck() {
     // onState, so without this the live-gated send helpers + GuestSession could act on a socket that
     // is still CONNECTING and throw on WebSocket.send (the "never live before the WS is up" invariant).
     setPubState("connecting");
+    pubStateRef.current = "connecting"; // keep the ref mirror in lockstep (close() never fires onState)
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
@@ -290,12 +291,21 @@ function DeviceCheck() {
             setLockedMods(locked);
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
             // Screenshare self-state (AC-13), folded into our OWN entry by the server. If it clears
-            // to "" while we still hold a capture, the host pulled us (force-no-share, eligibility
-            // revoke, or a re-select) — stop capturing locally. We do NOT echo {t:screen-stop} here:
-            // the server already dropped us from the pool, this is the cooperative source-side stop.
+            // to "" while we still hold a capture, decide WHY from a POSITIVE pull signal — the share
+            // suppression lock, which BOTH host-pull paths set (force-no-share directly, and an
+            // eligibility revoke runs the same force-no-share side-effect). A share lock → stop
+            // capturing locally (cooperative source-side stop — no {t:screen-stop} echo, the server
+            // already dropped us). With NO lock the "" is just a fresh-join projection from a transient
+            // reconnect (the server ran `leave` on the old socket, and its join roster PRECEDES the
+            // eligibility re-seed, so canScreen is briefly false) — never tear the share down on a blip:
+            // re-assert {t:screen-start} once we're eligible again to recover into the pool (parity with
+            // the camera republish), and otherwise wait for the next roster instead of stopping.
             const share = me.screenShare || "";
             setScreenShare(share);
-            if (share === "" && screenStreamRef.current) stopScreenCapture();
+            if (share === "" && screenStreamRef.current) {
+              if (locked.includes("share")) stopScreenCapture();
+              else if (canStartShare()) sessionRef.current.send({ t: "screen-start" });
+            }
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
           // RF-8 (receiver-side): detach each OTHER peer's force-suppressed thumbnail track from the
@@ -547,11 +557,15 @@ function DeviceCheck() {
   // session close() runs teardown → stops the watch + closes the dead pcs) and return to the
   // device-check preview, so the guest can switch networks (Wi-Fi → phone hotspot) and re-enter. The
   // camera stays live for the preview, and POST /enter is idempotent, so re-entering just re-publishes.
+  // The camera is kept for the preview, but any screen capture is released: this path closes the
+  // session without unmounting / onTerminal / a roster clear, so it's the only place a held capture
+  // would otherwise leak (the getDisplayMedia tracks + the OS indicator).
   function retryNetwork() {
     if (sessionRef.current) {
       sessionRef.current.close();
       sessionRef.current = null;
     }
+    stopScreenCapture();
     setNetBlocked(false);
     setPhase("preview");
   }

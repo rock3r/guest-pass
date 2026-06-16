@@ -24,7 +24,9 @@ const getDisplayMediaStubJS = `
     const c = document.createElement('canvas');
     c.width = 64; c.height = 64;
     c.getContext('2d').fillRect(0, 0, 64, 64);
-    return c.captureStream(5);
+    const s = c.captureStream(5);
+    window.__gpShareStream = s; // parked so a test can read the capture track's readyState
+    return s;
   };
 })();
 `
@@ -204,5 +206,115 @@ func TestScreenShare_SharerSelfState(t *testing.T) {
 	}
 	if btn != "Share screen" {
 		t.Fatalf("post-stop button = %q, want %q", btn, "Share screen")
+	}
+}
+
+// enterEligibleSharer opens a fake-media browser with the (immediate) getDisplayMedia stub plus any
+// extra pre-navigation scripts, runs the device check, and enters the in-session view for an
+// already-screenshare-eligible guest. Returns the live ctx.
+func enterEligibleSharer(t *testing.T, base, rawToken string, extraScripts ...string) context.Context {
+	t.Helper()
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	t.Cleanup(cancelAlloc)
+	ctx, cancel := chromedp.NewContext(alloc)
+	t.Cleanup(cancel)
+	ctx, cancelT := context.WithTimeout(ctx, 150*time.Second)
+	t.Cleanup(cancelT)
+	inject := chromedp.ActionFunc(func(c context.Context) error {
+		for _, js := range append([]string{getDisplayMediaStubJS}, extraScripts...) {
+			if _, err := page.AddScriptToEvaluateOnNewDocument(js).Do(c); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err := chromedp.Run(ctx,
+		inject,
+		chromedp.Navigate(base+"/p/"+rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"] .gs-selfview`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="idle"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("eligible sharer enter: %v", err)
+	}
+	return ctx
+}
+
+// T-13 / AC-13 (transient reconnect): an active screen share must survive a signaling blip. The
+// server runs `leave` on the dropped socket (removing the sharer from the preview pool), so the
+// fresh-join roster reads screenShare:"" — but the guest still holds an eligible capture, so the
+// client re-asserts {t:screen-start} and recovers into the pool instead of tearing the share down.
+// The capture track stays live throughout (parity with the camera republish).
+func TestScreenShare_SurvivesReconnect(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+	aCtx := enterEligibleSharer(t, s.base, s.rawToken, wsRecorderJS)
+
+	// Share → backstage.
+	if err := chromedp.Run(aCtx,
+		chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("share did not reach backstage: %v", err)
+	}
+
+	// Force-close the live signaling socket → reconnecting overlay → auto-recovery to live.
+	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close ws: %v", err)
+	}
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="reconnecting"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest did not reconnect: %v", err)
+	}
+
+	// After recovery the share is back in the pool (backstage) and the capture never stopped.
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+		chromedp.Poll(`!!window.__gpShareStream && window.__gpShareStream.getVideoTracks()[0].readyState === 'live'`,
+			nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("the screen share did not survive the reconnect (re-assert into the pool, capture kept live): %v", err)
+	}
+}
+
+// T-13 / AC-13 (moderation): the host force-no-shares a guest that is ALREADY sharing in the backstage
+// pool. The server pulls it (screenShare:"" + a share suppression lock), so the roster-sync sees a
+// genuine host pull (canStartShare false) and stops the capture — the track ends and the self-state
+// returns to idle, distinct from the transient-reconnect re-assert above.
+func TestScreenShare_ForceNoShareWhileSharingStopsCapture(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+	aCtx := enterEligibleSharer(t, s.base, s.rawToken)
+
+	if err := chromedp.Run(aCtx,
+		chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("share did not reach backstage: %v", err)
+	}
+
+	hostConn := dialHostWS(t, s)
+	defer hostConn.Close(websocket.StatusNormalClosure, "done")
+	writeFrame(t, hostConn, signaling.Frame{T: "force-no-share", PeerID: s.passID})
+
+	// The host pull stops the capture (track ended) and clears the self-state to idle; the
+	// force-no-share lock notice shows.
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`.gs-lock[data-locked="1"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="idle"]`, chromedp.ByQuery),
+		chromedp.Poll(`!!window.__gpShareStream && window.__gpShareStream.getVideoTracks()[0].readyState === 'ended'`,
+			nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("force-no-share while sharing did not stop the capture + return to idle: %v", err)
 	}
 }
