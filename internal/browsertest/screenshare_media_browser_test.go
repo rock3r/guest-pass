@@ -9,8 +9,10 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/coder/websocket"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
 // openHostGreenroom opens the host's /greenroom in its own fake-media browser (the host cookie
@@ -58,7 +60,7 @@ func renders(sel string) chromedp.Action {
 // T-12 / AC-11: the screenshare preview-switcher, end to end over real P2P. TWO eligible guests (own
 // fake-media browsers) share → the host's rail renders BOTH screens → the host selects one live → the
 // host badges it AND every backstage guest renders the live share (AC-11 "for everyone") → re-select
-// swaps it → taking it off air clears the live render. The /s/screen OBS source is PR-14.
+// swaps it → taking it off air clears the live render. The /s/screen OBS source has its own test below.
 func TestScreenShareMedia_RailSelectLiveEveryone(t *testing.T) {
 	s := seedDeviceCheck(t)
 	ctx := context.Background()
@@ -128,5 +130,52 @@ func TestScreenShareMedia_RailSelectLiveEveryone(t *testing.T) {
 		renders(railB+` .gr-screen-video`),
 	); err != nil {
 		t.Fatalf("host rail did not keep rendering backstage previews after take-off-air: %v", err)
+	}
+}
+
+// T-12 / AC-12: the /s/screen OBS source page renders the LIVE sharer's SCREEN over the screen
+// channel (D-21) — not its camera. A sharer goes live; the chromeless /s/screen source (authenticated
+// by the screenshare slot's source token, EN-15) binds the live occupant and consumes its screen
+// publisher. Taking the share off air unbinds the source (the live render clears).
+func TestScreenShareMedia_ScreenSourceRendersLiveShare(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+
+	// Guest A enters and shares (its screen publisher is now up); A is backstage (not yet live).
+	aCtx := enterEligibleSharer(t, s.base, s.rawToken, "A")
+	shareScreen(t, aCtx, "A")
+
+	// The /s/screen OBS source page in its own fake-media browser (loopback P2P). It starts unbound
+	// (no live share yet) and renders nothing.
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	srcCtx, cancelSrc := chromedp.NewContext(alloc)
+	defer cancelSrc()
+	srcCtx, cancelSrcT := context.WithTimeout(srcCtx, 180*time.Second)
+	defer cancelSrcT()
+	if err := chromedp.Run(srcCtx,
+		chromedp.Navigate(s.base+"/s/screen?token="+s.srcTokenScreen),
+		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("/s/screen source page did not load: %v", err)
+	}
+
+	// Host puts A's share live (screen slot ← A). The source gets the slot-rebind and consumes A's
+	// SCREEN publisher over the screen channel, rendering live frames.
+	hostConn := dialHostWS(t, s)
+	defer hostConn.Close(websocket.StatusNormalClosure, "done")
+	writeFrame(t, hostConn, signaling.Frame{T: "screen-select", PeerID: s.passID})
+	if err := chromedp.Run(srcCtx, renders(`#obs-video`)); err != nil {
+		t.Fatalf("/s/screen did not render the live sharer's screen over P2P: %v", err)
+	}
+
+	// Take the share off air → the screen slot unbinds → the source clears its surface.
+	writeFrame(t, hostConn, signaling.Frame{T: "screen-select", PeerID: ""})
+	if err := chromedp.Run(srcCtx, chromedp.Poll(
+		`(() => { const v = document.querySelector('#obs-video'); return !!v && !v.srcObject; })()`,
+		nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+		t.Fatalf("/s/screen did not clear after take-off-air: %v", err)
 	}
 }

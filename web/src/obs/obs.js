@@ -24,6 +24,11 @@ const RECONNECT_MAX_MS = 10_000;
 function start() {
   /** @type {HTMLVideoElement|null} */
   const video = /** @type {any} */ (document.getElementById("obs-video"));
+  // The signaling channel for this source (D-21): the screenshare slot ("screen") consumes the
+  // occupant's SCREEN publisher (ch="screen"), every cam/host slot its camera (ch=""). The slot label
+  // is server-provided on the video element (data-slot, no secret — EN-15), not parsed from the URL.
+  const slot = (video && video.dataset && video.dataset.slot) || "";
+  const channel = slot === "screen" ? "screen" : "";
   // EN-15: the token authenticates the WS the page opens, it is not page state — read it
   // from the URL and keep it out of the DOM entirely.
   const params = new URLSearchParams(location.search);
@@ -139,7 +144,7 @@ function start() {
       clearLink();
       occupant = occupantPeerId;
       renderNameplate(name);
-      const l = new PeerLink(room, occupantPeerId, room.iceServers);
+      const l = new PeerLink(room, occupantPeerId, room.iceServers, channel);
       link = l;
       l.pc.ontrack = (e) => {
         if (video) video.srcObject = e.streams[0];
@@ -189,7 +194,9 @@ function start() {
       applyOccupantLocks();
     });
     room.on("signal", (f) => {
-      if (link && f.from === occupant) link.onSignal(f);
+      // Match this source's channel (D-21): a /s/screen source ignores camera-channel signals and
+      // vice versa, so the occupant's camera and screen publishers never cross into the wrong source.
+      if (link && f.from === occupant && (f.ch || "") === channel) link.onSignal(f);
     });
 
     // A clean connection resets the backoff so the NEXT drop retries fast again, and
