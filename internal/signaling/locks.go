@@ -84,10 +84,18 @@ func (s *roomState) force(actor, target PeerID, modality string) []outbound {
 	if pres := t.modalityPresence(modality); pres != nil {
 		*pres = false
 	}
+	// A force-no-share ALSO pulls the target from the screenshare preview pool + the live "screen"
+	// slot if it held it (D-21: revoke/force pulls from pool + slot, no auto-advance). Mutates BEFORE
+	// the roster re-broadcast below, so the roster's screenShare fold reflects it.
+	var pull []outbound
+	if modality == "share" {
+		pull = s.pullFromShare(target)
+	}
 	// The roster carries the lock to every participant consumer (greenroom + mesh, EN-8); a slot's
 	// OBS source gets no roster (EN-13), so it learns the lock via a dedicated occupant-locks frame
 	// and detaches the locked remote track from the program output (RF-8 receiver-side).
-	return append(s.rebroadcastRoster(), s.sourceLockFrames(target)...)
+	out := append(s.rebroadcastRoster(), s.sourceLockFrames(target)...)
+	return append(out, pull...)
 }
 
 // release lifts a suppression lock (D-13). The target can NEVER self-release; an actor may

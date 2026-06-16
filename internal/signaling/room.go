@@ -434,6 +434,30 @@ func (r *Room) SetScreenEligibleLive(id PeerID, canScreen bool) {
 	})
 }
 
+// ScreenStart adds a participant to the screenshare preview pool (D-21/AC-11) — it began sharing.
+// Server-enforced eligibility (can_screen + not share-locked); see roomState.screenStart.
+func (r *Room) ScreenStart(id PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenStart(id))
+	})
+}
+
+// ScreenStop removes a participant from the preview pool — it stopped sharing; the live "screen"
+// slot vacates if it held it (no auto-advance). See roomState.screenStop.
+func (r *Room) ScreenStop(id PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenStop(id))
+	})
+}
+
+// ScreenSelect promotes a backstage sharer to live in the "screen" slot, or clears it (peer=""). The
+// actor must be the host (enforced in the reducer too, EN-7). See roomState.screenSelect.
+func (r *Room) ScreenSelect(actor, peer PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenSelect(actor, peer))
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection

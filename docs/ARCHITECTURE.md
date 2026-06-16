@@ -1049,7 +1049,11 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 // it falls silent so clients settle their meters). OBS source virtual peers have no meter.
 {"t":"levels","levels":{"<peerId>":0.4,…}}                // peerId → level (0..1), to each participant
 
-// Screenshare preview-switcher state (host-only) (D-21)
+// Screenshare preview-switcher state (host-only) (D-21/AC-11). `previews` = the full pool of peer
+// ids actively sharing (the backstage rail); `live` = the host-selected on-air sharer ("" = none, no
+// auto-advance). HOST-ONLY — a non-host learns the LIVE sharer from the `screenShare:"live"` roster
+// fold instead (AC-13), never the pool. The live share is the occupant of the "screen" slot, so
+// /s/screen re-routes slot-rebind-style and on-air folds in like any source (AC-12/D-24).
 {"t":"screen-roster","previews":["<peerId>",…],"live":"<peerId>"|null}
 
 // Slot rebind protocol (EN-3 / D-20). `name` is the occupant's nameplate display name (D-16); the
@@ -1107,7 +1111,10 @@ rank:
 > **M4 host-only per-entry fields** (stripped from a non-host's view of OTHERS, mirroring the
 > `obs` peers): `boundSlot` — the cam slot a participant occupies (PR-6/D-20); `canScreen` —
 > screenshare eligibility (PR-9/EN-23), which a guest ALSO sees on its OWN entry (gating its share
-> affordance) but never on another participant's.
+> affordance) but never on another participant's; `screenShare` — the screenshare preview-switcher
+> state (PR-11/D-21/AC-13): `"backstage"` (in the preview pool) is host-only + self-visible like
+> `canScreen`, but `"live"` (the host-selected on-air share) is visible to EVERYONE so all clients
+> render the live share, and a sharer reads its own active-backstage/active-live bit from this fold.
 
 Full `roster` / `peer-joined` / `peer-left` frames go out only on structural change
 (join/leave/presence/lock/role/on-air/slot): a join/leave uses the `peer-joined`/`peer-left`
