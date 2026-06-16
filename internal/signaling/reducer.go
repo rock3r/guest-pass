@@ -791,6 +791,13 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
 		return nil
 	}
+	// Screen-channel authorization (D-21/EN-7): a backstage (non-live) sharer's screen is visible
+	// ONLY to the host (the host-only preview rail, EN-8) — the live sharer's screen is visible to
+	// everyone (the live render). Without this gate any participant could craft a {t:signal,ch:"screen"}
+	// offer to a peer id and pull a non-live sharer's screen, bypassing the host-only rail.
+	if f.Ch == "screen" && !s.screenSignalAllowed(from, to) {
+		return nil
+	}
 	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE, Ch: f.Ch}}}
 }
 

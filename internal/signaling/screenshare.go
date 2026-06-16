@@ -21,6 +21,39 @@ func (s *roomState) screenLiveID() PeerID {
 	return s.slot(screenSlot).occupant
 }
 
+// isSharer reports whether a peer is currently sharing a screen — in the backstage preview pool or
+// the live "screen" slot. Used to identify the sharer end of a screen-channel signal (D-21).
+func (s *roomState) isSharer(id PeerID) bool {
+	return s.screenPreviews[id] || s.screenLiveID() == id
+}
+
+// screenSignalAllowed authorizes a screen-channel (ch="screen") signal between `from` and `to`
+// (D-21/EN-7). At least one end must be a SHARER (in the pool or live). The LIVE sharer's screen is
+// public — consumable by anyone, including a backstage sharer rendering the live share and the
+// /s/screen source — so any signal touching the live sharer is allowed. Otherwise a BACKSTAGE
+// (non-live) sharer's screen is consumable ONLY by the host (the host-only preview rail, EN-8): the
+// signal is allowed only when one end is a backstage sharer and the OTHER end is the host. A signal
+// between two non-sharers, or two backstage sharers, or a backstage sharer and a non-host, is
+// dropped — closing the gap where any participant could craft an offer to pull a backstage screen.
+//
+// The gate is direction-agnostic ({from,to} can't distinguish a consumer's offer from a sharer's
+// answer, since the answer flows back on the same pair). It admits one narrow residual: the CURRENT
+// live sharer could race a backstage sharer's screen in the window before that peer opens its
+// live-share consumer link (after which the client routes the signal to that link, not its
+// publisher). v1 accepts this — the live sharer is already an on-air, trusted participant.
+func (s *roomState) screenSignalAllowed(from, to PeerID) bool {
+	if !s.isSharer(from) && !s.isSharer(to) {
+		return false // no sharer involved — no legitimate screen link
+	}
+	if live := s.screenLiveID(); live != "" && (from == live || to == live) {
+		return true // the live share renders for everyone
+	}
+	// A backstage preview is host-only: one end a backstage sharer, the OTHER the host.
+	fromHost := s.peers[from] != nil && s.peers[from].role == "host"
+	toHost := s.peers[to] != nil && s.peers[to].role == "host"
+	return (s.isSharer(to) && fromHost) || (s.isSharer(from) && toHost)
+}
+
 // screenShareStateFor returns a peer's screenshare state for its roster entry (AC-13): "live" if it
 // is the selected live sharer, "backstage" if it is actively sharing but not selected, else "".
 func (s *roomState) screenShareStateFor(id PeerID) string {

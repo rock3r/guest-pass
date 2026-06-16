@@ -73,10 +73,10 @@ function CeilingControl({ ceiling, onApply }) {
  * video (attached via an effect so a re-render doesn't reload it), the sharer's name, and either a
  * "Put live" select control or the live badge. Select-live is host-only (D-11 exception); the server
  * enforces authority (EN-7). The screen capture is video-only (D-41), so the video is muted.
- * @param {{tile:{id:string,name:string,stream:MediaStream|null,live:boolean}, onSelect:()=>void}} props
+ * @param {{tile:{id:string,name:string,stream:MediaStream|null,live:boolean}, live:boolean, onSelect:()=>void}} props
  * @returns {import("preact").VNode}
  */
-function ScreenTile({ tile, onSelect }) {
+function ScreenTile({ tile, live, onSelect }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const ref = useRef(null);
   useEffect(() => {
@@ -92,7 +92,7 @@ function ScreenTile({ tile, onSelect }) {
             ● Live
           </span>
         ) : (
-          <button type="button" class="gr-screen-select" onClick={onSelect}>
+          <button type="button" class="gr-screen-select" disabled={!live} onClick={onSelect}>
             Put live
           </button>
         )}
@@ -534,6 +534,7 @@ function Greenroom() {
   // server enforces host-only authority + that the target is in the pool (EN-7); a co-host's click
   // would be a server no-op. The authoritative {t:screen-roster} re-broadcast updates the rail.
   function selectScreen(peerId) {
+    if (state !== "live") return; // the WS throws on send before it's live / once dropped
     roomRef.current?.send({ t: "screen-select", peerId });
   }
 
@@ -602,14 +603,14 @@ function Greenroom() {
           <div class="gr-screen-head">
             <span class="gr-screen-label">Screen shares</span>
             {screenLive ? (
-              <button type="button" class="gr-screen-off" onClick={() => selectScreen("")}>
+              <button type="button" class="gr-screen-off" disabled={state !== "live"} onClick={() => selectScreen("")}>
                 Take screen off air
               </button>
             ) : null}
           </div>
           <div class="gr-screen-rail">
             {screenTiles.map((t) => (
-              <ScreenTile key={t.id} tile={t} onSelect={() => selectScreen(t.id)} />
+              <ScreenTile key={t.id} tile={t} live={state === "live"} onSelect={() => selectScreen(t.id)} />
             ))}
           </div>
         </section>

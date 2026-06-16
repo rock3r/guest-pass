@@ -129,6 +129,10 @@ function DeviceCheck() {
   // (AC-11) — not just the host. Keyed by the sharer's peer id; at most one (the single live slot).
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
   const screenConsumersRef = useRef(new Map());
+  // The sharer id currently rendered in liveScreen, so a re-select to a DIFFERENT sharer clears the
+  // stale render immediately (rather than showing the previous, now-frozen, screen until the new
+  // track arrives). "" when nothing is rendered.
+  const liveScreenIdRef = useRef("");
   // The current signaling room (set by setup() on each (re)connect), so the component-level screen
   // publish/consume helpers can build links/publishers on the LIVE room without re-running setup.
   /** @type {{current: import("../rtc/room.js").Room|null}} */
@@ -433,6 +437,17 @@ function DeviceCheck() {
         room.onIce((servers) => {
           publisher.applyIceServers(servers);
           mesh.applyIceServers(servers);
+          // The screen-channel connections share the rotated TURN credential (EN-4): our screen
+          // Publisher (when sharing) and any live-share consumer link must refresh too, or they lose
+          // relay access on rotation.
+          if (screenPubRef.current) screenPubRef.current.applyIceServers(servers);
+          for (const link of screenConsumersRef.current.values()) {
+            try {
+              link.pc.setConfiguration({ iceServers: servers });
+            } catch {
+              /* setConfiguration unsupported / pc closed — ignore */
+            }
+          }
         });
         // Per-publisher-local degradation (AD-21): sample our OWN senders (Publisher = program/
         // monitor, highest priority; mesh = co-host/other-guest thumbnails, shed first), shed on
@@ -578,6 +593,7 @@ function DeviceCheck() {
   function closeScreenConsumers() {
     for (const link of screenConsumersRef.current.values()) link.close();
     screenConsumersRef.current.clear();
+    liveScreenIdRef.current = "";
     setLiveScreen(null);
   }
   // syncLiveScreen reconciles THIS client's live-share consumer link against the roster (AC-11): open
@@ -594,14 +610,20 @@ function DeviceCheck() {
         screenConsumersRef.current.delete(id);
       }
     }
-    if (!keep || !room) {
-      if (!keep) setLiveScreen(null);
-      return;
+    // Clear a stale render the instant the live sharer changes or clears, so we never show the
+    // previous sharer's now-frozen screen while the new link negotiates (or after a take-off-air).
+    if (liveScreenIdRef.current && liveScreenIdRef.current !== keep) {
+      liveScreenIdRef.current = "";
+      setLiveScreen(null);
     }
+    if (!keep || !room) return;
     if (!screenConsumersRef.current.has(keep)) {
       const link = new PeerLink(room, keep, room.iceServers, "screen");
       screenConsumersRef.current.set(keep, link);
-      link.pc.ontrack = (e) => setLiveScreen({ id: keep, name: nameOf(keep), stream: e.streams[0] });
+      link.pc.ontrack = (e) => {
+        liveScreenIdRef.current = keep;
+        setLiveScreen({ id: keep, name: nameOf(keep), stream: e.streams[0] });
+      };
       link.pc.oniceconnectionstatechange = () => {
         if (link.pc.iceConnectionState === "failed") link.restartIce();
       };
