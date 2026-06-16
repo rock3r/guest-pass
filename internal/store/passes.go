@@ -358,6 +358,23 @@ func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
 	return errIfNoRows(res)
 }
 
+// SetPassName overrides a pass's sticky display name — the nameplate (D-16/AC-7). passes.name is
+// the single source of truth for the name string (default = the invite name); a host override is a
+// sticky write here, surviving reconnect and restart (the live room is refreshed separately via
+// Room.SetName). The caller caps/sanitizes the value first (EN-15 charset/length); an empty string
+// clears the name to NULL (no nameplate text) rather than storing an empty string.
+func (s *Store) SetPassName(ctx context.Context, id, name string) error {
+	var value any = name
+	if name == "" {
+		value = nil // clear the override → NULL, not an empty string
+	}
+	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET name = ? WHERE id = ?", value, id)
+	if err != nil {
+		return fmt.Errorf("setting pass name: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
 // ReissuePass rotates a pass's magic-link token to newTokenHash and returns it to the
 // "sent" state, stamping sent_at (PD-2). The previous hash is overwritten, so the old link
 // stops resolving — one active token per pass (EN-5). It also CLEARS expires_at so the

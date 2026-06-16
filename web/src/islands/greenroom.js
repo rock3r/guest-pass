@@ -291,6 +291,34 @@ function Greenroom() {
       });
   }
 
+  // setName is the host-only nameplate override (AC-7/D-16): PUT /api/passes/{id}/name with the new
+  // sticky display name (or "" to clear). The server caps it server-side (EN-15), persists
+  // passes.name, and — if this stream is live — refreshes the OBS nameplate at the same occupant +
+  // epoch (no media re-link). The authoritative name rides the re-broadcast roster, so the gr-name
+  // pill updates without local override bookkeeping. Same-origin fetch carries the host cookie.
+  function setName(passId, name) {
+    fetch(`/api/passes/${encodeURIComponent(passId)}/name`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+      .then(async (r) => {
+        if (r.ok) {
+          setBindError("");
+          return;
+        }
+        let msg = "Couldn't update the nameplate.";
+        try {
+          const body = await r.json();
+          if (body && body.error) msg = body.error;
+        } catch (_) {
+          /* non-JSON body: keep the generic message */
+        }
+        setBindError(msg);
+      })
+      .catch(() => setBindError("Couldn't reach the server to update the nameplate."));
+  }
+
   // rollbackPicker forces a grid re-render so a rejected pick reverts to the authoritative
   // entry.boundSlot. setBindError alone is a no-op when the SAME message is already shown (e.g.
   // every unprovisioned slot returns the same 404), and then Preact wouldn't reconcile the
@@ -341,6 +369,7 @@ function Greenroom() {
             onRole={(role) => roomRef.current?.send({ t: "role", peerId: t.id, role })}
             onDismissHand={() => roomRef.current?.send({ t: "hand", peerId: t.id, raised: false })}
             onBindSlot={(slot) => bindSlot(t.id, slot)}
+            onSetName={(name) => setName(t.id, name)}
           />
           ))
         )}

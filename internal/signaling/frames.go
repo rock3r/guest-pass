@@ -17,7 +17,13 @@ type Frame struct {
 	ICE            json.RawMessage `json:"ice,omitempty"`
 	Slot           string          `json:"slot,omitempty"`
 	OccupantPeerID string          `json:"occupantPeerId,omitempty"`
-	Epoch          *int            `json:"epoch,omitempty"` // pointer so epoch rides ONLY slot frames; &0 still serializes (EN-3)
+	// Name carries the bound occupant's display name to an OBS source on a {t:slot-rebind} (the
+	// nameplate, D-16): the source page gets no roster (EN-13), so the name rides the binding frame.
+	// It renders as escaped textContent only, gated by the source's show/hide URL param (EN-15); a
+	// later name override re-sends slot-rebind with the SAME occupant+epoch so the source refreshes
+	// the nameplate without re-linking media.
+	Name  string `json:"name,omitempty"`
+	Epoch *int   `json:"epoch,omitempty"` // pointer so epoch rides ONLY slot frames; &0 still serializes (EN-3)
 	// LockKinds carries a {t:"occupant-locks"} projection to an OBS source page: the bound occupant's
 	// active suppression-lock KINDS (mic|cam|share) so the source detaches the locked REMOTE track from
 	// the program output, independent of the (possibly modified) occupant (RF-8 receiver-side). It is

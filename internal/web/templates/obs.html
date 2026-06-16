@@ -8,6 +8,11 @@
 <body>
 {{/* The slot label is an opaque cosmetic attribute (EN-15); the source token is read from the URL by obs.js and never rendered into the DOM. NOT muted: the guest's mic rides the cam source into OBS (D-41), so the page must play the remote audio for OBS to capture it. */}}
 <video id="obs-video" data-slot="{{.Slot}}" autoplay playsinline></video>
+{{/* Nameplate (D-16): the bound occupant's display name, hidden unless the source URL carries the
+     ?name show/hide param. obs.js writes the name as ESCAPED textContent only (EN-15) — the element
+     ships empty so the DOM never carries a name server-side. #obs-nameplate is a DOCUMENTED selector
+     hosts target with OBS Custom CSS to position/style it. */}}
+<div id="obs-nameplate" hidden></div>
 <script type="module" src="/static/obs.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}" crossorigin="anonymous"{{end}}></script>
 </body>
 </html>

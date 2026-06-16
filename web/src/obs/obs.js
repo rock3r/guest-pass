@@ -26,7 +26,16 @@ function start() {
   const video = /** @type {any} */ (document.getElementById("obs-video"));
   // EN-15: the token authenticates the WS the page opens, it is not page state — read it
   // from the URL and keep it out of the DOM entirely.
-  const token = new URLSearchParams(location.search).get("token") || "";
+  const params = new URLSearchParams(location.search);
+  const token = params.get("token") || "";
+  // The nameplate (D-16) is a per-source show/hide URL param (no DB column), HIDDEN by default:
+  // the name renders only when the source URL carries ?name (any value but 0/false). The display
+  // name is NOT a secret (unlike the token) — it is the guest's chosen name, meant to be shown —
+  // so it renders, but as ESCAPED textContent only (never innerHTML), the EN-15 injection guard.
+  const nameVal = params.get("name");
+  const showName = nameVal !== null && nameVal !== "0" && nameVal !== "false";
+  /** @type {HTMLElement|null} the nameplate overlay; styled by the host via OBS Custom CSS */
+  const nameplate = document.getElementById("obs-nameplate");
 
   // State that must survive a reconnect (a fresh Room is built on each retry).
   /** @type {PeerLink|null} */
@@ -76,6 +85,19 @@ function start() {
     occupant = null;
     lockedMods = []; // a (re)bind re-projects from the server; never carry a prior occupant's locks
     if (video) video.srcObject = null;
+    renderNameplate(""); // an unbound/cleared slot shows no nameplate
+  }
+
+  // renderNameplate writes the bound occupant's display name into the nameplate as ESCAPED
+  // textContent (EN-15 — NEVER innerHTML, so a hostile name can't inject markup) and only when the
+  // per-source ?name show/hide gate is on (hidden by default). The server already caps charset +
+  // length (EN-15); this is the injection-safe render half. An absent name or a hidden gate leaves
+  // the nameplate empty and hidden so it can't composite an empty box into OBS.
+  function renderNameplate(name) {
+    if (!nameplate) return;
+    const text = showName && typeof name === "string" ? name : "";
+    nameplate.textContent = text; // escaped textContent ONLY — never innerHTML (EN-15)
+    nameplate.hidden = text === "";
   }
 
   // applyOccupantLocks detaches/re-attaches the bound occupant's REMOTE tracks per the current lock
@@ -98,11 +120,20 @@ function start() {
     });
 
     // bind the slot to occupantPeerId by opening a recvonly link and rendering its track.
-    function bind(occupantPeerId, ep) {
+    function bind(occupantPeerId, ep, name) {
       if (typeof ep === "number" && ep < epoch) return; // stale epoch (EN-3)
+      // A same-occupant, same-epoch slot-rebind is a NAME-ONLY refresh (the nameplate override,
+      // D-16): the server re-sends slot-rebind after a host name change with the SAME occupant +
+      // epoch, so the overlay updates WITHOUT re-linking media — refresh the nameplate and leave the
+      // live video link untouched (no flicker on the program output).
+      if (link && occupantPeerId === occupant && (typeof ep !== "number" || ep === epoch)) {
+        renderNameplate(name);
+        return;
+      }
       if (typeof ep === "number") epoch = ep;
       clearLink();
       occupant = occupantPeerId;
+      renderNameplate(name);
       const l = new PeerLink(room, occupantPeerId, room.iceServers);
       link = l;
       l.pc.ontrack = (e) => {
@@ -134,7 +165,7 @@ function start() {
       }
     });
 
-    room.on("slot-rebind", (f) => bind(f.occupantPeerId, f.epoch));
+    room.on("slot-rebind", (f) => bind(f.occupantPeerId, f.epoch, f.name));
     room.on("slot-unbound", (f) => unbind(f.epoch));
     // RF-8 (receiver-side): the server projects the bound occupant's force-locked modality KINDS here
     // (an OBS source gets no roster). Detach the locked REMOTE track from the program output. Gated by

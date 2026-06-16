@@ -59,6 +59,49 @@ function SlotPicker({ entry, live, onBindSlot }) {
 }
 
 /**
+ * NameOverride is the host-only People control that sets a guest's sticky nameplate name
+ * (D-16/AC-7). Submitting PUTs /api/passes/{id}/name (via onSetName); the server caps the name
+ * server-side (EN-15 charset/length), persists passes.name, and — if the stream is live —
+ * refreshes the OBS nameplate at the SAME occupant + epoch (no media re-link). The input is
+ * UNCONTROLLED (defaultValue, keyed by the authoritative name) so a roster re-render never clobbers
+ * what the host is typing; the authoritative name still shows in the gr-name pill above. maxLength
+ * mirrors the server cap as a courtesy — the server is the authority.
+ * @param {{entry:any, onSetName:(name:string)=>void}} props
+ * @returns {import("preact").VNode}
+ */
+function NameOverride({ entry, onSetName }) {
+  return (
+    <form
+      class="gr-nameedit"
+      data-guest={entry.id}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = /** @type {HTMLInputElement} */ (
+          /** @type {HTMLFormElement} */ (e.currentTarget).elements.namedItem("name")
+        );
+        onSetName(input.value);
+      }}
+    >
+      <label class="gr-nameedit-label">
+        <span class="gr-nameedit-text">Nameplate</span>
+        <input
+          key={entry.name || ""}
+          class="gr-nameedit-input"
+          name="name"
+          type="text"
+          maxLength={60}
+          defaultValue={entry.name || ""}
+          placeholder="Display name"
+        />
+      </label>
+      <button type="submit" class="gr-nameedit-set">
+        Set
+      </button>
+    </form>
+  );
+}
+
+/**
  * onAirLabel maps the three-state on-air to its pill copy (D-24). status-unavailable means no live
  * OBS signal — never asserted as on/off.
  * @param {string} onAir
@@ -138,10 +181,10 @@ function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismi
  * Tile renders one participant's P2P video plus its roster-driven status chrome and moderation
  * controls. The stream attaches via an effect so a re-render (e.g. an on-air change) never reloads
  * the <video>. The Reconnect control forces an ICE restart for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void}} props
+ * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot }) {
+export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   useEffect(() => {
@@ -177,6 +220,7 @@ export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onFo
         </span>
       ) : null}
       {viewerRole === "host" && onBindSlot ? <SlotPicker entry={entry} live={live} onBindSlot={onBindSlot} /> : null}
+      {viewerRole === "host" && onSetName ? <NameOverride entry={entry} onSetName={onSetName} /> : null}
       <Controls
         entry={entry}
         viewerRole={viewerRole}

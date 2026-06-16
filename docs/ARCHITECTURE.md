@@ -386,14 +386,16 @@ tile. Each slot carries a monotonic **epoch**.
 
 ```jsonc
 // server → slot source page
-{"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","epoch":42}
+{"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","name":"Greta","epoch":42}
 {"t":"slot-unbound","slot":"cam-3","epoch":43}            // → transparent placeholder
 ```
 
 - On `slot-rebind`: close the old PeerLink, renegotiate to the new occupant, stop
   the old encoder. **Reset on-air to `status-unavailable`** until a fresh
   `obsSourceActiveChanged` arrives — the event fires only on **transitions**, so a
-  stale `active=true` would otherwise mislight the new occupant.
+  stale `active=true` would otherwise mislight the new occupant. `name` carries the
+  occupant's display name for the nameplate (D-16); a **same occupant + same epoch**
+  rebind is a name-only refresh that updates the nameplate **without** re-linking media.
 - On kick / force-end (D-25): **atomically clear the binding + bump epoch BEFORE
   the teardown broadcast**, so a reconnecting modified source resolves to
   placeholder, not the kicked occupant. The cooperative source drops the target
@@ -462,12 +464,25 @@ The **guest owns the name string** (default = host's invite name); the host can
 override it in the People panel and the override is **sticky**. Whether it renders
 in OBS is a *separate, host-only* concern:
 
-- **Visibility:** per-source **show/hide URL param** (no DB column).
-- **Styling:** OBS's native **Custom CSS** against documented selectors GuestPass
-  exposes (no GuestPass styling control).
+- **Override (AC-7):** the People-tab name field PUTs **`/api/passes/{id}/name`**
+  (host-only, RF-2). The server caps the value (see EN-15 below), writes
+  `passes.name` (the single source of truth; an empty value clears it to NULL), and —
+  when the pass's stream is the host's **live** session — refreshes the live nameplate
+  via `Room.SetName`. The refresh re-sends `{t:slot-rebind}` with the **same occupant +
+  same epoch**, so the OBS source updates the text **without re-linking media** (no
+  video flicker). The name rides the `name` field of `{t:slot-rebind}` because a source
+  page gets no roster (EN-13).
+- **Visibility:** per-source **show/hide URL param** (no DB column) — append **`?name`**
+  (any value but `0`/`false`) to the source URL; **hidden by default**.
+- **Styling:** OBS's native **Custom CSS** against the documented selector
+  **`#obs-nameplate`** (no GuestPass styling control); the default style is a
+  lower-left chip the host is free to override.
 - **Injection-safe (EN-15):** the display name renders as **escaped `textContent`
-  only**; server-side charset/length cap. No promise that viewers see the name — it
-  depends on the host's OBS setup.
+  only** (never `innerHTML`). `signaling.CapDisplayName` strips control/non-printable
+  runes and caps to **60 runes**, applied at every boundary a name enters room state
+  (room join, host override) **and** the DB write — so the nameplate is bounded by
+  construction regardless of how the name reached the pass. No promise that viewers see
+  the name — it depends on the host's OBS setup.
 
 ---
 
@@ -995,8 +1010,10 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 // Screenshare preview-switcher state (host-only) (D-21)
 {"t":"screen-roster","previews":["<peerId>",…],"live":"<peerId>"|null}
 
-// Slot rebind protocol (EN-3 / D-20)
-{"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","epoch":8}
+// Slot rebind protocol (EN-3 / D-20). `name` is the occupant's nameplate display name (D-16); the
+// source renders it as escaped textContent gated by the ?name show/hide param. A host name override
+// re-sends slot-rebind with the SAME occupant + epoch — a name-only refresh, no media re-link.
+{"t":"slot-rebind","slot":"cam-3","occupantPeerId":"<id>","name":"Greta","epoch":8}
 {"t":"slot-unbound","slot":"cam-3","epoch":9}
 
 // Occupant suppression-lock projection to a slot's OBS source page (RF-8 receiver-side). A source

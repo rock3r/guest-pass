@@ -378,6 +378,17 @@ func (r *Room) SetRole(actor, target PeerID, newRole string) {
 	})
 }
 
+// SetName overrides a participant's sticky display name — the nameplate (D-16/AC-7). It updates the
+// peer's name, re-broadcasts the roster, and re-sends {t:slot-rebind} (same occupant + epoch) to any
+// slot source the peer occupies so a live OBS nameplate refreshes without re-linking media. Host
+// authority is enforced at the web layer (RequireHost); this is the live re-broadcast only — the
+// persisted passes.name override is written by the dispatch layer before calling this.
+func (r *Room) SetName(id PeerID, name string) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setName(id, name))
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection
