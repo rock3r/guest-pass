@@ -172,14 +172,16 @@ export class DegradationController {
     // Program quality ceiling (D-19/AC-8): the MAX encoding the program/monitor (protected) senders
     // run at, so the program encoder is actually capped and degradation recovery never exceeds it.
     // null = no ceiling yet (browser default). Per-source overrides cap one specific source's sender
-    // tighter (its ?res). _capApplied memoizes the last ceiling signature per sender key so the
-    // ceiling isn't re-pushed to setParameters every sample.
+    // tighter (its ?res). _capApplied memoizes the last applied ceiling signature keyed by the SENDER
+    // OBJECT (a reconnect makes a NEW sender for the same pub:<id> key — it must re-cap), recorded
+    // only AFTER setParameters resolves, so the ceiling isn't re-pushed every sample yet a recreated
+    // or rejected sender is re-capped. A WeakMap so dropped senders don't leak.
     /** @type {{maxRes:number, maxFps:number, maxBitrateKbps:number}|null} */
     this._ceiling = null;
     /** @type {Record<string, number>} sender key ("pub:<id>") → per-source max height override */
     this._overrides = {};
-    /** @type {Record<string, string>} sender key → last applied ceiling signature */
-    this._capApplied = {};
+    /** @type {WeakMap<RTCRtpSender, string>} sender → last successfully applied ceiling signature */
+    this._capApplied = new WeakMap();
   }
 
   /**
@@ -189,7 +191,7 @@ export class DegradationController {
    */
   setCeiling(c) {
     this._ceiling = c && c.maxRes ? { maxRes: c.maxRes, maxFps: c.maxFps, maxBitrateKbps: c.maxBitrateKbps } : null;
-    this._capApplied = {}; // a new ceiling must re-push to every sender
+    this._capApplied = new WeakMap(); // a new ceiling must re-push to every sender
     this._enforceCeiling();
   }
 
@@ -202,7 +204,8 @@ export class DegradationController {
   setSourceOverride(key, res) {
     if (res > 0) this._overrides[key] = res;
     else delete this._overrides[key];
-    delete this._capApplied[key]; // force a re-apply for this one sender
+    // No memo clear needed: the override changes the computed ceiling signature for that sender, so
+    // _enforceCeiling re-applies it (a stale memo only matches an identical signature).
     this._enforceCeiling();
   }
 
@@ -236,9 +239,17 @@ export class DegradationController {
       if ((this.state.bw[t.key] || 0) > 0) continue; // shed below the ceiling — leave it lower
       const params = this._ceilingParamsFor(t);
       const sig = `${params.scaleResolutionDownBy}|${params.maxFramerate}|${params.maxBitrate}`;
-      if (this._capApplied[t.key] === sig) continue;
-      this._capApplied[t.key] = sig;
-      applyAction(t.sender, { params });
+      const sender = t.sender;
+      if (this._capApplied.get(sender) === sig) continue; // already capped (this exact sender object)
+      // Record the memo ONLY after setParameters resolves: a recreated sender (reconnect) is a fresh
+      // object so it misses the memo and re-caps, and a transient rejection (renegotiation) leaves no
+      // memo so the next sample retries — the recreated/uncapped program sender can't outrun the cap.
+      sender
+        .setParameters(encodingParams(sender, { params }))
+        .then(() => this._capApplied.set(sender, sig))
+        .catch(() => {
+          /* renegotiating / closed — leave it unmemoized so the next sample retries */
+        });
     }
   }
 
@@ -271,7 +282,7 @@ export class DegradationController {
     // "Bump quality now" restores to the program CEILING, never above it (D-19/AC-8): re-cap the
     // protected senders we just reset to scaleResolutionDownBy:1 so the override can't exceed the
     // host's ceiling. _capApplied is cleared so the re-cap actually pushes.
-    this._capApplied = {};
+    this._capApplied = new WeakMap();
     this._enforceCeiling();
     // Report recovered IMMEDIATELY (don't wait for the next ~2s sample) so the host's badge and the
     // guest's own degradation clear right away — that's the point of the override. If the pressure
@@ -331,7 +342,7 @@ export class DegradationController {
       // A shed/recover action touched a protected sender → its applied params no longer match the
       // ceiling memo, so clear it; _enforceCeiling below re-caps it to the ceiling if it recovered
       // to baseline, or leaves it shed below the ceiling.
-      if (target.protected) delete this._capApplied[a.key];
+      if (target.protected) this._capApplied.delete(target.sender);
     }
     // Cap any protected sender at the program ceiling (D-19/AC-8): catches a newly-connected program
     // consumer and a sender that just recovered to baseline, so the program encoder never runs above
@@ -370,11 +381,13 @@ function readSenderStats(stats) {
 }
 
 /**
- * applyAction applies one ladder action to a sender via setParameters (the proven AD-21 mechanism).
+ * encodingParams folds one action into a sender's current RTCRtpSendParameters (encodings[0]),
+ * returning the object to hand to setParameters. Split out so _enforceCeiling can apply the same
+ * encoding shape but observe setParameters success/failure itself (success-gated ceiling memo).
  * @param {RTCRtpSender} sender
  * @param {{active?:boolean, params?:object}} action
  */
-function applyAction(sender, action) {
+function encodingParams(sender, action) {
   const p = sender.getParameters();
   if (!p.encodings || !p.encodings.length) p.encodings = [{}];
   const enc = p.encodings[0];
@@ -386,7 +399,16 @@ function applyAction(sender, action) {
     if (action.params.maxBitrate !== undefined) enc.maxBitrate = action.params.maxBitrate;
     else delete enc.maxBitrate;
   }
-  return sender.setParameters(p).catch(() => {
+  return p;
+}
+
+/**
+ * applyAction applies one ladder action to a sender via setParameters (the proven AD-21 mechanism).
+ * @param {RTCRtpSender} sender
+ * @param {{active?:boolean, params?:object}} action
+ */
+function applyAction(sender, action) {
+  return sender.setParameters(encodingParams(sender, action)).catch(() => {
     /* setParameters can reject on a renegotiating sender; the next sample retries */
   });
 }

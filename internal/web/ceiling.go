@@ -9,11 +9,13 @@ import (
 )
 
 // putCeilingRequest adjusts a stream's program quality ceiling (D-19/AC-8): the max resolution
-// (height px), framerate, and bitrate (kbps) the program encoder is capped at.
+// (height px), framerate, and bitrate (kbps) the program encoder is capped at. The fields are
+// POINTERS so an OMITTED dimension preserves the stored value rather than unmarshalling to 0 and
+// clobbering it down to the minimum — a partial adjust changes only what it names (codex/Bugbot).
 type putCeilingRequest struct {
-	MaxRes         int `json:"maxRes"`
-	MaxFps         int `json:"maxFps"`
-	MaxBitrateKbps int `json:"maxBitrateKbps"`
+	MaxRes         *int `json:"maxRes"`
+	MaxFps         *int `json:"maxFps"`
+	MaxBitrateKbps *int `json:"maxBitrateKbps"`
 }
 
 // putCeilingResponse echoes the CLAMPED ceiling now in effect (so the host UI reflects the server's
@@ -48,9 +50,10 @@ func (a *apiServer) putStreamCeiling(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	mr := clampInt(req.MaxRes, minMaxRes, maxMaxRes)
-	mf := clampInt(req.MaxFps, minMaxFps, maxMaxFps)
-	mb := clampInt(req.MaxBitrateKbps, minMaxBitrateKbps, maxMaxBitrateKbps)
+	// An omitted dimension preserves the stored value (then clamp); only a named one changes.
+	mr := clampInt(intOr(req.MaxRes, derefInt(stream.MaxRes)), minMaxRes, maxMaxRes)
+	mf := clampInt(intOr(req.MaxFps, derefInt(stream.MaxFPS)), minMaxFps, maxMaxFps)
+	mb := clampInt(intOr(req.MaxBitrateKbps, derefInt(stream.MaxBitrateKbps)), minMaxBitrateKbps, maxMaxBitrateKbps)
 
 	r64, f64, b64 := int64(mr), int64(mf), int64(mb)
 	stream.MaxRes, stream.MaxFPS, stream.MaxBitrateKbps = &r64, &f64, &b64
@@ -114,6 +117,14 @@ func derefInt(v *int64) int {
 		return 0
 	}
 	return int(*v)
+}
+
+// intOr returns *v when present, else def — so an omitted ceiling dimension keeps its stored value.
+func intOr(v *int, def int) int {
+	if v != nil {
+		return *v
+	}
+	return def
 }
 
 // liveCeiling broadcasts the ceiling to the live room's publishers (if any). No-op when no stream

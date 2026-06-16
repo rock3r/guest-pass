@@ -151,11 +151,12 @@ function start() {
         if (l.pc.iceConnectionState === "failed") l.restartIce();
       };
       l.offer();
-      // A per-source resolution override (?res, D-19/AC-8): tell the server a (new) occupant is bound
-      // so it relays the cap to the occupant, which caps the sender feeding us. Re-sent on every real
-      // (re)bind, so a swapped-in occupant always picks it up. The server resolves us→occupant via the
-      // slot (EN-1); we never address the occupant directly.
-      if (resOverride) relay({ t: "source-quality", res: resOverride });
+      // Per-source resolution override (?res, D-19/AC-8): on every real (re)bind tell the server our
+      // override so it relays the cap to the (new) occupant, which caps the sender feeding us. ALWAYS
+      // sent — res 0 when ?res is absent — so a source whose URL DROPS ?res (host reload) clears any
+      // override the prior occupant/sender still held, instead of leaving a stale tighter cap. The
+      // server resolves us→occupant via the slot (EN-1); we never address the occupant directly.
+      relay({ t: "source-quality", res: resOverride });
     }
 
     function unbind(ep) {

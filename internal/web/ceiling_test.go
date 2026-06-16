@@ -49,6 +49,16 @@ func TestCeiling_PersistsAndClamps(t *testing.T) {
 		t.Fatalf("ceiling did not persist: res=%v fps=%v", s.MaxRes, s.MaxFPS)
 	}
 
+	// A PARTIAL body changes only the named dimension and PRESERVES the others (codex/Bugbot): a body
+	// with just maxRes must not reset fps/bitrate to their minimums.
+	_, resp = set(alice, streamID, `{"maxRes":600}`)
+	if resp.MaxRes != 600 || resp.MaxFps != 24 || resp.MaxBitrateKbps != 1500 {
+		t.Fatalf("partial PUT = %d/%d/%d, want 600/24/1500 (others preserved)", resp.MaxRes, resp.MaxFps, resp.MaxBitrateKbps)
+	}
+	if s, _ := a.store.GetStream(ctx, streamID); *s.MaxFPS != 24 || *s.MaxBitrateKbps != 1500 {
+		t.Fatalf("partial PUT clobbered the unset fields: fps=%d kbps=%d", *s.MaxFPS, *s.MaxBitrateKbps)
+	}
+
 	// Out-of-range values are clamped server-side (no 0/divide-by-zero, no absurd bitrate).
 	_, resp = set(alice, streamID, `{"maxRes":0,"maxFps":999,"maxBitrateKbps":9999999}`)
 	if resp.MaxRes != minMaxRes || resp.MaxFps != maxMaxFps || resp.MaxBitrateKbps != maxMaxBitrateKbps {

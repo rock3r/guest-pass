@@ -97,7 +97,7 @@ func TestCeiling_CapsProgramSenderLive(t *testing.T) {
 // downscaled (scaleResolutionDownBy > 1) relative to the capture, which a no-override source is not.
 func TestCeiling_PerSourceResolutionOverride(t *testing.T) {
 	s := seedDeviceCheck(t)
-	guestCtx, _ := publishGuestWithSource(t, s, "res=240")
+	guestCtx, obsCtx := publishGuestWithSource(t, s, "res=240")
 
 	// With ?res=240 below the fake capture height, the program sender is downscaled (scale > 1).
 	if err := chromedp.Run(guestCtx, chromedp.Poll(
@@ -105,6 +105,23 @@ func TestCeiling_PerSourceResolutionOverride(t *testing.T) {
 		nil, chromedp.WithPollingTimeout(20*time.Second),
 	)); err != nil {
 		t.Fatalf("per-source ?res override did not downscale the program sender: %v", err)
+	}
+
+	// Reload the SAME source WITHOUT ?res (host removed it): the source sends res:0 on rebind, which
+	// CLEARS the stale override so the program sender returns to the stream ceiling (no downscale on a
+	// sub-720 capture) — codex/Bugbot: a dropped ?res must not leave a stale tighter cap.
+	if err := chromedp.Run(obsCtx,
+		chromedp.Navigate(s.base+"/s/"+s.slotLabel+"?token="+s.srcToken),
+		chromedp.WaitVisible(`#obs-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('#obs-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("source reload without ?res did not re-render: %v", err)
+	}
+	if err := chromedp.Run(guestCtx, chromedp.Poll(
+		`(window.__gpPubEncodings ? window.__gpPubEncodings() : []).every((e) => !(e.scaleResolutionDownBy > 1.2))`,
+		nil, chromedp.WithPollingTimeout(20*time.Second),
+	)); err != nil {
+		t.Fatalf("dropping ?res did not clear the stale per-source override: %v", err)
 	}
 }
 
@@ -155,6 +172,54 @@ func TestCeiling_GreenroomControlApplies(t *testing.T) {
 			t.Fatalf("greenroom Apply did not persist the ceiling; max_res = %v, want 480", st.MaxRes)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// AC-8 (codex P2): a RECREATED program sender (same pub:<id> key, new RTCRtpSender on reconnect)
+// must be re-capped — the ceiling memo is keyed by the sender OBJECT, not the key, so a fresh sender
+// with default encodings can't run above the ceiling until the host next touches it.
+func TestCeiling_RecapsRecreatedSender(t *testing.T) {
+	s := seedDeviceCheck(t)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+	ctx, cancelT := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelT()
+
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Poll(`!!(window.__gpDeg && window.__gpDeg.DegradationController)`, nil, chromedp.WithPollingTimeout(15*time.Second)),
+	); err != nil {
+		t.Fatalf("degradation seam not available: %v", err)
+	}
+
+	var ok bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const mkSender = () => {
+			const s = { enc: {}, track: { kind: "video", getSettings: () => ({ height: 720 }) } };
+			s.getParameters = () => ({ encodings: [ { ...s.enc } ] });
+			s.setParameters = (p) => { s.enc = p.encodings[0]; return Promise.resolve(); };
+			return s;
+		};
+		let sender = mkSender();
+		const deg = new window.__gpDeg.DegradationController({
+			getTargets: () => [{ key: "pub:x", priority: 3, protected: true, sender }],
+			report: () => {},
+		});
+		deg.setCeiling({ maxRes: 360, maxFps: 20, maxBitrateKbps: 800 }); // caps sender A → scale 2
+		const cappedA = Math.abs(sender.enc.scaleResolutionDownBy - 2) < 0.01 && sender.enc.maxBitrate === 800000;
+		// Reconnect: a NEW sender object reuses the same pub:x key with DEFAULT (uncapped) encodings.
+		sender = mkSender();
+		deg._enforceCeiling();
+		const cappedB = Math.abs(sender.enc.scaleResolutionDownBy - 2) < 0.01 && sender.enc.maxBitrate === 800000;
+		return cappedA && cappedB;
+	})()`, &ok)); err != nil {
+		t.Fatalf("recreated-sender eval: %v", err)
+	}
+	if !ok {
+		t.Fatalf("a recreated program sender was not re-capped at the ceiling")
 	}
 }
 
