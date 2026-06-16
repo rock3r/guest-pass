@@ -104,6 +104,13 @@ function DeviceCheck() {
   // server clears its roster screenShare pointer → we stop capturing), and on teardown.
   /** @type {{current: MediaStream|null}} */
   const screenStreamRef = useRef(null);
+  // In-flight guard for the screen-capture request, so a rapid double-click can't start two
+  // concurrent getDisplayMedia calls (the second stream would leak — mirrors requestingRef on cam).
+  const screenRequestingRef = useRef(false);
+  // Live mirror of pubState, so async/once-registered closures (the post-picker send + the screen
+  // track's `onended`, both captured at share-start) consult the CURRENT connection state instead of
+  // a stale "live" — a send on a dropped/reconnecting socket would throw.
+  const pubStateRef = useRef("connecting");
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -150,13 +157,15 @@ function DeviceCheck() {
   }, [phase]);
 
   // Tear down on unmount: stop the reconnecting session (which closes the publisher + WS and
-  // halts retries), release the camera, and mark cancelled so a still-pending getUserMedia
-  // releases its stream when it resolves.
+  // halts retries), release the camera AND any screen capture (so getDisplayMedia tracks + the OS
+  // screen-capture indicator don't outlive the island), and mark cancelled so a still-pending
+  // getUserMedia/getDisplayMedia releases its stream when it resolves.
   useEffect(
     () => () => {
       cancelledRef.current = true;
       if (sessionRef.current) sessionRef.current.close();
       stopStream();
+      stopScreenCapture();
     },
     [],
   );
@@ -388,7 +397,10 @@ function DeviceCheck() {
         setStreaming(false);
         setSelfDegraded(null);
       },
-      onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
+      onState: (st) => {
+        pubStateRef.current = st; // keep the ref mirror current for async screen-capture closures
+        setPubState(st); // "live" once up, "reconnecting" while a drop retries
+      },
       onTerminal: (reason) => {
         // The session is over for good — release the camera/mic so the device light goes off behind
         // the error screen (the session won't reconnect, so nothing re-publishes this stream). The
@@ -443,30 +455,48 @@ function DeviceCheck() {
       screenStreamRef.current = null;
     }
   }
+  // sessionLive reports whether the signaling socket is usable right now (open + publishing). Read at
+  // CALL time (via pubStateRef) so async + once-registered screen-capture closures never send on a
+  // dropped/reconnecting/CONNECTING socket, which would throw.
+  function sessionLive() {
+    return !!sessionRef.current && pubStateRef.current === "live";
+  }
   // Screenshare capture toggle (AC-13/D-21). Video-only getDisplayMedia (D-41) — start grabs the
   // display surface, registers the native-stop `ended` handler, and announces {t:screen-start} so the
   // server adds us to the backstage preview pool; stop tears the capture down and announces
   // {t:screen-stop}. The host alone promotes a sharer to the live slot (host-only {t:screen-select}),
   // so starting only ever yields the "backstage" self-state until the server says otherwise.
   async function toggleScreen() {
-    if (!(sessionRef.current && pubState === "live")) return;
+    if (!sessionLive()) return;
     if (screenStreamRef.current) {
       sessionRef.current.send({ t: "screen-stop" });
       stopScreenCapture();
       return;
     }
+    if (screenRequestingRef.current) return; // a getDisplayMedia is already in flight (double-click)
+    screenRequestingRef.current = true;
     let stream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     } catch {
       return; // user cancelled the picker or capture failed — stay idle, no frame sent
+    } finally {
+      screenRequestingRef.current = false;
+    }
+    // The picker can resolve long after it opened: if we unmounted, the socket dropped, or another
+    // capture already won the slot meanwhile, release this stream instead of leaking it (and don't
+    // send on a dead socket). Mirrors the cancelledRef guard on the camera's getUserMedia.
+    if (cancelledRef.current || screenStreamRef.current || !sessionLive()) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
     }
     screenStreamRef.current = stream;
-    // Native browser "Stop sharing" — mirror it back to the server so the pool drops us.
+    // Native browser "Stop sharing" — mirror it back to the server so the pool drops us (only if the
+    // socket is still live at that moment — pubStateRef, not a stale capture-time pubState).
     const vt = stream.getVideoTracks()[0];
     if (vt) {
       vt.onended = () => {
-        if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "screen-stop" });
+        if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
         stopScreenCapture();
       };
     }
