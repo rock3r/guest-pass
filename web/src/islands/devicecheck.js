@@ -506,6 +506,19 @@ function DeviceCheck() {
   function sessionLive() {
     return !!sessionRef.current && pubStateRef.current === "live";
   }
+  // stopScreenShare announces {t:screen-stop} (best-effort) and ALWAYS releases the local capture.
+  // The send is wrapped because the WS can be mid-close — out of OPEN before onClose flips pubStateRef
+  // away from "live" — so sessionLive() can still pass yet ws.send() throw; the local teardown must
+  // run regardless, or the getDisplayMedia tracks (and the OS indicator) leak. The server drops us
+  // from the pool on disconnect anyway, so a missed screen-stop is harmless.
+  function stopScreenShare() {
+    try {
+      if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
+    } catch {
+      /* socket already closing/closed — fall through to the unconditional local stop */
+    }
+    stopScreenCapture();
+  }
   // canStartShare reports whether STARTING a screen capture is allowed right now, from refs (so it's
   // correct after an `await`): the session must be live + not terminated/unmounting, and this guest's
   // OWN current roster entry must still be screenshare-eligible and not force-no-share'd (EN-7 — the
@@ -526,9 +539,7 @@ function DeviceCheck() {
   async function toggleScreen() {
     if (!sessionRef.current) return;
     if (screenStreamRef.current) {
-      // Stopping is always allowed when we hold a capture; only the server send is gated on liveness.
-      if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
-      stopScreenCapture();
+      stopScreenShare(); // best-effort {t:screen-stop} + unconditional local capture release
       return;
     }
     if (!canStartShare()) return;
@@ -555,10 +566,7 @@ function DeviceCheck() {
     // socket is still live at that moment — pubStateRef, not a stale capture-time pubState).
     const vt = stream.getVideoTracks()[0];
     if (vt) {
-      vt.onended = () => {
-        if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
-        stopScreenCapture();
-      };
+      vt.onended = () => stopScreenShare(); // native "Stop sharing": same best-effort stop + release
     }
     sessionRef.current.send({ t: "screen-start" });
   }
