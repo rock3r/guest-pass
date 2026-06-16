@@ -203,6 +203,23 @@ func (wr *wsResolver) guestBoundSlot(ctx context.Context, passID, hostID string)
 	return label
 }
 
+// passCeiling resolves the program quality ceiling (D-19/AC-8) for a publishing participant from
+// its pass's stream, so the guest/co-host caps its program encoder the moment it publishes — pre-
+// live or live (a guest may publish before Go live). Returns ok=false on any lookup miss or a stream
+// with no ceiling set (CreateStream defaults it, so that is the unusual case). int-narrowed from the
+// nullable columns; the values are small.
+func (wr *wsResolver) passCeiling(ctx context.Context, passID string) (maxRes, maxFps, maxBitrateKbps int, ok bool) {
+	pass, err := wr.store.GetPass(ctx, passID)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	stream, err := wr.store.GetStream(ctx, pass.StreamID)
+	if err != nil || stream.MaxRes == nil || stream.MaxFPS == nil || stream.MaxBitrateKbps == nil {
+		return 0, 0, 0, false
+	}
+	return int(*stream.MaxRes), int(*stream.MaxFPS), int(*stream.MaxBitrateKbps), true
+}
+
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {
 	slot, err := wr.store.GetSlotBySourceTokenHash(ctx, wr.hasher.Hash(raw))
 	if errors.Is(err, store.ErrNotFound) {

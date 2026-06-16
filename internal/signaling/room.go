@@ -339,6 +339,25 @@ func (r *Room) NotifySessionLive() {
 	})
 }
 
+// SetCeiling broadcasts the stream's program quality ceiling (D-19/AC-8) to every participant so
+// each publisher caps its program encoder + clamps degradation recovery to it. Host authority is
+// enforced at the web layer (RequireHost); this is the live broadcast only. The persisted ceiling
+// (streams.max_*) is written by the dispatch layer; this carries the live numbers.
+func (r *Room) SetCeiling(maxRes, maxFps, maxBitrateKbps int) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setCeiling(maxRes, maxFps, maxBitrateKbps))
+	})
+}
+
+// SourceQuality relays an OBS cam source's per-source resolution override (D-19/AC-8) to its slot's
+// bound occupant (see roomState.sourceQuality). Called when a source reports its ?res; the occupant
+// caps the sender feeding that source.
+func (r *Room) SourceQuality(source PeerID, res int) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.sourceQuality(source, res))
+	})
+}
+
 // Force applies a suppression force (force-mute/force-no-cam/force-no-share) from actor onto
 // target's modality (D-13/EN-7). Authority is enforced server-side against current rank — a
 // guest's or peer's attempt is a no-op. Modality is mic | cam | share.

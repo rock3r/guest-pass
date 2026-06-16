@@ -20,6 +20,55 @@ import { Tile, FORCE_FRAME } from "./grid-tile.js";
 const isGuestRole = (role) => role === "guest" || role === "cohost";
 
 /**
+ * CeilingControl is the host-only stream-wide program quality ceiling control (D-19/AC-8): max
+ * resolution / fps / bitrate inputs + Apply. Submitting PUTs the ceiling; the server clamps,
+ * persists, and re-broadcasts {t:ceiling} to live publishers so each re-caps its program encoder.
+ * Inputs are UNCONTROLLED, keyed by the current values so a server clamp or external update re-seeds
+ * them. Shown only while a session is live (the parent renders it only when `ceiling` is set).
+ * @param {{ceiling:{streamId:string,maxRes:number,maxFps:number,maxBitrateKbps:number}, onApply:(streamId:string,maxRes:number,maxFps:number,maxBitrateKbps:number)=>void}} props
+ * @returns {import("preact").VNode}
+ */
+function CeilingControl({ ceiling, onApply }) {
+  return (
+    <form
+      class="gr-ceiling"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const el = /** @type {HTMLFormElement} */ (e.currentTarget).elements;
+        const num = (name) => parseInt(/** @type {HTMLInputElement} */ (el.namedItem(name)).value, 10) || 0;
+        onApply(ceiling.streamId, num("maxRes"), num("maxFps"), num("maxBitrateKbps"));
+      }}
+    >
+      <span class="gr-ceiling-label">Quality ceiling</span>
+      <label class="gr-ceiling-field">
+        <span>Res</span>
+        <input key={"r" + ceiling.maxRes} class="gr-ceiling-res" name="maxRes" type="number" min="144" max="2160" defaultValue={ceiling.maxRes} />
+        <span class="gr-ceiling-unit">p</span>
+      </label>
+      <label class="gr-ceiling-field">
+        <span>FPS</span>
+        <input key={"f" + ceiling.maxFps} class="gr-ceiling-fps" name="maxFps" type="number" min="1" max="60" defaultValue={ceiling.maxFps} />
+      </label>
+      <label class="gr-ceiling-field">
+        <span>Kbps</span>
+        <input
+          key={"b" + ceiling.maxBitrateKbps}
+          class="gr-ceiling-bitrate"
+          name="maxBitrateKbps"
+          type="number"
+          min="100"
+          max="20000"
+          defaultValue={ceiling.maxBitrateKbps}
+        />
+      </label>
+      <button type="submit" class="gr-ceiling-apply">
+        Apply
+      </button>
+    </form>
+  );
+}
+
+/**
  * Greenroom is the grid island.
  * @returns {import("preact").VNode}
  */
@@ -41,6 +90,10 @@ function Greenroom() {
   // by pass id → the slot the host last successfully set (""=unassigned). The roster clears an entry
   // once the authoritative live value catches up (e.g. on Go-live replay).
   const [boundOverrides, setBoundOverrides] = useState({});
+  // ceiling is the active session's program quality ceiling (D-19/AC-8): {streamId, maxRes, maxFps,
+  // maxBitrateKbps} when a session is live, else null (the control is hidden until Go live). Fetched
+  // from GET /api/session/ceiling on mount + on session-live, and updated from each adjust's response.
+  const [ceiling, setCeiling] = useState(null);
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -60,6 +113,7 @@ function Greenroom() {
   useEffect(() => {
     const room = new Room(""); // host: the session cookie authenticates the WS
     roomRef.current = room;
+    fetchCeiling(); // populate the quality-ceiling control if a session is already live
 
     // syncTiles rebuilds the rendered tiles from the current entries + streams, in a stable id
     // order so the grid doesn't reshuffle on every roster update.
@@ -165,6 +219,7 @@ function Greenroom() {
       // before Go live would otherwise keep showing its stale slot while OBS shows the placeholder
       // (codex). Sent after the replay, so entry.boundSlot is already authoritative.
       setBoundOverrides((prev) => (Object.keys(prev).length ? {} : prev));
+      fetchCeiling(); // the session just went live — its ceiling control is now available
     });
     room.on("peer-joined", (f) => {
       upsert(f.peer);
@@ -328,6 +383,34 @@ function Greenroom() {
     setTiles((ts) => [...ts]);
   }
 
+  // fetchCeiling loads the active session's stream id + current ceiling (D-19/AC-8) for the control;
+  // a 404 (no live session) hides it. Called on mount and on session-live.
+  function fetchCeiling() {
+    fetch("/api/session/ceiling")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => setCeiling(c && c.streamId ? c : null))
+      .catch(() => {
+        /* transient: the control just stays as-is */
+      });
+  }
+
+  // applyCeiling PUTs a ceiling adjustment; the server clamps + persists + re-broadcasts {t:ceiling}
+  // to live publishers, and echoes the clamped values so the control reflects the server's clamp.
+  function applyCeiling(streamId, maxRes, maxFps, maxBitrateKbps) {
+    fetch(`/api/streams/${encodeURIComponent(streamId)}/ceiling`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxRes, maxFps, maxBitrateKbps }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => {
+        if (c) setCeiling({ streamId, maxRes: c.maxRes, maxFps: c.maxFps, maxBitrateKbps: c.maxBitrateKbps });
+      })
+      .catch(() => {
+        /* transient network failure: the persisted ceiling is unchanged */
+      });
+  }
+
   return (
     <div class="greenroom" data-state={state}>
       <div class="gr-toolbar">
@@ -341,6 +424,7 @@ function Greenroom() {
         >
           Bump quality now
         </button>
+        {ceiling ? <CeilingControl ceiling={ceiling} onApply={applyCeiling} /> : null}
         {bindError ? (
           <p class="gr-binderr" role="alert">
             {bindError}

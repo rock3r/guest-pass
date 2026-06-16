@@ -39,12 +39,34 @@ func TestStreamRepo_CRUD(t *testing.T) {
 		t.Fatalf("GetStream round-trip: %+v / %v", got, err)
 	}
 
+	// AC-8/D-19: a new stream ships with the default quality ceiling (720p/30/~2500 kbps) when the
+	// caller specifies none, so the program encoder is always bounded.
+	if s1.MaxRes == nil || *s1.MaxRes != DefaultMaxRes ||
+		s1.MaxFPS == nil || *s1.MaxFPS != DefaultMaxFPS ||
+		s1.MaxBitrateKbps == nil || *s1.MaxBitrateKbps != DefaultMaxBitrateKbps {
+		t.Fatalf("default ceiling = res:%v fps:%v kbps:%v, want %d/%d/%d",
+			s1.MaxRes, s1.MaxFPS, s1.MaxBitrateKbps, DefaultMaxRes, DefaultMaxFPS, DefaultMaxBitrateKbps)
+	}
+	if reload, _ := st.GetStream(ctx, s1.ID); reload.MaxRes == nil || *reload.MaxRes != DefaultMaxRes {
+		t.Fatalf("default ceiling did not persist: %v", reload.MaxRes)
+	}
+
+	// An explicit ceiling is preserved (not overridden by the default).
+	cr, cf, cb := int64(1080), int64(60), int64(6000)
+	custom, err := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "HiQ", MaxRes: &cr, MaxFPS: &cf, MaxBitrateKbps: &cb})
+	if err != nil {
+		t.Fatalf("CreateStream custom: %v", err)
+	}
+	if *custom.MaxRes != 1080 || *custom.MaxFPS != 60 || *custom.MaxBitrateKbps != 6000 {
+		t.Fatalf("explicit ceiling overridden: res:%d fps:%d kbps:%d", *custom.MaxRes, *custom.MaxFPS, *custom.MaxBitrateKbps)
+	}
+
 	// Second stream for list ordering.
 	if _, err := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show 2"}); err != nil {
 		t.Fatalf("CreateStream 2: %v", err)
 	}
 	list, err := st.ListStreamsByHost(ctx, h.ID)
-	if err != nil || len(list) != 2 {
+	if err != nil || len(list) != 3 {
 		t.Fatalf("ListStreamsByHost = %d streams, %v", len(list), err)
 	}
 

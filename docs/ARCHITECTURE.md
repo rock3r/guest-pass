@@ -266,6 +266,28 @@ transparency** (D-34): the host sees every stream's degradation (which stream, h
 much, direction lowering vs recovering); each guest sees only their own (e.g.
 "trimming background video to protect your stream").
 
+#### Quality ceiling (D-19/AC-8)
+
+A stream carries a **program quality ceiling** — `max_res / max_fps /
+max_bitrate_kbps` — that bounds the program encoder from the top, distinct from the
+degradation ladder which sheds from the bottom under pressure. A new stream ships
+with a sensible default (**720p / 30 fps / ~2500 kbps**, `store.Default*`); the host
+adjusts it live via **`PUT /api/streams/{id}/ceiling`** (host-only, clamped to sane
+bounds), which persists `streams.max_*` and — when the stream is the host's live
+session — broadcasts `{t:ceiling}` to the publishers. The greenroom control reads
+the current ceiling from **`GET /api/session/ceiling`**.
+
+Each publishing client receives the ceiling on join (delivered from its own
+stream, so it applies pre-live too) and on every live adjustment, and caps its
+**program/monitor (protected) senders** at it via `setParameters` — so the program
+encoder is *actually* capped, and the degradation ladder's **recovery clamps to the
+ceiling** (shed below is fine; recover never exceeds, including "bump quality now").
+An optional **per-guest program-resolution override** rides a cam source's `?res`
+URL param: the source relays `{t:source-quality}`, the server routes it to the
+slot's bound occupant (EN-1), and the occupant caps the sender feeding *that* source
+tighter (resolution only). The server never touches media (D-23) — it relays the
+numbers; the cap is per-publisher-local. (This replaced the M3 DEF-3 placeholder.)
+
 ### Host aggregation chokepoint
 
 The host machine is a bottleneck: its **downlink carries N×program + N×monitor**
@@ -953,6 +975,14 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 {"t":"role","peerId":"<id>","role":"cohost"|"guest"}      // promote / demote (live, from the greenroom)
 {"t":"recover-quality"}                                   // "bump quality now" (AD-21/D-34): broadcast to
                                                           // every publisher to recover immediately, host only
+
+// Program quality ceiling (D-19/AC-8). Server → publishing participants: cap the program encoder at
+// this + clamp degradation recovery to it. Delivered on join (from the guest's own stream) + re-
+// broadcast when the host adjusts it live (PUT /api/streams/{id}/ceiling). OBS sources never get it.
+{"t":"ceiling","maxRes":720,"maxFps":30,"maxBitrateKbps":2500}
+// Per-source program-resolution override: a cam source's ?res, source → server → relayed to the
+// slot's bound occupant (peerId = the source's id) so it caps the sender feeding that source.
+{"t":"source-quality","res":480}                          // source → server (server stamps peerId to the occupant)
 
 // Screenshare preview-switcher — host only (D-21); the one sanctioned exception to "OBS owns composition"
 {"t":"screen-select","peerId":"<id>"}                     // promote this active backstage share to LIVE

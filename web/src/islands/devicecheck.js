@@ -331,6 +331,31 @@ function DeviceCheck() {
         });
         degRef.current = deg;
         deg.start();
+        // Program quality ceiling (D-19/AC-8): the server delivers the stream ceiling on join and
+        // re-broadcasts it when the host adjusts it live. Cap our program/monitor encoder at it (and
+        // clamp degradation recovery to it). The ceiling is re-delivered on every reconnect.
+        room.on("ceiling", (f) => {
+          if (degRef.current) degRef.current.setCeiling({ maxRes: f.maxRes, maxFps: f.maxFps, maxBitrateKbps: f.maxBitrateKbps });
+        });
+        // Per-source program-resolution override (D-19/AC-8): an OBS source's ?res, relayed to us as
+        // the bound occupant. Cap the sender feeding THAT source (pub:<sourceId>) tighter; res<=0
+        // clears it. f.peerId is the source's id (the key our Publisher pc for it uses).
+        room.on("source-quality", (f) => {
+          if (degRef.current) degRef.current.setSourceOverride("pub:" + f.peerId, f.res);
+        });
+        // Test seam (no behavior, no secrets): expose the current encoding params of our PROGRAM/
+        // monitor (protected) senders so a browser test can assert the quality ceiling (D-19/AC-8)
+        // actually capped the program encoder. Mesh thumbnails are excluded — they ride their own
+        // shedding, not the program ceiling.
+        if (typeof window !== "undefined") {
+          window.__gpPubEncodings = () =>
+            degradationTargets()
+              .filter((t) => t.protected)
+              .map((t) => {
+                const e = (t.sender.getParameters().encodings || [{}])[0] || {};
+                return { key: t.key, scaleResolutionDownBy: e.scaleResolutionDownBy, maxFramerate: e.maxFramerate, maxBitrate: e.maxBitrate };
+              });
+        }
       },
       teardown: () => {
         // The link dropped (or we're closing): stop the degradation sampler, stop publishing + tear

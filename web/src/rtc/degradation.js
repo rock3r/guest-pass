@@ -169,6 +169,77 @@ export class DegradationController {
     this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
     /** @type {ReturnType<typeof setInterval>|undefined} */
     this._timer = undefined;
+    // Program quality ceiling (D-19/AC-8): the MAX encoding the program/monitor (protected) senders
+    // run at, so the program encoder is actually capped and degradation recovery never exceeds it.
+    // null = no ceiling yet (browser default). Per-source overrides cap one specific source's sender
+    // tighter (its ?res). _capApplied memoizes the last ceiling signature per sender key so the
+    // ceiling isn't re-pushed to setParameters every sample.
+    /** @type {{maxRes:number, maxFps:number, maxBitrateKbps:number}|null} */
+    this._ceiling = null;
+    /** @type {Record<string, number>} sender key ("pub:<id>") → per-source max height override */
+    this._overrides = {};
+    /** @type {Record<string, string>} sender key → last applied ceiling signature */
+    this._capApplied = {};
+  }
+
+  /**
+   * setCeiling sets the program quality ceiling (D-19/AC-8) and immediately caps every protected
+   * (program/monitor) sender at it. A falsy/zero ceiling clears it (back to browser default).
+   * @param {{maxRes:number, maxFps:number, maxBitrateKbps:number}|null} c
+   */
+  setCeiling(c) {
+    this._ceiling = c && c.maxRes ? { maxRes: c.maxRes, maxFps: c.maxFps, maxBitrateKbps: c.maxBitrateKbps } : null;
+    this._capApplied = {}; // a new ceiling must re-push to every sender
+    this._enforceCeiling();
+  }
+
+  /**
+   * setSourceOverride caps ONE source's program sender (keyed "pub:<sourceId>") at `res` px — the
+   * source's ?res URL param (D-19/AC-8), layered under the stream ceiling. res<=0 clears it.
+   * @param {string} key sender key "pub:<sourceId>"
+   * @param {number} res max height in px (0 = clear)
+   */
+  setSourceOverride(key, res) {
+    if (res > 0) this._overrides[key] = res;
+    else delete this._overrides[key];
+    delete this._capApplied[key]; // force a re-apply for this one sender
+    this._enforceCeiling();
+  }
+
+  /**
+   * _ceilingParamsFor computes the ceiling encoding for a protected sender from its captured height,
+   * the stream ceiling, and any per-source override (the tighter of the two resolutions). Returns
+   * null when no ceiling is set.
+   * @param {{key:string, sender:RTCRtpSender}} target
+   */
+  _ceilingParamsFor(target) {
+    const c = this._ceiling;
+    if (!c) return null;
+    const settings = target.sender.track && target.sender.track.getSettings ? target.sender.track.getSettings() : {};
+    const h = settings.height || 0;
+    const override = this._overrides[target.key];
+    const maxRes = override ? Math.min(c.maxRes, override) : c.maxRes; // per-source override is res-only
+    const scaleResolutionDownBy = h && maxRes ? Math.max(1, h / maxRes) : 1;
+    return { scaleResolutionDownBy, maxFramerate: c.maxFps, maxBitrate: c.maxBitrateKbps * 1000 };
+  }
+
+  /**
+   * _enforceCeiling caps each PROTECTED (program/monitor) sender at the ceiling baseline, UNLESS the
+   * bandwidth ladder has it shed BELOW the ceiling already (don't raise a shed sender). Idempotent
+   * via _capApplied so identical params aren't re-pushed every sample. The mesh thumbnails are NOT
+   * capped here — they ride their own low-res shedding, not the program ceiling.
+   */
+  _enforceCeiling() {
+    if (!this._ceiling) return;
+    for (const t of this.getTargets()) {
+      if (!t.protected) continue;
+      if ((this.state.bw[t.key] || 0) > 0) continue; // shed below the ceiling — leave it lower
+      const params = this._ceilingParamsFor(t);
+      const sig = `${params.scaleResolutionDownBy}|${params.maxFramerate}|${params.maxBitrate}`;
+      if (this._capApplied[t.key] === sig) continue;
+      this._capApplied[t.key] = sig;
+      applyAction(t.sender, { params });
+    }
   }
 
   start() {
@@ -197,6 +268,11 @@ export class DegradationController {
       applyAction(t.sender, { active: true, params: { scaleResolutionDownBy: 1 } });
     }
     this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
+    // "Bump quality now" restores to the program CEILING, never above it (D-19/AC-8): re-cap the
+    // protected senders we just reset to scaleResolutionDownBy:1 so the override can't exceed the
+    // host's ceiling. _capApplied is cleared so the re-cap actually pushes.
+    this._capApplied = {};
+    this._enforceCeiling();
     // Report recovered IMMEDIATELY (don't wait for the next ~2s sample) so the host's badge and the
     // guest's own degradation clear right away — that's the point of the override. If the pressure
     // persists, the next sample re-degrades.
@@ -250,8 +326,17 @@ export class DegradationController {
     this.state = plan.state;
     for (const a of plan.actions) {
       const target = byKey[a.key];
-      if (target) applyAction(target.sender, a);
+      if (!target) continue;
+      applyAction(target.sender, a);
+      // A shed/recover action touched a protected sender → its applied params no longer match the
+      // ceiling memo, so clear it; _enforceCeiling below re-caps it to the ceiling if it recovered
+      // to baseline, or leaves it shed below the ceiling.
+      if (target.protected) delete this._capApplied[a.key];
     }
+    // Cap any protected sender at the program ceiling (D-19/AC-8): catches a newly-connected program
+    // consumer and a sender that just recovered to baseline, so the program encoder never runs above
+    // the ceiling and recovery clamps to it (shed-below senders are left untouched).
+    this._enforceCeiling();
     // Debug/test observability: expose this sample's reason + decision (matches the wsRecorder seam
     // used by the browser tests). No behavior, no secrets — just this publisher's own numbers.
     if (typeof window !== "undefined") {
