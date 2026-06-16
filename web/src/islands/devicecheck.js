@@ -308,6 +308,15 @@ function DeviceCheck() {
           // link; anything else on the screen channel is a consumer (host / OBS) negotiating OUR
           // screen track → our screen Publisher (created only while we share).
           if (f.ch === "screen") {
+            // An OFFER is always a consumer negotiating OUR screen → the publisher, EVEN if we still
+            // hold a stale consumer link to that peer (a live re-select can momentarily leave us
+            // consuming a peer that is now consuming us — routing its offer to the stale link would
+            // leave it unanswered). An answer/ICE for a link WE opened goes to that consumer link.
+            const isOffer = f.sdp && f.sdp.type === "offer";
+            if (isOffer) {
+              if (screenPubRef.current) screenPubRef.current.onSignal(f);
+              return;
+            }
             const consumer = screenConsumersRef.current.get(f.from);
             if (consumer) consumer.onSignal(f);
             else if (screenPubRef.current) screenPubRef.current.onSignal(f);

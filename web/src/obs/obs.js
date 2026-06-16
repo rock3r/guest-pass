@@ -25,10 +25,10 @@ function start() {
   /** @type {HTMLVideoElement|null} */
   const video = /** @type {any} */ (document.getElementById("obs-video"));
   // The signaling channel for this source (D-21): the screenshare slot ("screen") consumes the
-  // occupant's SCREEN publisher (ch="screen"), every cam/host slot its camera (ch=""). The slot label
-  // is server-provided on the video element (data-slot, no secret — EN-15), not parsed from the URL.
-  const slot = (video && video.dataset && video.dataset.slot) || "";
-  const channel = slot === "screen" ? "screen" : "";
+  // occupant's SCREEN publisher (ch="screen"), every cam/host slot its camera (ch=""). It is bound to
+  // the AUTHENTICATED slot the server reports on the {t:slot-rebind} frame (resolved from the source
+  // TOKEN), NOT the cosmetic /s/{slot} URL label — so a mismatched path can't pick the wrong channel.
+  let channel = "";
   // EN-15: the token authenticates the WS the page opens, it is not page state — read it
   // from the URL and keep it out of the DOM entirely.
   const params = new URLSearchParams(location.search);
@@ -132,8 +132,10 @@ function start() {
       lastReason = f && f.reason;
     });
 
-    // bind the slot to occupantPeerId by opening a recvonly link and rendering its track.
-    function bind(occupantPeerId, ep, name) {
+    // bind the slot to occupantPeerId by opening a recvonly link and rendering its track. slotLabel is
+    // the server-authenticated slot from the rebind frame (D-21): it sets the consume channel.
+    function bind(occupantPeerId, ep, name, slotLabel) {
+      channel = slotLabel === "screen" ? "screen" : ""; // bind the channel to the authenticated slot
       if (typeof ep === "number" && ep < epoch) return; // stale epoch (EN-3)
       // A same-occupant, same-epoch slot-rebind is a NAME-ONLY refresh (the nameplate override,
       // D-16): the server re-sends slot-rebind after a host name change with the SAME occupant +
@@ -184,7 +186,7 @@ function start() {
       }
     });
 
-    room.on("slot-rebind", (f) => bind(f.occupantPeerId, f.epoch, f.name));
+    room.on("slot-rebind", (f) => bind(f.occupantPeerId, f.epoch, f.name, f.slot));
     room.on("slot-unbound", (f) => unbind(f.epoch));
     // RF-8 (receiver-side): the server projects the bound occupant's force-locked modality KINDS here
     // (an OBS source gets no roster). Detach the locked REMOTE track from the program output. Gated by
