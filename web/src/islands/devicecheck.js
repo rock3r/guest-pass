@@ -425,13 +425,30 @@ function DeviceCheck() {
           // its pc so the connectivity watchdog stops counting a never-connected consumer that left
           // (a no-op for a mesh peer — the Publisher serves none — which mesh.sync below untracks).
           publisher.dropConsumer(f.peerId);
+          // A departed peer is also a possible SCREEN consumer (the host rail / a live-share viewer)
+          // and/or the live SHARER we were rendering — drop its screen-publisher pc and close any
+          // screen consumer link to it, so no dead screen pc lingers.
+          if (screenPubRef.current) screenPubRef.current.dropConsumer(f.peerId);
+          const goneScreen = screenConsumersRef.current.get(f.peerId);
+          if (goneScreen) {
+            goneScreen.close();
+            screenConsumersRef.current.delete(f.peerId);
+            if (liveScreenIdRef.current === f.peerId) {
+              liveScreenIdRef.current = "";
+              setLiveScreen(null);
+            }
+          }
           mesh.sync(selfIdRef.current, peersRef.current);
           syncThumbnails();
         });
         // D-38: an OBS source consuming this guest departed (sources get no peer-left — they're hidden
         // from guest rosters, EN-13). Drop its Publisher pc so the watchdog untracks it; the peer id is
-        // the same "src-<label>" the guest answered on the source's offer.
-        room.on("consumer-left", (f) => publisher.dropConsumer(f.peerId));
+        // the same "src-<label>" the guest answered on the source's offer. The screen source ("src-
+        // screen") consumes the screen Publisher, so drop it there too.
+        room.on("consumer-left", (f) => {
+          publisher.dropConsumer(f.peerId);
+          if (screenPubRef.current) screenPubRef.current.dropConsumer(f.peerId);
+        });
         room.on("streaming", (f) => setStreaming(!!f.active));
         // Host "bump quality now" (AD-21/D-34): restore our shed senders immediately, overriding the
         // slow recover hysteresis. If the pressure persists, the next sample re-degrades.
