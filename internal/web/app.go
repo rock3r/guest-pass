@@ -47,6 +47,30 @@ type dashboardData struct {
 	Streams []dashStream
 }
 
+// settingsData backs the host's account settings page (AC-10): the read-only Google identity for
+// the account card. The GDPR stub copy lives in the template (non-functional in M4, D-37).
+type settingsData struct {
+	Name  string
+	Email string
+}
+
+// settings renders the host's account settings page (AC-10): a READ-ONLY account card (the host's
+// Google identity), a pointer to the per-stream quality ceiling (set in the greenroom, D-19), and
+// GDPR stub entry points (export / amend / delete) whose copy states self-service lands in a later
+// release — there is no functional purge in M4 (D-37). Host-only (RequireHost); the email shown is
+// the host's OWN account email on their own page (not a leak), never logged (EN-16).
+func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
+	host, ok := auth.HostFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	s.rd.render(w, r, "settings.html", pageData{
+		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name},
+		Data: settingsData{Name: host.Name, Email: host.Email},
+	})
+}
+
 // streamFormData backs the edit form; Title/ScheduledAt/DurationMin are pre-formatted for
 // the corresponding HTML inputs (datetime-local / number).
 type streamFormData struct {

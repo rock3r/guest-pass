@@ -152,6 +152,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).
 			hr.Get("/app", app.dashboard)
 			hr.Get("/app/calendar", app.calendar)
+			// Account settings + GDPR stubs (AC-10/D-37): read-only account card + non-functional
+			// export/amend/delete entry points. Host-only.
+			hr.Get("/app/settings", app.settings)
 			hr.Post("/app/streams", app.createStream)
 			hr.Get("/app/streams/{id}", app.streamDetail)
 			hr.Get("/app/streams/{id}/sources", app.sourcesTab) // read-only Sources tab (EN-26)
