@@ -462,14 +462,18 @@ func (s *roomState) setScreenEligibleLive(id PeerID, canScreen bool) []outbound 
 	p.canScreen = canScreen
 	lockChanged := false
 	if !canScreen {
-		// Revoke → force-no-share (apply only if not already host-locked, so a re-revoke is a no-op).
-		if cur := s.lockOn(id, "share"); cur == nil || cur.floor < rankHost {
+		// Revoke → force-no-share, but ONLY when no share lock exists: if the guest is ALREADY
+		// share-locked (e.g. a co-host's moderation force-no-share, floor < host), the share is
+		// already suppressed — do NOT overwrite that lock with a host-floor one, or a later grant
+		// (which clears only the host-floor lock) would erase the co-host's moderation entirely (codex).
+		if s.lockOn(id, "share") == nil {
 			s.setLock(id, "share", &lockState{applier: "host", floor: rankHost})
 			p.screen = false // suppress the share presence at source
 			lockChanged = true
 		}
 	} else if cur := s.lockOn(id, "share"); cur != nil && cur.floor >= rankHost {
-		// Grant → clear the host-applied share lock (the eligibility block); leave a co-host's lock.
+		// Grant → clear the host-applied eligibility share lock; leave a co-host's lower-floor
+		// moderation lock in place (eligibility and moderation are separate authorities).
 		s.clearLock(id, "share")
 		lockChanged = true
 	}

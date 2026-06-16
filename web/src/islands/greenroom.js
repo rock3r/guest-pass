@@ -398,7 +398,12 @@ function Greenroom() {
         setBindError(msg);
         rollbackPicker(); // re-render so the controlled checkbox reverts to the authoritative value
       })
-      .catch(() => setBindError("Couldn't reach the server to update screenshare eligibility."));
+      .catch(() => {
+        // A network failure leaves the DB unchanged + no roster update, so the controlled checkbox
+        // would otherwise stay on the host's click — re-render so it reverts to the authoritative value.
+        setBindError("Couldn't reach the server to update screenshare eligibility.");
+        rollbackPicker();
+      });
   }
 
   // rollbackPicker forces a grid re-render so a rejected pick reverts to the authoritative

@@ -141,17 +141,19 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
 			room.ResumeBind(slot, id.peer)
 		}
+		// Seed the guest's screenshare eligibility (EN-23/AC-9) into the roster UNDER the lock,
+		// re-reading passes.can_screen at seed time (like the slot replay) — so a host PATCH in the
+		// join window is ordered with this seed (both take the per-host lock) and can't be undone by a
+		// stale handshake snapshot. Projection only — no force-no-share side-effect on a fresh join.
+		if h.resolver.passCanScreen(ctx, string(id.peer)) {
+			room.SetScreenEligible(id.peer, true)
+		}
 		unlock()
 		// Deliver the program quality ceiling (D-19/AC-8) so the publisher caps its program encoder
 		// the moment it publishes (and its degradation ladder recovers no higher). Resolved from the
 		// guest's own stream, so it applies pre-live too; a later host adjustment re-broadcasts.
 		if mr, mf, mb, ok := h.resolver.passCeiling(ctx, string(id.peer)); ok {
 			room.DeliverTo(id.peer, signaling.Frame{T: "ceiling", MaxRes: mr, MaxFps: mf, MaxBitrateKbps: mb})
-		}
-		// Seed the guest's screenshare eligibility (EN-23/AC-9) into the roster so its share affordance
-		// reflects passes.can_screen from the start (projection only — no force-no-share side-effect).
-		if id.canScreen {
-			room.SetScreenEligible(id.peer, true)
 		}
 	} else if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to

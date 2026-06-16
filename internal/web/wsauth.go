@@ -33,10 +33,6 @@ type wsIdentity struct {
 	name string
 	// slot is the slot an OBS source subscribes to ("cam-1"/"host"/"screen"); "" otherwise.
 	slot signaling.SlotID
-	// canScreen is the guest/co-host's screenshare eligibility from passes.can_screen (EN-23/AC-9),
-	// seeded into the room's roster after join so the guest's share affordance reflects it. false for
-	// the host and OBS sources.
-	canScreen bool
 }
 
 // isSource reports whether this identity is an OBS browser-source page. Only sources may
@@ -155,7 +151,7 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	if pass.Name != nil {
 		name = *pass.Name
 	}
-	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name, canScreen: pass.CanScreen}, nil
+	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
 }
 
 // guestAdmissible re-checks at JOIN time (under the per-host binding lock) that a guest/co-host may
@@ -225,6 +221,15 @@ func (wr *wsResolver) passCeiling(ctx context.Context, passID string) (maxRes, m
 	// the product default so the publisher always gets a usable ceiling (codex).
 	mr, mf, mb := ceilingOf(stream)
 	return mr, mf, mb, true
+}
+
+// passCanScreen re-reads a guest's CURRENT screenshare eligibility (passes.can_screen) at REPLAY
+// time — under the per-host binding lock, AFTER Join — so a host PATCH during the join window can't
+// seed a stale handshake snapshot. It mirrors guestBoundSlot's re-read-under-lock discipline (D-20).
+// Best-effort: a lookup miss answers false (no eligibility).
+func (wr *wsResolver) passCanScreen(ctx context.Context, passID string) bool {
+	pass, err := wr.store.GetPass(ctx, passID)
+	return err == nil && pass.CanScreen
 }
 
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {

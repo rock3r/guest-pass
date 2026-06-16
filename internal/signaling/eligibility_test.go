@@ -104,3 +104,31 @@ func TestScreenEligibilityGrantLeavesCohostLock(t *testing.T) {
 		t.Fatal("a grant must not clear a co-host's moderation share lock")
 	}
 }
+
+// AC-9 (codex HIGH): a host REVOKE must not OVERWRITE a co-host's existing force-no-share lock with
+// a host-floor one — otherwise a later grant (which clears only host-floor locks) would erase the
+// co-host's moderation entirely and let the guest share again despite the co-host never releasing.
+func TestScreenEligibilityRevokeKeepsCohostLock(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("co", "cohost", "")
+	s.join("g1", "guest", "")
+	s.setScreenEligible("g1", true)
+
+	// A co-host force-no-shares g1 (moderation, floor = cohost).
+	s.force("co", "g1", "share")
+	if lk := s.lockOn("g1", "share"); lk == nil || lk.floor != rankCohost {
+		t.Fatalf("co-host force should leave a cohost-floor share lock, got %+v", lk)
+	}
+	// Host revokes eligibility → must NOT overwrite the co-host's lock (it stays cohost-floor).
+	s.setScreenEligibleLive("g1", false)
+	if lk := s.lockOn("g1", "share"); lk == nil || lk.floor != rankCohost {
+		t.Fatalf("revoke overwrote the co-host's share lock (floor now %v) — must leave it", lk)
+	}
+	// Host grants eligibility again → the co-host's moderation lock SURVIVES (grant clears only the
+	// host-floor eligibility lock, which was never applied here).
+	s.setScreenEligibleLive("g1", true)
+	if lk := s.lockOn("g1", "share"); lk == nil || lk.floor != rankCohost {
+		t.Fatalf("revoke→grant erased the co-host's moderation lock (got %+v) — it must survive", lk)
+	}
+}
