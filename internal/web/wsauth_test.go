@@ -356,6 +356,20 @@ func TestWS_GuestAdmissibleRecheck(t *testing.T) {
 	if wr.guestAdmissible(ctx, otherPass.ID, host.ID) {
 		t.Fatal("a guest whose stream isn't live must be refused at join")
 	}
+
+	// A pass that lapses (revoked or past-deadline) AFTER the handshake is refused at the re-check,
+	// even though its stream is the live one (codex).
+	if err := h.store.SetPassStatus(ctx, livePass.ID, store.PassRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if wr.guestAdmissible(ctx, livePass.ID, host.ID) {
+		t.Fatal("a revoked pass must be refused at join even when its stream is live")
+	}
+	past := int64(1)
+	_, expiredPass := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, &past)
+	if wr.guestAdmissible(ctx, expiredPass.ID, host.ID) {
+		t.Fatal("a past-deadline pass must be refused at join")
+	}
 }
 
 func TestWS_RejectsExpiredPassByStatus(t *testing.T) {

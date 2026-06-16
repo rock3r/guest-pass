@@ -163,7 +163,9 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 // a lookup error.
 func (wr *wsResolver) guestAdmissible(ctx context.Context, passID, hostID string) bool {
 	pass, err := wr.store.GetPass(ctx, passID)
-	if err != nil {
+	if err != nil || !passJoinable(pass) {
+		// Re-check joinability too: a pass revoked or past its expires_at deadline SINCE the
+		// handshake must not be admitted just because the active session matches (codex).
 		return false
 	}
 	switch sess, serr := wr.store.ActiveSession(ctx, hostID); {
