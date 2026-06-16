@@ -318,3 +318,51 @@ func TestScreenShare_ForceNoShareWhileSharingStopsCapture(t *testing.T) {
 		t.Fatalf("force-no-share while sharing did not stop the capture + return to idle: %v", err)
 	}
 }
+
+// T-13 / AC-13 (revoke while disconnected): a guest is sharing, its socket drops, and the host
+// revokes eligibility before it reconnects. The live revoke no-ops (the peer is absent → no share
+// lock is created), so the fresh-join roster reads screenShare:"" + canScreen:false with NO lock —
+// indistinguishable in a single frame from the transient join roster that precedes the eligibility
+// re-seed. The deferred reconcile waits one grace window: no re-seed arrives (genuinely revoked), so
+// the stranded capture — which the now-hidden .gs-screen control can't stop — is released.
+func TestScreenShare_RevokeWhileDisconnectedStopsCapture(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+	aCtx := enterEligibleSharer(t, s.base, s.rawToken, wsRecorderJS)
+
+	if err := chromedp.Run(aCtx,
+		chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("share did not reach backstage: %v", err)
+	}
+
+	// Revoke eligibility in the store (the rejoin handshake re-seeds from passes.can_screen): writing
+	// it BEFORE the drop removes any race — the reconnect's join will read can_screen=false. No live
+	// revoke action is sent, so no share lock exists (matching the "revoked while absent" scenario).
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, false); err != nil {
+		t.Fatalf("revoke can_screen: %v", err)
+	}
+
+	// Drop the socket → the guest auto-reconnects and rejoins ineligible.
+	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close ws: %v", err)
+	}
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest did not reconnect: %v", err)
+	}
+
+	// The share control is hidden (no longer eligible), and after the reconcile grace the stranded
+	// capture is released (track ended) rather than running invisibly forever.
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery),
+		chromedp.Poll(`!!window.__gpShareStream && window.__gpShareStream.getVideoTracks()[0].readyState === 'ended'`,
+			nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("a capture stranded by a revoke-while-disconnected was not released: %v", err)
+	}
+}

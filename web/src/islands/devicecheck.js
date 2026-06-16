@@ -20,6 +20,13 @@ function passTokenFromPath() {
   return m ? m[1] : "";
 }
 
+// Grace before a screen capture that the server says is no longer pooled (screenShare:"") with no
+// share lock is released (D-21/AC-13). A transient reconnect briefly projects screenShare:"" +
+// canScreen:false on the JOIN roster before the eligibility re-seed roster arrives in the same
+// handshake; the genuine "revoked while disconnected" case never re-seeds. A follow-up roster within
+// this window supersedes (recover into the pool); if none arrives we're genuinely stranded → release.
+const SHARE_RECONCILE_MS = 2000;
+
 /**
  * DeviceCheck is the guest's journey island (AC-5/AC-6): it requests a live camera + mic via
  * getUserMedia, shows a local preview, and — only on the explicit "enter" action — marks the
@@ -107,6 +114,9 @@ function DeviceCheck() {
   // In-flight guard for the screen-capture request, so a rapid double-click can't start two
   // concurrent getDisplayMedia calls (the second stream would leak — mirrors requestingRef on cam).
   const screenRequestingRef = useRef(false);
+  // Pending timer id for the deferred "release a stranded capture" reconcile (see SHARE_RECONCILE_MS).
+  /** @type {{current: ReturnType<typeof setTimeout>|null}} */
+  const pendingShareReconcileRef = useRef(null);
   // Live mirror of pubState, so async/once-registered closures (the post-picker send + the screen
   // track's `onended`, both captured at share-start) consult the CURRENT connection state instead of
   // a stale "live" — a send on a dropped/reconnecting socket would throw.
@@ -290,21 +300,37 @@ function DeviceCheck() {
             }
             setLockedMods(locked);
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
-            // Screenshare self-state (AC-13), folded into our OWN entry by the server. If it clears
-            // to "" while we still hold a capture, decide WHY from a POSITIVE pull signal — the share
-            // suppression lock, which BOTH host-pull paths set (force-no-share directly, and an
-            // eligibility revoke runs the same force-no-share side-effect). A share lock → stop
-            // capturing locally (cooperative source-side stop — no {t:screen-stop} echo, the server
-            // already dropped us). With NO lock the "" is just a fresh-join projection from a transient
-            // reconnect (the server ran `leave` on the old socket, and its join roster PRECEDES the
-            // eligibility re-seed, so canScreen is briefly false) — never tear the share down on a blip:
-            // re-assert {t:screen-start} once we're eligible again to recover into the pool (parity with
-            // the camera republish), and otherwise wait for the next roster instead of stopping.
+            // Screenshare self-state (AC-13), folded into our OWN entry by the server. If it clears to
+            // "" while we still hold a capture, reconcile against WHY. Any fresh roster supersedes a
+            // prior deferred decision, so cancel a pending reconcile first and re-decide:
+            //  - a share LOCK (set by BOTH host-pull paths: force-no-share directly, and an eligibility
+            //    revoke that runs the same side-effect WHILE WE'RE PRESENT) → stop capturing locally
+            //    (cooperative source-side stop — no {t:screen-stop} echo, the server already dropped us);
+            //  - else if we're still eligible + live → a transient reconnect dropped us from the pool
+            //    (the server ran `leave` on the old socket); re-assert {t:screen-start} to recover
+            //    (parity with the camera republish);
+            //  - else AMBIGUOUS (no lock, not eligible now): either the brief join roster before the
+            //    eligibility re-seed (recovers within the handshake) OR a revoke that landed while we
+            //    were disconnected (no lock created — we were absent). Defer; a follow-up roster
+            //    supersedes, and if none arrives we're genuinely stranded (a capture the now-hidden
+            //    .gs-screen control can't stop) → release it (codex).
             const share = me.screenShare || "";
             setScreenShare(share);
+            if (pendingShareReconcileRef.current) {
+              clearTimeout(pendingShareReconcileRef.current);
+              pendingShareReconcileRef.current = null;
+            }
             if (share === "" && screenStreamRef.current) {
-              if (locked.includes("share")) stopScreenCapture();
-              else if (canStartShare()) sessionRef.current.send({ t: "screen-start" });
+              if (locked.includes("share")) {
+                stopScreenCapture();
+              } else if (canStartShare()) {
+                sessionRef.current.send({ t: "screen-start" });
+              } else {
+                pendingShareReconcileRef.current = setTimeout(() => {
+                  pendingShareReconcileRef.current = null;
+                  if (screenStreamRef.current && !canStartShare()) stopScreenCapture();
+                }, SHARE_RECONCILE_MS);
+              }
             }
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
@@ -465,6 +491,10 @@ function DeviceCheck() {
   // browser "Stop sharing" affordance (the track's `ended` event), by the host-pull roster sync, and
   // on teardown. Idempotent — safe to call when nothing is captured.
   function stopScreenCapture() {
+    if (pendingShareReconcileRef.current) {
+      clearTimeout(pendingShareReconcileRef.current);
+      pendingShareReconcileRef.current = null;
+    }
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
