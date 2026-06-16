@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -104,9 +105,12 @@ func (s *Store) ListPassesByStream(ctx context.Context, streamID string) ([]*Pas
 	return out, nil
 }
 
-// AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host
-// invariant: the slot must belong to the pass's stream's host. The DB additionally
-// enforces at-most-one active occupant per (stream, slot) via a partial unique index.
+// AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host invariant
+// (the slot must belong to the pass's stream's host) and cam-only. Binding onto a slot another
+// active guest holds DISPLACES them — the prior occupant's binding is cleared and the new one
+// assigned in ONE transaction (the DoD "swap a slot occupant"), so a failure can never leave
+// the displaced guest unbound while the new bind is lost. The partial unique index on
+// (stream, slot) backstops the at-most-one-occupant invariant.
 func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error {
 	pass, err := s.GetPass(ctx, passID)
 	if err != nil {
@@ -126,9 +130,166 @@ func (s *Store) AssignPassSlot(ctx context.Context, passID, slotID string) error
 	if slot.Kind != SlotCam {
 		return ErrSlotNotCam
 	}
-	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET slot_id = ? WHERE id = ?", slotID, passID)
+	tx, err := s.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("assigning slot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful commit
+	// Clear the slot from ANY other pass still pointing at this (stream, slot): the active occupant
+	// being displaced (the DoD "swap"), AND any retired row that kept a stale slot_id when it was
+	// revoked/expired. Leaving a retired row's slot_id set would let a later Re-issue re-activate it
+	// back into the partial unique index and collide with the new occupant (codex). Retired rows
+	// aren't live-connected, so this never diverges from the room.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE passes SET slot_id = NULL WHERE stream_id = ? AND slot_id = ? AND id != ?`,
+		stream.ID, slotID, passID); err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, "UPDATE passes SET slot_id = ? WHERE id = ?", slotID, passID)
+	if err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	if err := errIfNoRows(res); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("assigning slot: %w", err)
+	}
+	return nil
+}
+
+// BoundCamPass is a pass currently bound to a cam slot, paired with that slot's label — used to
+// reconcile a freshly-live room with persisted bindings on Go live (D-40 replay).
+type BoundCamPass struct {
+	PassID    string
+	SlotLabel string // "cam-1".."cam-8"
+}
+
+// BoundCamPassesForStream lists the stream's still-JOINABLE passes bound to a cam slot, each with
+// its "cam-N" label. On Go live the handler replays these into the now-live room so a guest who
+// connected BEFORE the session started (its join-replay was gated off, any pre-live bind DB-only)
+// gets bound without the host re-picking. It mirrors passJoinable: revoked/expired-by-status AND
+// passes past their expires_at DEADLINE are excluded — a guest can connect pre-live and then cross
+// its deadline before Go live (status still "sent"), and such a no-longer-joinable invite must not
+// be replayed onto an OBS slot (codex).
+func (s *Store) BoundCamPassesForStream(ctx context.Context, streamID string) ([]BoundCamPass, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
+		 WHERE p.stream_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)
+		   AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+		streamID, SlotCam, PassRevoked, PassExpired, time.Now().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("listing bound cam passes: %w", err)
+	}
+	defer rows.Close()
+	var out []BoundCamPass
+	for rows.Next() {
+		var id string
+		var idx int64
+		if err := rows.Scan(&id, &idx); err != nil {
+			return nil, fmt.Errorf("scanning bound cam pass: %w", err)
+		}
+		out = append(out, BoundCamPass{PassID: id, SlotLabel: "cam-" + strconv.FormatInt(idx, 10)})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating bound cam passes: %w", err)
+	}
+	return out, nil
+}
+
+// OtherStreamPassIDs returns the ids of all passes belonging to the host's streams OTHER than
+// exceptStreamID (their room peer ids). On Go live for one stream they are evicted from the
+// host-scoped room, so a guest of a NON-live stream that connected pre-live can't linger in (and
+// mesh with) the now-live session — the admission gate refuses NEW such joins, this clears the
+// pre-live stragglers (codex). EvictPeers no-ops the ids that aren't actually connected.
+func (s *Store) OtherStreamPassIDs(ctx context.Context, hostID, exceptStreamID string) ([]string, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id FROM passes p JOIN streams st ON p.stream_id = st.id
+		 WHERE st.host_id = ? AND p.stream_id != ?`,
+		hostID, exceptStreamID)
+	if err != nil {
+		return nil, fmt.Errorf("listing other-stream passes: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning other-stream pass: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating other-stream passes: %w", err)
+	}
+	return out, nil
+}
+
+// RetiredPassIDsForStream returns the stream's NON-joinable pass ids — split into revoked and
+// expired (by status OR past the expires_at deadline) — so a guest that connected pre-live but
+// whose invite lapsed before Go live can be evicted with the right terminal reason (codex). Mirrors
+// passJoinable's notion of "retired".
+func (s *Store) RetiredPassIDsForStream(ctx context.Context, streamID string, now int64) (revoked, expired []string, err error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT id, status, expires_at FROM passes WHERE stream_id = ?`, streamID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing retired passes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		var exp *int64
+		if err := rows.Scan(&id, &status, &exp); err != nil {
+			return nil, nil, fmt.Errorf("scanning retired pass: %w", err)
+		}
+		switch {
+		case status == PassRevoked:
+			revoked = append(revoked, id)
+		case status == PassExpired || (exp != nil && *exp <= now):
+			expired = append(expired, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterating retired passes: %w", err)
+	}
+	return revoked, expired, nil
+}
+
+// HostBoundCamPasses returns the host's still-joinable passes bound to a cam slot, as a
+// pass-id → "cam-N" map. The greenroom seeds its picker from this on load, so a pre-live binding
+// (DB-only — not yet reflected in the live-occupancy roster) survives a refresh / new tab (codex).
+// Slots are host-global, so this spans all the host's streams.
+func (s *Store) HostBoundCamPasses(ctx context.Context, hostID string) (map[string]string, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT p.id, sl.idx FROM passes p JOIN slots sl ON p.slot_id = sl.id
+		 WHERE sl.host_id = ? AND sl.kind = ? AND p.status NOT IN (?, ?)
+		   AND (p.expires_at IS NULL OR p.expires_at > ?)`,
+		hostID, SlotCam, PassRevoked, PassExpired, time.Now().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("listing host bound passes: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id string
+		var idx int64
+		if err := rows.Scan(&id, &idx); err != nil {
+			return nil, fmt.Errorf("scanning host bound pass: %w", err)
+		}
+		out[id] = "cam-" + strconv.FormatInt(idx, 10)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating host bound passes: %w", err)
+	}
+	return out, nil
+}
+
+// ClearPassSlot unbinds a pass from any slot (slot_id → NULL) — the persistent half of a
+// greenroom "unassign" (the live half is Room.Unbind).
+func (s *Store) ClearPassSlot(ctx context.Context, passID string) error {
+	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET slot_id = NULL WHERE id = ?", passID)
+	if err != nil {
+		return fmt.Errorf("clearing pass slot: %w", err)
 	}
 	return errIfNoRows(res)
 }
@@ -201,11 +362,15 @@ func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
 // "sent" state, stamping sent_at (PD-2). The previous hash is overwritten, so the old link
 // stops resolving — one active token per pass (EN-5). It also CLEARS expires_at so the
 // fresh link can't be born already-expired (D-5: re-issuing an expired pass mints a fresh,
-// usable token); a later expiry-derivation pass re-stamps a deadline. The rest of the row's
-// history (opened_at/accepted_at) is kept (same row).
+// usable token); a later expiry-derivation pass re-stamps a deadline. It also CLEARS slot_id:
+// a re-issued invite is a FRESH start and must not silently inherit the slot the guest held
+// before being kicked/revoked/dropped — otherwise the join replay would auto-rebind a
+// previously-removed guest onto that OBS slot (codex). The caller (reissueInvite) vacates any
+// live binding too, so the DB and room stay in sync. The rest of the row's history
+// (opened_at/accepted_at) is kept (same row).
 func (s *Store) ReissuePass(ctx context.Context, id, newTokenHash string) error {
 	res, err := s.writer.ExecContext(ctx,
-		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL WHERE id = ?",
+		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL, slot_id = NULL WHERE id = ?",
 		newTokenHash, PassSent, time.Now().Unix(), id)
 	if err != nil {
 		return fmt.Errorf("reissuing pass: %w", err)

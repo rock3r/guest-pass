@@ -3,7 +3,21 @@
 <p class="back-link"><a href="/app">← Back to streams</a></p>
 <div class="detail-head">
 <h1>{{.Data.StreamTitle}}</h1>
+<div class="detail-actions">
+{{if .Data.SessionLive}}
+<span class="live-pill" role="status">● Live</span>
+<form method="post" action="/app/streams/{{.Data.StreamID}}/session/end" class="inline-form">
+<button type="submit" class="btn btn-quiet">End session</button>
+</form>
+{{else if .Data.OtherStreamLive}}
+<span class="live-note">You’re live on another stream. End it first to go live here.</span>
+{{else}}
+<form method="post" action="/app/streams/{{.Data.StreamID}}/session/start" class="inline-form">
+<button type="submit" class="btn">Go live</button>
+</form>
+{{end}}
 <a class="btn btn-quiet" href="/app/streams/{{.Data.StreamID}}/edit">Edit stream</a>
+</div>
 </div>
 
 <nav class="tabs" aria-label="Stream sections">

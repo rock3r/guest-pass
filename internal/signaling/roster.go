@@ -1,6 +1,9 @@
 package signaling
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Roster projection (EN-8). The roster is a per-recipient server projection filtered by the
 // recipient's rank. The M3 greenroom carries the full entry shape (name, cam/mic/screen,
@@ -41,8 +44,28 @@ func (s *roomState) entryFor(p *peerInfo) RosterEntry {
 		e.OnAir = s.onAirFor(p.id)
 		e.Locks = s.locksOf(p.id)                                     // live-visible suppression locks (D-13/EN-7), with applierRank
 		e.Signal, e.RttMs, e.Degraded = p.signal, p.rttMs, p.degraded // degradation health (AD-21)
+		e.BoundSlot = s.boundSlotFor(p.id)                            // host-only; stripped from non-host projections in rosterFor
 	}
 	return e
+}
+
+// isCamSlot reports whether a slot label is an addressable cam slot (cam-1..cam-8), as opposed
+// to the screenshare/host slots which use occupancy differently (D-20/D-21).
+func isCamSlot(sid SlotID) bool {
+	return strings.HasPrefix(string(sid), "cam-")
+}
+
+// boundSlotFor returns the cam slot label this peer currently occupies live (e.g. "cam-1"), or
+// "" if it occupies none — the reverse of the slot→occupant binding, so the host's roster shows
+// who is in which slot for the People controls (D-20). Screenshare/host slots are not cam-slot
+// bindings, so they are not reported here.
+func (s *roomState) boundSlotFor(id PeerID) string {
+	for sid, st := range s.slots {
+		if st.occupant == id && isCamSlot(sid) {
+			return string(sid)
+		}
+	}
+	return ""
 }
 
 // onAirFor aggregates a participant's three-state on-air across the cam slot(s) it occupies:
@@ -81,6 +104,9 @@ func (s *roomState) rosterFor(recipientID PeerID, recipientRole string) []Roster
 			continue
 		}
 		e := s.entryFor(p)
+		if recipientRole != "host" {
+			e.BoundSlot = "" // slot bindings are host-only (the People controls are host-only, D-15)
+		}
 		if id == recipientID {
 			e.Self = true
 		} else if recipientRole == "guest" {

@@ -339,6 +339,44 @@ hashed):
   (D-19) + nameplate, and the stream-wide **quality ceiling** all live in the
   greenroom's **host-only People tab** (EN-23/EN-26). Co-hosts never see slot URLs
   or quality controls (D-15).
+- **Slot→guest binding lives in the greenroom People controls** (host-only): a
+  per-guest slot picker (M4) calls `PUT /api/passes/{id}/slot` (`{"slot":"cam-1"}`
+  to bind, `""` to unassign). The handler persists `passes.slot_id` AND, if a stream
+  is live, re-routes `/s/{slot}` by bumping the slot epoch (`Room.Rebind`) — so the
+  host **swaps an occupant with no OBS edit** (EN-3). Same-host + at-most-one-occupant
+  enforced (RF-2): reassigning an occupied slot **displaces** the prior occupant
+  (their binding cleared + on-air degraded) in **one transaction** (so a swap can't
+  leave the displaced guest unbound while the new bind is lost). The host's
+  role-filtered roster carries a **host-only `boundSlot`** per participant (which cam
+  slot they occupy) so the picker reflects the live assignment; it is stripped from
+  co-host/guest projections (D-15). The persisted binding is **replayed as a live
+  rebind when the guest (re)connects** (the `/ws` join path issues `Room.ResumeBind`
+  from `passes.slot_id`), so a binding made before OBS/guests connect — or surviving a
+  reconnect — takes effect on `/s/{slot}` without the host re-binding (D-40). Two guards
+  keep the replay safe: it is **gated on the host's active session** — it fires only when
+  the binding's stream is the one the host went live for (see **Live session**), so a
+  guest of a non-live stream opening their link can't auto-bind into the host-global pool;
+  and it is **non-displacing** — even in-scope it only resumes into a free slot or
+  re-affirms the same peer, never knocking a different live occupant off-air. Only the
+  host's **explicit** greenroom (re)bind displaces.
+
+#### Live session (EN-2/D-20)
+
+The host declares **which stream is live** from its detail page (**Go live** / **End
+session**), opening a row in `sessions` (`status = active`, one per host via the partial
+unique index — concurrent shows are v1.1). The active session's `stream_id` is the runtime
+answer to "which of my streams is live". It gates the host-scoped room three ways:
+
+- **Admission** — a guest/co-host `/ws` handshake is **refused** (`stream not live`) when the
+  host is live for a *different* stream, so a non-live-stream guest can't enter the room and
+  mesh with the live session's peers. With **no** active session (pre-live) anyone is admitted.
+- **Join-replay** — only a guest of the live stream auto-binds its persisted slot (above).
+- **Go live / End / Delete** — going live **replays** the live stream's persisted bindings and
+  **evicts** any pre-live straggler from another stream; ending the session, or deleting the
+  stream, tears the room down (or evicts the deleted stream's peers) so nothing carries into
+  the next session.
+
+The session row is a thin durable audit — live roster/lock/epoch state stays in-memory (AD-3).
 
 ### Slot-rebind protocol + slot epoch (EN-3)
 

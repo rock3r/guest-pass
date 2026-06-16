@@ -132,8 +132,10 @@ func TestWSSignalRelayICEStripsExtras(t *testing.T) {
 
 	a := h.dialOK(t, "pass="+aRaw, nil)
 	defer a.CloseNow()
+	_ = wsReadFrame(t, a) // wait for A's join (roster) so the relay has a live sender
 	b := h.dialOK(t, "pass="+bRaw, nil)
 	defer b.CloseNow()
+	_ = wsReadFrame(t, b) // wait for B's join (roster) before relaying — else the signal is dropped
 
 	ice := []byte(`{"candidate":"candidate:1 1 udp 2122260223 192.0.2.1 9 typ host","sdpMid":"0"}`)
 	// Sender attaches a hostile slot/reason that must NOT reach the addressee.

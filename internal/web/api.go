@@ -12,6 +12,7 @@ import (
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -23,6 +24,8 @@ type apiServer struct {
 	mailer  mail.Mailer
 	baseURL string
 	rd      *renderer
+	hub     *signaling.Hub // live slot (re)bind re-route (D-20); may be nil (minimal config)
+	binds   *bindingLocks  // serialize a host's slot-binding ops with the /ws join-replay (D-20)
 }
 
 // --- response DTOs (never expose token hashes or raw tokens) ---
@@ -123,9 +126,23 @@ func (a *apiServer) deleteStream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Deleting the LIVE stream tears down its room too (D-40): the FK cascade drops the sessions
+	// row, but the host-scoped room + connected peers would otherwise linger into the host's next
+	// stream. Hold the per-host binding lock across the liveness check, delete, and teardown so a
+	// concurrent goLive can't interleave (codex); capture liveness BEFORE the delete.
+	host, _ := auth.HostFromContext(r.Context())
+	if host != nil {
+		unlock := a.binds.lock(host.ID)
+		defer unlock()
+	}
+	wasLive := host != nil && a.streamIsLive(r.Context(), host.ID, s.ID)
+	peers := streamPeerIDs(r.Context(), a.store, s.ID) // collect BEFORE the cascade erases the passes
 	if err := a.store.DeleteStream(r.Context(), s.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not delete stream")
 		return
+	}
+	if host != nil {
+		teardownDeletedStream(a.hub, host.ID, wasLive, peers)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

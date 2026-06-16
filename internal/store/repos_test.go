@@ -454,6 +454,170 @@ func TestPassRepo_SetRoleAndReissue(t *testing.T) {
 	}
 }
 
+// Re-assigning a slot clears it from EVERY other row on that (stream, slot) — including a
+// retired row that kept a stale slot_id when it was revoked/expired (codex, M4 PR-6). Without
+// that cleanup the stale binding survives, and a later Re-issue re-activates the row back into
+// the partial unique index, colliding with the slot's current active occupant. Re-issue itself
+// deliberately leaves slot_id alone (so it can't silently unbind a connected guest from the
+// live room), which is exactly why the displacement, not re-issue, must do the cleanup.
+func TestPassRepo_RebindClearsRetiredSlotBinding(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-reissue-slot")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-reissue"})
+
+	a, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "a-tok"})
+	b, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "b-tok"})
+
+	// Bind A to cam-1, revoke A (slot_id retained but A excluded from the active index), then
+	// bind B to cam-1 — B becomes the active occupant and the displacement must scrub A's stale
+	// slot_id even though A is retired.
+	if err := st.AssignPassSlot(ctx, a.ID, slot.ID); err != nil {
+		t.Fatalf("assign a: %v", err)
+	}
+	if err := st.SetPassStatus(ctx, a.ID, PassRevoked); err != nil {
+		t.Fatalf("revoke a: %v", err)
+	}
+	if err := st.AssignPassSlot(ctx, b.ID, slot.ID); err != nil {
+		t.Fatalf("assign b: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
+		t.Fatalf("re-binding the slot must scrub the retired row's stale slot_id, got %v", got.SlotID)
+	}
+
+	// Re-issuing A must therefore SUCCEED (no index collision with B) and leave B untouched.
+	if err := st.ReissuePass(ctx, a.ID, "a-tok-2"); err != nil {
+		t.Fatalf("re-issuing a previously-bound-then-revoked pass should not conflict: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, b.ID); got.SlotID == nil || *got.SlotID != slot.ID {
+		t.Fatalf("B's binding must be untouched, got %v", got.SlotID)
+	}
+}
+
+// Session lifecycle (EN-2/D-20): a host goes live for one stream at a time. StartSession opens
+// the active session; ActiveSession reports it; a second concurrent StartSession is rejected
+// (one-live-per-host); EndActiveSession closes it and frees the host to go live again.
+func TestSessionRepo_Lifecycle(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-session")
+	other := seedHost(t, st, "host-session-other")
+	x, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "X"})
+	y, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Y"})
+	foreign, _ := st.CreateStream(ctx, CreateStreamParams{HostID: other.ID, Title: "F"})
+
+	if _, err := st.ActiveSession(ctx, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no session yet: want ErrNotFound, got %v", err)
+	}
+
+	// StartSession refuses a stream that isn't the host's (RF-2), without leaking it.
+	if _, err := st.StartSession(ctx, foreign.ID, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign stream: want ErrNotFound, got %v", err)
+	}
+
+	sess, err := st.StartSession(ctx, x.ID, h.ID)
+	if err != nil {
+		t.Fatalf("StartSession(x): %v", err)
+	}
+	if sess.Status != SessionActive || sess.StreamID != x.ID || sess.EndedAt != nil {
+		t.Fatalf("started session = %+v, want active on x with no ended_at", sess)
+	}
+	got, err := st.ActiveSession(ctx, h.ID)
+	if err != nil || got.StreamID != x.ID {
+		t.Fatalf("ActiveSession = %+v / %v, want x", got, err)
+	}
+
+	// One live session per host: a second StartSession while one is active is rejected.
+	if _, err := st.StartSession(ctx, y.ID, h.ID); !errors.Is(err, ErrSessionAlreadyLive) {
+		t.Fatalf("second StartSession: want ErrSessionAlreadyLive, got %v", err)
+	}
+
+	// End frees the host; ActiveSession reports none and a fresh StartSession succeeds.
+	if err := st.EndActiveSession(ctx, h.ID); err != nil {
+		t.Fatalf("EndActiveSession: %v", err)
+	}
+	if _, err := st.ActiveSession(ctx, h.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after end: want ErrNotFound, got %v", err)
+	}
+	// End again is an idempotent no-op (nothing live).
+	if err := st.EndActiveSession(ctx, h.ID); err != nil {
+		t.Fatalf("EndActiveSession (idempotent): %v", err)
+	}
+	if _, err := st.StartSession(ctx, y.ID, h.ID); err != nil {
+		t.Fatalf("StartSession(y) after end: %v", err)
+	}
+	if got, _ := st.ActiveSession(ctx, h.ID); got.StreamID != y.ID {
+		t.Fatalf("active session now = %+v, want y", got)
+	}
+}
+
+// BoundCamPassesForStream (the Go-live replay source) excludes passes past their expires_at
+// DEADLINE, not just status-retired ones (codex): a guest can connect pre-live and cross its
+// deadline before Go live (status still "sent"), and such a no-longer-joinable invite must not be
+// replayed onto an OBS slot. Mirrors passJoinable.
+func TestPassRepo_BoundCamPassesExcludesDeadlineExpired(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-bound-exp")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	cam1, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-be-1"})
+	cam2, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(2), SourceTokenHash: "src-be-2"})
+
+	past := time.Now().Unix() - 3600
+	expired, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "exp", Status: PassSent, ExpiresAt: &past})
+	live, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "liv", Status: PassSent}) // no deadline
+	if err := st.AssignPassSlot(ctx, expired.ID, cam1.ID); err != nil {
+		t.Fatalf("assign expired: %v", err)
+	}
+	if err := st.AssignPassSlot(ctx, live.ID, cam2.ID); err != nil {
+		t.Fatalf("assign live: %v", err)
+	}
+
+	bound, err := st.BoundCamPassesForStream(ctx, stream.ID)
+	if err != nil {
+		t.Fatalf("BoundCamPassesForStream: %v", err)
+	}
+	for _, b := range bound {
+		if b.PassID == expired.ID {
+			t.Fatalf("a deadline-expired pass (%s) must not be replayed onto %s", b.PassID, b.SlotLabel)
+		}
+	}
+	var sawLive bool
+	for _, b := range bound {
+		if b.PassID == live.ID && b.SlotLabel == "cam-2" {
+			sawLive = true
+		}
+	}
+	if !sawLive {
+		t.Fatalf("the still-joinable pass should be replayed onto cam-2, got %+v", bound)
+	}
+}
+
+// Re-issue clears slot_id so a re-issued invite starts UNBOUND (codex): a guest kicked/revoked
+// from a slot must not auto-reclaim it on the fresh link via the join replay — the host re-binds.
+func TestPassRepo_ReissueClearsSlot(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-reissue-clear")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-rc"})
+	a, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "a-tok"})
+	if err := st.AssignPassSlot(ctx, a.ID, slot.ID); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	// Kicked/revoked, then re-issued: the binding must NOT carry over to the fresh invite.
+	if err := st.SetPassStatus(ctx, a.ID, PassRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := st.ReissuePass(ctx, a.ID, "a-tok-2"); err != nil {
+		t.Fatalf("ReissuePass: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
+		t.Fatalf("re-issued pass must start unbound, got slot %v", got.SlotID)
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {
@@ -586,16 +750,17 @@ func TestPassRepo_OneActiveOccupantPerSlot(t *testing.T) {
 	if err := st.AssignPassSlot(ctx, p1.ID, slot.ID); err != nil {
 		t.Fatalf("assign p1: %v", err)
 	}
-	// A second active pass in the same (stream, slot) violates the partial unique index.
-	if err := st.AssignPassSlot(ctx, p2.ID, slot.ID); err == nil {
-		t.Fatal("expected unique-index violation for second active occupant, got nil")
-	}
-	// Revoking p1 frees the slot for p2 (index excludes revoked/expired).
-	if err := st.SetPassStatus(ctx, p1.ID, PassRevoked); err != nil {
-		t.Fatalf("revoke p1: %v", err)
-	}
+	// Assigning a second active pass to the same (stream, slot) DISPLACES the first (the DoD
+	// "swap a slot occupant"), atomically — so at most one active occupant remains (RF-2) and the
+	// partial unique index is never violated.
 	if err := st.AssignPassSlot(ctx, p2.ID, slot.ID); err != nil {
-		t.Fatalf("assign p2 after revoke: %v", err)
+		t.Fatalf("swap assign p2: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, p2.ID); got.SlotID == nil || *got.SlotID != slot.ID {
+		t.Fatalf("p2 not bound to the slot after swap: %v", got.SlotID)
+	}
+	if got, _ := st.GetPass(ctx, p1.ID); got.SlotID != nil {
+		t.Fatalf("p1 not displaced by the swap: %v", got.SlotID)
 	}
 }
 

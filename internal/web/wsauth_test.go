@@ -293,6 +293,85 @@ func TestWS_RejectsRevokedPass(t *testing.T) {
 	}
 }
 
+// A guest of a NON-live stream is refused admission while the host is live for a DIFFERENT stream
+// (codex P1): one live session per host (EN-2/D-20), so a non-live-stream guest must not enter the
+// host-scoped room and mesh with the live session's peers. A guest of the LIVE stream is admitted,
+// and (pre-live) with no active session anyone is admitted.
+func TestWS_RejectsNonLiveStreamGuest(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "host-adm", store.HostActive)
+	live := h.seedStream(t, host.ID)
+	other := h.seedStream(t, host.ID)
+	liveRaw, _ := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, nil)
+	otherRaw, _ := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+
+	// Pre-live (no active session): the other-stream guest is admitted.
+	c0, _, err := h.dial(t, "pass="+otherRaw, nil)
+	if err != nil {
+		t.Fatalf("pre-live guest should be admitted: %v", err)
+	}
+	c0.CloseNow()
+
+	// Host goes live for `live`.
+	if _, err := h.store.StartSession(context.Background(), live.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	// The live stream's guest is admitted; the other-stream guest is refused (403 stream not live).
+	cl := h.dialOK(t, "pass="+liveRaw, nil)
+	cl.CloseNow()
+	_, resp, err := h.dial(t, "pass="+otherRaw, nil)
+	if err == nil {
+		t.Fatal("a non-live-stream guest must be refused while another stream is live")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %v, want 403", resp)
+	}
+}
+
+// guestAdmissible is the Join-time re-check (under the binding lock) that closes the goLive↔join
+// TOCTOU (codex): admit pre-live or a live-stream guest, refuse a guest whose stream isn't the
+// active session's. Mirrors the handshake gate but re-evaluated against the CURRENT session.
+func TestWS_GuestAdmissibleRecheck(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, _ := h.seedHost(t, "admissible", store.HostActive)
+	live := h.seedStream(t, host.ID)
+	other := h.seedStream(t, host.ID)
+	_, livePass := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, nil)
+	_, otherPass := h.seedPass(t, other.ID, store.RoleGuest, store.PassSent, nil)
+	wr := &wsResolver{store: h.store}
+
+	// Pre-live (no session): every guest is admissible.
+	if !wr.guestAdmissible(ctx, livePass.ID, host.ID) || !wr.guestAdmissible(ctx, otherPass.ID, host.ID) {
+		t.Fatal("pre-live: all guests must be admissible")
+	}
+	// Live for `live`: the live-stream guest is admissible, the other-stream guest is NOT.
+	if _, err := h.store.StartSession(ctx, live.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if !wr.guestAdmissible(ctx, livePass.ID, host.ID) {
+		t.Fatal("live-stream guest must be admissible at join")
+	}
+	if wr.guestAdmissible(ctx, otherPass.ID, host.ID) {
+		t.Fatal("a guest whose stream isn't live must be refused at join")
+	}
+
+	// A pass that lapses (revoked or past-deadline) AFTER the handshake is refused at the re-check,
+	// even though its stream is the live one (codex).
+	if err := h.store.SetPassStatus(ctx, livePass.ID, store.PassRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if wr.guestAdmissible(ctx, livePass.ID, host.ID) {
+		t.Fatal("a revoked pass must be refused at join even when its stream is live")
+	}
+	past := int64(1)
+	_, expiredPass := h.seedPass(t, live.ID, store.RoleGuest, store.PassSent, &past)
+	if wr.guestAdmissible(ctx, expiredPass.ID, host.ID) {
+		t.Fatal("a past-deadline pass must be refused at join")
+	}
+}
+
 func TestWS_RejectsExpiredPassByStatus(t *testing.T) {
 	h := newWSHarness(t, wsHarnessOpts{})
 	host, _ := h.seedHost(t, "host1", store.HostActive)

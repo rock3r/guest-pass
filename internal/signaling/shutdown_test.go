@@ -33,12 +33,127 @@ func TestHubShutdown_BroadcastsTerminateThenCloses(t *testing.T) {
 	_ = room
 }
 
+// TestHubEndSession_RoomDiscoverableUntilTerminated (codex): EndSession must keep the ending room
+// in the registry until its teardown completes, so a concurrent /ws handshake for the same host
+// resolves to the draining room (refused) rather than spawning a fresh one that survives the
+// teardown. A peer on an unbuffered, unread out stalls Terminate's budgeted send, holding
+// EndSession mid-teardown — during which the room must still be the registry entry, and only gone
+// once teardown finishes.
+func TestHubEndSession_RoomDiscoverableUntilTerminated(t *testing.T) {
+	h := NewHub(nil, nil)
+	room := h.Room("s1")
+	out := make(chan Frame) // unbuffered, no reader → Terminate's budgeted send stalls
+	room.Join(PeerID("p1"), "guest", "", "", out)
+
+	ended := make(chan struct{})
+	go func() { h.EndSession("s1", "session-ended"); close(ended) }()
+
+	// Let EndSession enter Terminate (where it blocks on the stalled peer).
+	select {
+	case <-ended:
+		t.Fatal("EndSession returned before the stalled peer drained")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// Mid-teardown, the room must STILL be discoverable in the registry (so a racing connect can't
+	// spawn a fresh, surviving room).
+	if h.RoomIfLive("s1") != room {
+		t.Fatal("ending room must remain the registry entry until teardown completes")
+	}
+
+	// Drain the peer → Terminate completes → EndSession returns → the room is removed.
+	go func() {
+		for range out { // pull the terminate frame, then the close ends the range
+		}
+	}()
+	<-ended
+	if h.RoomIfLive("s1") != nil {
+		t.Fatal("room must be removed once teardown completes")
+	}
+}
+
+// Room.Close must be idempotent (codex): a server drain (Shutdown) can race a host ending/deleting
+// the live stream, and both teardown paths hold the same Room — a second raw close(r.done) would
+// panic "close of closed channel" and crash the process instead of draining cleanly.
+func TestRoomClose_Idempotent(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	r.Close()
+	r.Close() // must be a no-op, not a panic
+}
+
+// Ending a session must NOT strand the host-global OBS sources (codex P1): participants get the
+// terminal session-ended, but the "wire OBS once" slot source pages get a recoverable reconnect so
+// they re-attach to the next session instead of sitting on a terminal error screen.
+func TestRoomTerminateSession_SourcesRecoverable(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	defer r.Close()
+	guestOut := make(chan Frame, 8)
+	srcOut := make(chan Frame, 8)
+	r.Join(PeerID("g"), "guest", "", "", guestOut)
+	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", srcOut)
+
+	r.TerminateSession(TerminateSessionEnded)
+
+	if got := lastTerminateReason(guestOut); got != TerminateSessionEnded {
+		t.Fatalf("guest terminate reason = %q, want %q", got, TerminateSessionEnded)
+	}
+	if got := lastTerminateReason(srcOut); got != TerminateReconnect {
+		t.Fatalf("OBS source terminate reason = %q, want a recoverable %q (wire-once)", got, TerminateReconnect)
+	}
+}
+
+// lastTerminateReason drains ch (until the room closes it) and returns the reason of the terminate
+// frame it carried, or "" if none.
+func lastTerminateReason(ch chan Frame) string {
+	reason := ""
+	for f := range ch {
+		if f.T == "terminate" {
+			reason = f.Reason
+		}
+	}
+	return reason
+}
+
 func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 	h := NewHub(nil, nil)
 	h.Shutdown("reconnect")
 	if r := h.Room("late-arrival"); r != nil {
 		t.Fatal("Room for a new session after Shutdown should be nil")
 	}
+}
+
+// TestRoomEvictPeers_DoesNotDropTerminate mirrors the Terminate guarantee for the SYSTEM eviction
+// path (codex): the terminal `revoked` frame must reach a slow peer (backed-up/unbuffered queue)
+// before its socket closes, not be dropped like a routine frame — else the browser sees a bare
+// close and follows the transient reconnect flow instead of the revoked teardown. An unbuffered
+// out with no reader makes a non-blocking deliver drop; the budgeted blocking send must still land
+// once a reader appears.
+func TestRoomEvictPeers_DoesNotDropTerminate(t *testing.T) {
+	r := newRoom("s", nil, nil)
+	go r.run()
+	defer r.Close()
+
+	out := make(chan Frame) // unbuffered, no reader: a non-blocking send would drop the terminate
+	r.Join(PeerID("g"), "guest", "", "", out)
+
+	returned := make(chan struct{})
+	go func() { r.EvictPeers(TerminateRevoked, []PeerID{"g"}); close(returned) }()
+
+	// With no reader, the OLD non-blocking deliver would drop the terminate and EvictPeers would
+	// return at once. The budgeted blocking send must still be waiting after a grace period.
+	select {
+	case <-returned:
+		t.Fatal("EvictPeers returned without delivering the terminate (it was dropped)")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// A reader appears; the blocked terminal send proceeds with the revoked reason.
+	f := <-out
+	if f.T != "terminate" || f.Reason != TerminateRevoked {
+		t.Fatalf("delivered frame = %+v, want terminate:revoked", f)
+	}
+	<-returned
 }
 
 // A connection that resolved a room just before it started draining must not be admitted

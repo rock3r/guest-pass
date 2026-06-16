@@ -26,11 +26,12 @@ type roomCmd func(*roomState, map[PeerID]*peerConn)
 // table; every mutation arrives as a roomCmd. No locks on room state. A nil lockStore
 // disables suppression-lock persistence (AD-22) — used by the pure transport tests.
 type Room struct {
-	id    string
-	cmds  chan roomCmd
-	done  chan struct{}
-	locks LockPersistence
-	log   *slog.Logger
+	id        string
+	cmds      chan roomCmd
+	done      chan struct{}
+	closeOnce sync.Once // guards done against a double Close (drain racing an end-session, codex)
+	locks     LockPersistence
+	log       *slog.Logger
 }
 
 func newRoom(id string, locks LockPersistence, log *slog.Logger) *Room {
@@ -255,6 +256,52 @@ func (r *Room) Kick(actor, target PeerID, invalidate func()) {
 	})
 }
 
+// EvictPeers tears the named peers out of the room with a terminal reason — a SYSTEM teardown
+// (NO rank check, unlike Kick) used when their passes are deleted with the stream, so orphaned,
+// pass-deleted sockets can't linger and carry into the host's next session (D-40). It reuses
+// leave() per peer (clears any slot + bumps the epoch + drops the roster entry + tells the
+// others), then delivers each the TERMINAL frame with the per-peer budget (RF-16) — so a slow
+// guest still gets its reason instead of a bare socket close — and shuts its socket. Blocks until
+// the evictions flush (like Terminate), so the caller knows the peers are gone. Absent peers are
+// skipped.
+func (r *Room) EvictPeers(reason string, targets []PeerID) {
+	done := make(chan struct{})
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		var wg sync.WaitGroup
+		for _, target := range targets {
+			c := conns[target]
+			if c == nil {
+				continue // not connected — nothing to evict
+			}
+			// Tell the OTHERS the peer left (peer-left + roster, slot-unbound to a source); a slow
+			// RECIPIENT may drop one of those routine frames (AD-12) — non-terminal, so fine.
+			deliver(conns, st.leave(target))
+			delete(conns, target)
+			// The TERMINAL frame must NOT be dropped like a routine one: budgeted blocking send,
+			// concurrent across targets so the total wait is ~one budget rather than the sum.
+			wg.Add(1)
+			go func(c *peerConn) {
+				defer wg.Done()
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case c.out <- Frame{T: "terminate", Reason: reason}:
+				case <-t.C: // genuinely wedged — give up; the socket still closes below
+				}
+				close(c.out)
+			}(c)
+		}
+		wg.Wait()
+		close(done)
+	})
+	// Block until the evictions flush (a stream delete should complete teardown before responding,
+	// not leave a window of half-evicted sockets). r.done guards a racing Close.
+	select {
+	case <-done:
+	case <-r.done:
+	}
+}
+
 // ApplyState folds a participant's self-presence ({t:state}, EN-7) into the roster: each
 // provided (non-nil) modality updates and, on a real change, every viewer's roster
 // re-broadcasts. An absent modality is left unchanged (a meter-only update must not clobber
@@ -280,6 +327,15 @@ func (r *Room) ApplyStats(id PeerID, signal, rttMs int, degraded *DegradedView) 
 func (r *Room) RecoverQuality() {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.recoverQuality())
+	})
+}
+
+// NotifySessionLive tells the host's greenroom (if connected) that the session went live, so it
+// drops optimistic pre-live slot overrides and reconciles to the authoritative roster — see
+// roomState.sessionLive.
+func (r *Room) NotifySessionLive() {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.sessionLive())
 	})
 }
 
@@ -375,9 +431,36 @@ func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 	})
 }
 
+// ResumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a
+// different live occupant — see roomState.resumeBind. Used by the /ws join replay; the host's
+// explicit greenroom (re)bind still displaces via Rebind/RebindOrVacate.
+func (r *Room) ResumeBind(slot SlotID, occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.resumeBind(slot, occupant))
+	})
+}
+
+// RebindOrVacate binds the slot to occupant if it is connected, else VACATES the slot — so a
+// greenroom (re)bind whose new occupant is OFFLINE drops the slot to placeholder instead of
+// stranding the displaced prior occupant live (see rebindOrVacate).
+func (r *Room) RebindOrVacate(slot SlotID, occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.rebindOrVacate(slot, occupant))
+	})
+}
+
 func (r *Room) Unbind(slot SlotID) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.unbindSlot(slot))
+	})
+}
+
+// VacateOccupant clears any cam slot the peer occupies (the greenroom "unassign"), keyed on the
+// room's own live occupancy rather than a caller label — so a concurrent move of the same guest
+// can't strand a stale slot bound (see vacateOccupant).
+func (r *Room) VacateOccupant(occupant PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.vacateOccupant(occupant))
 	})
 }
 
@@ -412,13 +495,37 @@ const terminateBudget = 2 * time.Second
 // room goroutine, so a concurrent readLoop Leave for a now-removed conn is a no-op
 // (identity-checked).
 func (r *Room) Terminate(reason string) {
+	r.terminateWith(func(string) string { return reason })
+}
+
+// TerminateSession ends a host's live session: PARTICIPANTS (host/co-host/guests) get the terminal
+// reason (e.g. session-ended → "stream ended" screen), but OBS slot SOURCES get a RECOVERABLE
+// reconnect instead — they are host-global "wire OBS once" pages (EN-26/D-20) that must outlive the
+// session and re-attach to the next one, not be stranded on a terminal error screen (codex). The
+// caller (Hub.EndSession) closes the room after; the sources reconnect into the fresh one and show
+// a placeholder until the next session binds them.
+func (r *Room) TerminateSession(reason string) {
+	r.terminateWith(func(role string) string {
+		if isParticipant(role) {
+			return reason
+		}
+		return TerminateReconnect
+	})
+}
+
+// terminateWith broadcasts a {t:terminate} to every conn — the reason chosen PER ROLE by reasonFor
+// — with the per-peer budget (RF-16, a terminal frame must not be dropped), concurrent so the
+// total wait is ~one budget, then closes each socket. It marks the room draining first so a late
+// Join is refused. Blocks until the flush completes (or the room stops).
+func (r *Room) terminateWith(reasonFor func(role string) string) {
 	done := make(chan struct{})
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		st.terminating = true // refuse any late Join that arrives after this command
 		var wg sync.WaitGroup
 		for id, c := range conns {
+			reason := reasonFor(c.role)
 			wg.Add(1)
-			go func(c *peerConn) {
+			go func(c *peerConn, reason string) {
 				defer wg.Done()
 				t := time.NewTimer(terminateBudget)
 				defer t.Stop()
@@ -427,7 +534,7 @@ func (r *Room) Terminate(reason string) {
 				case <-t.C: // this peer is wedged; give up on it
 				}
 				close(c.out)
-			}(c)
+			}(c, reason)
 			delete(conns, id)
 		}
 		wg.Wait()
@@ -440,4 +547,4 @@ func (r *Room) Terminate(reason string) {
 }
 
 // Close stops the room goroutine.
-func (r *Room) Close() { close(r.done) }
+func (r *Room) Close() { r.closeOnce.Do(func() { close(r.done) }) }

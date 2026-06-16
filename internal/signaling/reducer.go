@@ -150,6 +150,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 		return out
 	}
 	entry := s.entryFor(p)
+	// peer-joined sends ONE entry to recipients of every rank, so it must not carry the
+	// host-only BoundSlot (rosterFor does the per-rank strip; this single-entry path can't). A
+	// fresh joiner holds no slot anyway — the binding arrives via the host's roster on rebind.
+	entry.BoundSlot = ""
 	for pid, rp := range s.peers {
 		if pid == id || !isParticipant(rp.role) {
 			continue // only participants receive peer-joined; never echo to the joiner
@@ -455,8 +459,66 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 	if _, ok := s.peers[occupant]; !ok {
 		return nil
 	}
-	out := s.bindSlot(sid, occupant)
+	var out []outbound
+	// One cam slot per occupant (D-20): vacate any OTHER cam slot this occupant already holds
+	// before binding, so a move / re-bind / concurrent double-bind can never leave the guest
+	// live in two OBS sources while the DB stores only the last slot. Gate this on the NEW slot
+	// being a cam slot: the screenshare slot is independent of the camera pool, so binding it
+	// must not evict the guest's camera (a guest can be both on-cam and screensharing).
+	if isCamSlot(sid) {
+		for other, st := range s.slots {
+			if other != sid && st.occupant == occupant && isCamSlot(other) {
+				out = append(out, s.vacateSlot(other)...)
+			}
+		}
+	}
+	out = append(out, s.bindSlot(sid, occupant)...)
 	return append(out, s.rebroadcastRoster()...)
+}
+
+// rebindOrVacate binds sid to occupant when occupant is a connected peer, otherwise VACATES
+// the slot. Used for a greenroom (re)bind whose new occupant may be OFFLINE: a plain rebind
+// no-ops when the occupant can't receive media (EN-3), which would leave the slot's PRIOR
+// occupant live while the DB already names the new one. Vacating instead drops the slot to a
+// placeholder (D-24) — never the displaced guest — so live and the DB agree. The occupant is
+// (re)bound for real once it connects (the /ws join replays passes.slot_id).
+func (s *roomState) rebindOrVacate(sid SlotID, occupant PeerID) []outbound {
+	if _, ok := s.peers[occupant]; ok {
+		return s.rebindSlot(sid, occupant)
+	}
+	return s.unbindSlot(sid)
+}
+
+// resumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a
+// different live occupant. v1 runs one live session per host (EN-2), but the persisted binding
+// is keyed per-pass with no runtime "which stream is live" gate (session lifecycle is v1.1),
+// so a guest whose pass.slot_id was set for a NON-live stream could otherwise auto-replay into
+// and hijack the on-air slot. An automatic replay must only RESUME into a slot that is free or
+// already this peer's (idempotent reconnect, D-40); a held slot is left to its live occupant.
+// Displacing a slot occupant remains an explicit, host-initiated greenroom action (rebindSlot).
+func (s *roomState) resumeBind(sid SlotID, occupant PeerID) []outbound {
+	if st, ok := s.slots[sid]; ok && st.occupant != "" && st.occupant != occupant {
+		return nil // slot is live to a different peer — never auto-displace on a replay
+	}
+	return s.rebindSlot(sid, occupant)
+}
+
+// vacateOccupant clears any cam slot a peer currently occupies — the greenroom "unassign". It
+// keys on the LIVE occupancy the room owns, not a caller-supplied label, so a concurrent move
+// of the same guest between the caller's read and this call can't leave a stale slot bound.
+func (s *roomState) vacateOccupant(occupant PeerID) []outbound {
+	var out []outbound
+	freed := false
+	for sid, st := range s.slots {
+		if st.occupant == occupant && isCamSlot(sid) {
+			out = append(out, s.vacateSlot(sid)...)
+			freed = true
+		}
+	}
+	if freed {
+		out = append(out, s.rebroadcastRoster()...)
+	}
+	return out
 }
 
 // vacateSlot is the core of clearing a slot (kick / leave / unbind): degrade stale on-air,
@@ -544,6 +606,21 @@ func (s *roomState) recoverQuality() []outbound {
 			continue
 		}
 		out = append(out, outbound{to: pid, frame: Frame{T: "recover-quality"}})
+	}
+	return out
+}
+
+// sessionLive notifies the host that its session just went live (D-40). A greenroom that was open
+// BEFORE Go live drops its optimistic pre-live slot overrides on this signal and reconciles to the
+// now-authoritative roster (the Go-live replay's live bindings), so a pass unassigned/displaced
+// elsewhere before Go live can't keep showing its stale slot (codex). It is broadcast AFTER the
+// replay, so the authoritative roster frames land first. Host-only: only the host has the picker.
+func (s *roomState) sessionLive() []outbound {
+	var out []outbound
+	for pid, p := range s.peers {
+		if p.role == "host" {
+			out = append(out, outbound{to: pid, frame: Frame{T: "session-live"}})
+		}
 	}
 	return out
 }

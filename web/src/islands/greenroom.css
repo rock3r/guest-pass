@@ -120,8 +120,17 @@
    room-level "bump quality now" control. Functional-first (D-B). */
 .gr-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 10px;
+}
+/* Surfaced slot (re)bind failure (AC-6): e.g. binding to an unprovisioned cam slot. */
+.gr-binderr {
+  margin: 0;
+  margin-right: auto;
+  font-size: 0.8rem;
+  color: #a3271f;
 }
 .gr-recover {
   font: inherit;
@@ -138,4 +147,26 @@
 }
 .gr-degraded[data-degraded^="recovering"] {
   color: #1f6a3a;
+}
+
+/* Host-only slot picker (People controls, AC-6/D-20): (re)assign a guest to a cam slot. */
+.gr-slotbind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.gr-slotbind-label {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.gr-slot {
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
 }

@@ -33,6 +33,9 @@ const (
 	SlotCam         = "cam"
 	SlotHost        = "host"
 	SlotScreenshare = "screenshare"
+
+	SessionActive = "active"
+	SessionEnded  = "ended"
 )
 
 // Host is a Google-authenticated host (D-28 status lifecycle).
@@ -91,6 +94,20 @@ type Pass struct {
 	OpenedAt   *int64
 	AcceptedAt *int64
 	RevokedAt  *int64
+}
+
+// Session is the thin audit row marking a host's one live show (EN-2/D-20): created when the
+// host goes live for a specific stream, ended when they stop. The partial unique index
+// idx_sessions_one_live enforces at most one active session per host. The active session's
+// stream_id is the runtime answer to "which of the host's streams is live" — used to gate the
+// /ws join-replay so a guest of a non-live stream can't auto-bind into the on-air slot pool.
+type Session struct {
+	ID        string
+	StreamID  string
+	HostID    string
+	StartedAt int64
+	EndedAt   *int64
+	Status    string // active | ended
 }
 
 // PassLock is a persisted suppression lock (AD-22/D-13): one row per (pass, modality) that

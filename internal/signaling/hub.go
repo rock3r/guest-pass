@@ -45,6 +45,15 @@ func (h *Hub) Room(session string) *Room {
 	return r
 }
 
+// RoomIfLive returns the host's live room, or nil WITHOUT spawning one — a peek of the
+// registry, not Room(). Backs control actions (slot (re)bind, D-20) that are DB-only when no
+// stream is live: binding a guest to a slot with no live room must not create an empty room.
+func (h *Hub) RoomIfLive(session string) *Room {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rooms[session]
+}
+
 // TerminateSourceIfLive terminates the OBS source peer in the host's LIVE room, if one
 // exists — WITHOUT spawning a room (a peek of the registry, not Room()). Backs D-22
 // slot-token rotation: rotating while no stream is live is a DB-only update with no source
@@ -55,6 +64,50 @@ func (h *Hub) TerminateSourceIfLive(session string, source PeerID) {
 	h.mu.Unlock()
 	if r != nil {
 		r.RotateSource(source)
+	}
+}
+
+// EndSession terminates the host's live room (if any) with reason and removes it from the
+// registry, so guests and OBS sources get the terminal teardown and NO connection carries into
+// the next session — rooms are keyed by host id, so without this an "end session" would leave the
+// old peers live in the room the next stream reuses (D-40). The room is terminated/closed WHILE it
+// is still the registry entry, THEN removed: during teardown a concurrent /ws handshake for this
+// host resolves (via Hub.Room) to the draining room — whose Join refuses (terminating) or whose
+// closed r.done rejects it — instead of spawning a fresh room that would survive the teardown and
+// carry into the next session (codex). hub.mu is not held across the blocking Terminate, so other
+// hub ops aren't stalled. A no-op when no room is live. The NEXT connection (after removal) spawns
+// a fresh room.
+func (h *Hub) EndSession(session, reason string) {
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r == nil {
+		return
+	}
+	// Participants get the terminal reason (session-ended); host-global OBS sources get a
+	// recoverable reconnect so they outlive the session and re-attach to the next one (codex).
+	r.TerminateSession(reason) // marks the room draining (Join refuses), still discoverable
+	r.Close()
+	h.mu.Lock()
+	if h.rooms[session] == r { // don't drop a room a racing start already replaced
+		delete(h.rooms, session)
+	}
+	h.mu.Unlock()
+}
+
+// EvictIfLive evicts the named peers from the host's live room (if any) with a terminal reason —
+// a system teardown when their passes are deleted (stream delete), so the deleted stream's guests
+// don't linger in the host-scoped room. No-op when no room is live or no targets are given; it
+// never spawns a room (peek, not Room()).
+func (h *Hub) EvictIfLive(session, reason string, targets []PeerID) {
+	if len(targets) == 0 {
+		return
+	}
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r != nil {
+		r.EvictPeers(reason, targets)
 	}
 }
 

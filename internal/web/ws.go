@@ -39,15 +39,16 @@ type wsHandler struct {
 	resolver *wsResolver
 	inflight *sync.WaitGroup // nil-safe; lets a graceful drain wait for terminate flush (RF-21)
 	ice      ICEConfigurer   // per-peer ICE join-ack (AD-14); nil = no ICE servers offered
+	binds    *bindingLocks   // serialize the join-replay with the host's binding PUTs (D-20)
 	log      *slog.Logger
 }
 
 // newWSHandler builds the handler, defaulting the logger so the hot path never nil-panics.
-func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, logger *slog.Logger) *wsHandler {
+func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, binds *bindingLocks, logger *slog.Logger) *wsHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, log: logger}
+	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, binds: binds, log: logger}
 }
 
 func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +114,35 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 			out <- iceFrame
 		}
 	}
-	if !room.Join(id.peer, id.role, id.name, id.slot, out) {
+	// Guests/co-hosts are stream-gated (EN-2/D-20): hold the per-host binding lock across the
+	// admission RE-CHECK, Join, AND replay. The handshake admitted this guest against the active
+	// session as of THEN, but a concurrent goLive can make a different stream live (and run its
+	// straggler eviction) in the window before this Join — so without re-checking under the lock
+	// (which goLive also holds) a non-live-stream guest could slip into the now-live room after the
+	// eviction already ran (codex). The lock also orders the replay's room command with a concurrent
+	// host PUT by DB-commit order (D-20).
+	//
+	// The replay re-reads passes.slot_id HERE (not at the handshake), so a host PUT during the join
+	// window can't route from a stale label. ResumeBind (not Rebind) is NON-displacing — an
+	// automatic replay must never knock a different live occupant off a slot; the host's own
+	// greenroom (re)bind still displaces deliberately (putPassSlot → Rebind/RebindOrVacate).
+	if id.role == "guest" || id.role == "cohost" {
+		unlock := h.binds.lock(id.session)
+		if !h.resolver.guestAdmissible(ctx, string(id.peer), id.session) {
+			unlock()
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
+			return
+		}
+		if !room.Join(id.peer, id.role, id.name, id.slot, out) {
+			unlock()
+			_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})
+			return
+		}
+		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
+			room.ResumeBind(slot, id.peer)
+		}
+		unlock()
+	} else if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
 		// reconnect and close; we never registered, so there's no writer to drain.
 		_ = wsjson.Write(ctx, c, signaling.Frame{T: "terminate", Reason: signaling.TerminateReconnect})

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -22,6 +23,11 @@ type detailData struct {
 	StreamID    string
 	StreamTitle string
 	Tab         string // "invites" | "sources"
+	// Live-session state (EN-2/D-20): SessionLive is true when THIS stream is the host's active
+	// session; OtherStreamLive is true when the host is live for a DIFFERENT stream (so the page
+	// explains the one-live-at-a-time rule instead of offering a "Go live" that would 409).
+	SessionLive     bool
+	OtherStreamLive bool
 	// Invites tab
 	Passes []passRow
 	Issued *issuedLink // set after create/reissue to reveal the fresh link once
@@ -93,9 +99,13 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 	for _, p := range passes {
 		rows = append(rows, toPassRow(p, now))
 	}
+	live, otherLive := s.sessionState(r.Context(), host.ID, st.ID)
 	s.rd.render(w, r, "streamdetail.html", pageData{
 		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name},
-		Data: detailData{StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued},
+		Data: detailData{
+			StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued,
+			SessionLive: live, OtherStreamLive: otherLive,
+		},
 	})
 }
 
@@ -159,10 +169,21 @@ func (s *appServer) reissueInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not mint token", http.StatusInternalServerError)
 		return
 	}
+	// Clear the binding (ReissuePass nulls slot_id) AND vacate any LIVE slot the guest held, under
+	// the per-host binding lock so it orders with the /ws join-replay + picker PUTs (D-20). A
+	// re-issued invite starts unbound — the host re-binds in the greenroom if needed (codex).
+	unlock := s.binds.lock(st.HostID)
 	if err := s.store.ReissuePass(r.Context(), pass.ID, s.hasher.Hash(raw)); err != nil {
+		unlock()
 		http.Error(w, "could not re-issue invite", http.StatusInternalServerError)
 		return
 	}
+	if s.hub != nil {
+		if room := s.hub.RoomIfLive(st.HostID); room != nil {
+			room.VacateOccupant(signaling.PeerID(pass.ID))
+		}
+	}
+	unlock()
 	name, email := passNameEmail(pass)
 	link := s.baseURL + "/p/" + raw
 	delivered := s.deliverInvite(r.Context(), st, name, email, link) == nil

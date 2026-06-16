@@ -147,6 +147,13 @@ func (s *Store) GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) 
 	return scanSlot(s.reader.QueryRowContext(ctx, slotSelect+" WHERE source_token_hash = ?", tokenHash))
 }
 
+// GetHostCamSlot resolves a host's cam slot by index (1..8), or ErrNotFound if it isn't
+// provisioned. Backs the greenroom slot picker, which names a slot by its cam index.
+func (s *Store) GetHostCamSlot(ctx context.Context, hostID string, idx int64) (*Slot, error) {
+	return scanSlot(s.reader.QueryRowContext(ctx,
+		slotSelect+" WHERE host_id = ? AND kind = ? AND idx = ?", hostID, SlotCam, idx))
+}
+
 // RecordSlotTokenUse stamps a slot's source-token leak-detection metadata
 // (source_token_last_used_at = now, source_token_last_source_ip = sourceIP). The
 // /ws?src= source-page handshake calls this after resolving a slot via

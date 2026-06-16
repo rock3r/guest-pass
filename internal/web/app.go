@@ -31,6 +31,7 @@ type appServer struct {
 	baseURL string         // absolute origin for building magic links + OBS source URLs
 	reveals *revealStore   // one-time post-redirect reveal of a just-minted secret
 	hub     *signaling.Hub // to tear down a live OBS source on slot-token rotation (D-22); may be nil
+	binds   *bindingLocks  // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
@@ -148,14 +149,24 @@ func (s *appServer) updateStream(w http.ResponseWriter, r *http.Request) {
 // deleteStream removes an owned stream (cascading to its passes/sessions, FK) and
 // redirects to the dashboard.
 func (s *appServer) deleteStream(w http.ResponseWriter, r *http.Request) {
-	_, st, ok := s.ownedStream(w, r)
+	host, st, ok := s.ownedStream(w, r)
 	if !ok {
 		return
 	}
+	// Deleting the LIVE stream must tear down its room too (D-40): the FK cascade drops the
+	// sessions row, but the host-scoped room + connected peers would otherwise linger and be
+	// reused by the host's next stream. Hold the per-host binding lock across the liveness check,
+	// delete, and teardown so a concurrent goLive can't interleave (codex); capture liveness
+	// BEFORE the delete (the cascade erases the session row).
+	unlock := s.binds.lock(host.ID)
+	defer unlock()
+	wasLive, _ := s.sessionState(r.Context(), host.ID, st.ID)
+	peers := streamPeerIDs(r.Context(), s.store, st.ID) // collect BEFORE the cascade erases the passes
 	if err := s.store.DeleteStream(r.Context(), st.ID); err != nil {
 		http.Error(w, "could not delete stream", http.StatusInternalServerError)
 		return
 	}
+	teardownDeletedStream(s.hub, host.ID, wasLive, peers)
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 

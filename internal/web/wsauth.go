@@ -55,8 +55,12 @@ func (e *wsAuthError) Error() string { return e.reason }
 type wsStore interface {
 	GetHost(ctx context.Context, id string) (*store.Host, error)
 	GetStream(ctx context.Context, id string) (*store.Stream, error)
+	GetPass(ctx context.Context, id string) (*store.Pass, error)
 	GetPassByTokenHash(ctx context.Context, tokenHash string) (*store.Pass, error)
+	GetSlot(ctx context.Context, id string) (*store.Slot, error)
 	GetSlotBySourceTokenHash(ctx context.Context, tokenHash string) (*store.Slot, error)
+	// ActiveSession gates the join-replay on which of the host's streams is currently live (EN-2).
+	ActiveSession(ctx context.Context, hostID string) (*store.Session, error)
 	RecordSlotTokenUse(ctx context.Context, slotID, sourceIP string) error
 	// SetPassStatus backs a kick's token invalidation (D-25): revoking the target's pass so a
 	// reconnect is refused at the handshake (passJoinable → false).
@@ -130,11 +134,73 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	if aerr := wr.requireActiveHost(ctx, stream.HostID); aerr != nil {
 		return wsIdentity{}, aerr
 	}
+	// One live session per host (EN-2/D-20): if the host is live for a DIFFERENT stream, this
+	// guest's show isn't the on-air one — REFUSE admission so a non-live-stream guest can't enter
+	// the host-scoped room and see/mesh with the live session's peers (the replay gate alone left
+	// the socket admitted, codex). No active session = pre-live: admit (the host isn't live yet);
+	// Go live evicts any straggler from another stream. Fail-closed on a lookup error.
+	switch sess, serr := wr.store.ActiveSession(ctx, stream.HostID); {
+	case errors.Is(serr, store.ErrNotFound):
+		// no live session yet — pre-live, admit
+	case serr != nil:
+		return wsIdentity{}, &wsAuthError{http.StatusInternalServerError, "session lookup failed"}
+	case sess.StreamID != pass.StreamID:
+		return wsIdentity{}, &wsAuthError{http.StatusForbidden, "stream not live"}
+	}
 	name := ""
 	if pass.Name != nil {
 		name = *pass.Name
 	}
 	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
+}
+
+// guestAdmissible re-checks at JOIN time (under the per-host binding lock) that a guest/co-host may
+// enter the host's room: admit when there's no live session yet (pre-live) or the live session is
+// for the guest's OWN stream; refuse otherwise. The handshake already gated admission, but a
+// concurrent goLive can make a DIFFERENT stream live in the window between the handshake and Join —
+// re-checking under the lock (which goLive also holds) closes that TOCTOU so a non-live-stream
+// guest can't slip into the now-live room after the straggler eviction ran (codex). Fail-closed on
+// a lookup error.
+func (wr *wsResolver) guestAdmissible(ctx context.Context, passID, hostID string) bool {
+	pass, err := wr.store.GetPass(ctx, passID)
+	if err != nil || !passJoinable(pass) {
+		// Re-check joinability too: a pass revoked or past its expires_at deadline SINCE the
+		// handshake must not be admitted just because the active session matches (codex).
+		return false
+	}
+	switch sess, serr := wr.store.ActiveSession(ctx, hostID); {
+	case errors.Is(serr, store.ErrNotFound):
+		return true // no live session yet — pre-live, admit
+	case serr != nil:
+		return false // fail-closed
+	default:
+		return sess.StreamID == pass.StreamID
+	}
+}
+
+// guestBoundSlot re-reads a guest's persisted cam-slot binding (passes.slot_id resolved to its
+// label) at REPLAY time — AFTER Join, not at the handshake — so a host PUT during the join
+// window can't make the replay route from a stale binding. It returns a label ONLY when the
+// binding's stream is the host's currently-LIVE session (EN-2/D-20): the slot pool is host-global
+// and the room host-scoped, so without this gate a guest of a non-live stream whose pass carries
+// a (legitimately) preassigned slot could auto-bind into the on-air pool just by opening their
+// link. Returns "" for an unbound guest, a non-cam binding, a guest of a non-live stream, no live
+// session, or any lookup miss (best-effort: a miss just means no replay).
+func (wr *wsResolver) guestBoundSlot(ctx context.Context, passID, hostID string) signaling.SlotID {
+	pass, err := wr.store.GetPass(ctx, passID)
+	if err != nil || pass.SlotID == nil {
+		return ""
+	}
+	sess, err := wr.store.ActiveSession(ctx, hostID)
+	if err != nil || sess.StreamID != pass.StreamID {
+		return "" // host not live, or this guest belongs to a stream that isn't the live one
+	}
+	slot, err := wr.store.GetSlot(ctx, *pass.SlotID)
+	if err != nil || slot.Kind != store.SlotCam {
+		return ""
+	}
+	label, _ := slotLabelRole(slot)
+	return label
 }
 
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {
