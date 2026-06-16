@@ -244,7 +244,13 @@ function DeviceCheck() {
         // guest would otherwise sit on a false "you're live" — surface the network-blocked screen
         // instead. onRecovered clears it if a connection eventually comes through (a slow network).
         const watch = new ConnectivityWatch({
-          onBlocked: () => setNetBlocked(true),
+          onBlocked: () => {
+            // The network-blocked overlay (D-38) takes render precedence over the in-session view,
+            // hiding the .gs-screen control — and a STUN-only blocked path can't carry the share
+            // anyway. Release any held capture so it isn't left running invisibly until Retry.
+            stopScreenCapture();
+            setNetBlocked(true);
+          },
           onRecovered: () => setNetBlocked(false),
         });
         watchRef.current = watch;
