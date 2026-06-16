@@ -20,6 +20,13 @@ function passTokenFromPath() {
   return m ? m[1] : "";
 }
 
+// Grace before a screen capture that the server says is no longer pooled (screenShare:"") with no
+// share lock is released (D-21/AC-13). A transient reconnect briefly projects screenShare:"" +
+// canScreen:false on the JOIN roster before the eligibility re-seed roster arrives in the same
+// handshake; the genuine "revoked while disconnected" case never re-seeds. A follow-up roster within
+// this window supersedes (recover into the pool); if none arrives we're genuinely stranded → release.
+const SHARE_RECONCILE_MS = 2000;
+
 /**
  * DeviceCheck is the guest's journey island (AC-5/AC-6): it requests a live camera + mic via
  * getUserMedia, shows a local preview, and — only on the explicit "enter" action — marks the
@@ -73,6 +80,11 @@ function DeviceCheck() {
   // (the round-trip: the local controller sheds + reports {t:stats}, the server folds it, and the
   // roster reflects it here) — a guest sees only its OWN degradation (AC-15).
   const [selfDegraded, setSelfDegraded] = useState(/** @type {{dir:string,reason:string}|null} */ (null));
+  // This guest's OWN screenshare self-state (AC-13), read back from its self roster entry's
+  // screenShare pointer: "" not sharing, "backstage" capturing-but-not-selected, "live" the host
+  // promoted this sharer to the screen slot. The sharer never asserts "live" optimistically — it is
+  // derived solely from the server-folded self pointer (screen-roster is host-only, EN-8).
+  const [screenShare, setScreenShare] = useState(/** @type {string} */ (""));
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -94,6 +106,25 @@ function DeviceCheck() {
   const degRef = useRef(null);
   /** @type {{current: import("../rtc/connectivity.js").ConnectivityWatch|null}} */
   const watchRef = useRef(null);
+  // The guest's video-only screen-capture stream while it is sharing (D-21/AC-13); null when not.
+  // Held here so the sharer can stop it on screen-stop, on a host force-no-share/revoke pull (the
+  // server clears its roster screenShare pointer → we stop capturing), and on teardown.
+  /** @type {{current: MediaStream|null}} */
+  const screenStreamRef = useRef(null);
+  // In-flight guard for the screen-capture request, so a rapid double-click can't start two
+  // concurrent getDisplayMedia calls (the second stream would leak — mirrors requestingRef on cam).
+  const screenRequestingRef = useRef(false);
+  // Pending timer id for the deferred "release a stranded capture" reconcile (see SHARE_RECONCILE_MS).
+  /** @type {{current: ReturnType<typeof setTimeout>|null}} */
+  const pendingShareReconcileRef = useRef(null);
+  // Live mirror of pubState, so async/once-registered closures (the post-picker send + the screen
+  // track's `onended`, both captured at share-start) consult the CURRENT connection state instead of
+  // a stale "live" — a send on a dropped/reconnecting socket would throw.
+  const pubStateRef = useRef("connecting");
+  // Set once the session ends for good (onTerminal). The screen picker can resolve AFTER a terminal,
+  // and pubStateRef may still read "live" (no non-live onState precedes every terminal), so the
+  // post-picker re-validation consults this to avoid capturing behind the terminal screen.
+  const terminatedRef = useRef(false);
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -140,13 +171,15 @@ function DeviceCheck() {
   }, [phase]);
 
   // Tear down on unmount: stop the reconnecting session (which closes the publisher + WS and
-  // halts retries), release the camera, and mark cancelled so a still-pending getUserMedia
-  // releases its stream when it resolves.
+  // halts retries), release the camera AND any screen capture (so getDisplayMedia tracks + the OS
+  // screen-capture indicator don't outlive the island), and mark cancelled so a still-pending
+  // getUserMedia/getDisplayMedia releases its stream when it resolves.
   useEffect(
     () => () => {
       cancelledRef.current = true;
       if (sessionRef.current) sessionRef.current.close();
       stopStream();
+      stopScreenCapture();
     },
     [],
   );
@@ -202,6 +235,7 @@ function DeviceCheck() {
     // onState, so without this the live-gated send helpers + GuestSession could act on a socket that
     // is still CONNECTING and throw on WebSocket.send (the "never live before the WS is up" invariant).
     setPubState("connecting");
+    pubStateRef.current = "connecting"; // keep the ref mirror in lockstep (close() never fires onState)
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
@@ -210,7 +244,15 @@ function DeviceCheck() {
         // guest would otherwise sit on a false "you're live" — surface the network-blocked screen
         // instead. onRecovered clears it if a connection eventually comes through (a slow network).
         const watch = new ConnectivityWatch({
-          onBlocked: () => setNetBlocked(true),
+          onBlocked: () => {
+            // The network-blocked overlay (D-38) takes render precedence over the in-session view,
+            // hiding the .gs-screen control — and a STUN-only blocked path can't carry the share
+            // anyway. D-38 is a MEDIA (P2P) failure: the SIGNALING socket is typically still live, so
+            // the server still has us in the preview pool — use stopScreenShare (best-effort
+            // {t:screen-stop} + local release), not a bare local stop, so the pool drops us too.
+            stopScreenShare();
+            setNetBlocked(true);
+          },
           onRecovered: () => setNetBlocked(false),
         });
         watchRef.current = watch;
@@ -266,6 +308,45 @@ function DeviceCheck() {
             }
             setLockedMods(locked);
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
+            // Screenshare self-state (AC-13), folded into our OWN entry by the server. If it clears to
+            // "" while we still hold a capture, reconcile against WHY. Any fresh roster supersedes a
+            // prior deferred decision, so cancel a pending reconcile first and re-decide:
+            //  - a share LOCK (set by BOTH host-pull paths: force-no-share directly, and an eligibility
+            //    revoke that runs the same side-effect WHILE WE'RE PRESENT) → stop capturing locally
+            //    (cooperative source-side stop — no {t:screen-stop} echo, the server already dropped us);
+            //  - else if we're still eligible + live → a transient reconnect dropped us from the pool
+            //    (the server ran `leave` on the old socket); re-assert {t:screen-start} to recover
+            //    (parity with the camera republish);
+            //  - else AMBIGUOUS (no lock, not eligible now): either the brief join roster before the
+            //    eligibility re-seed (recovers within the handshake) OR a revoke that landed while we
+            //    were disconnected (no lock created — we were absent). Defer; a follow-up roster
+            //    supersedes, and if none arrives we're genuinely stranded (a capture the now-hidden
+            //    .gs-screen control can't stop) → release it (codex).
+            const share = me.screenShare || "";
+            setScreenShare(share);
+            if (pendingShareReconcileRef.current) {
+              clearTimeout(pendingShareReconcileRef.current);
+              pendingShareReconcileRef.current = null;
+            }
+            if (share === "" && screenStreamRef.current) {
+              if (locked.includes("share")) {
+                stopScreenCapture();
+              } else if (canStartShare()) {
+                // Recover into the pool. A throw here means the socket died again mid-recovery;
+                // swallow and keep the capture — the next reconnect's roster re-asserts, or
+                // onTerminal releases it. (Unlike the start path, we already hold a valid capture.)
+                try {
+                  sessionRef.current.send({ t: "screen-start" });
+                } catch {
+                  /* socket mid-close; a later roster re-asserts or onTerminal releases */
+                }
+              } else {
+                pendingShareReconcileRef.current = setTimeout(() => {
+                  pendingShareReconcileRef.current = null;
+                  if (screenStreamRef.current && !canStartShare()) stopScreenCapture();
+                }, SHARE_RECONCILE_MS);
+              }
+            }
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
           // RF-8 (receiver-side): detach each OTHER peer's force-suppressed thumbnail track from the
@@ -371,11 +452,17 @@ function DeviceCheck() {
         setStreaming(false);
         setSelfDegraded(null);
       },
-      onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
+      onState: (st) => {
+        pubStateRef.current = st; // keep the ref mirror current for async screen-capture closures
+        setPubState(st); // "live" once up, "reconnecting" while a drop retries
+      },
       onTerminal: (reason) => {
         // The session is over for good — release the camera/mic so the device light goes off behind
-        // the error screen (the session won't reconnect, so nothing re-publishes this stream).
+        // the error screen (the session won't reconnect, so nothing re-publishes this stream). The
+        // screen capture is released too: no reconnect means no roster to drive the cooperative stop.
+        terminatedRef.current = true; // a pending picker that resolves after this must not capture
         stopStream();
+        stopScreenCapture();
         setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
       },
     });
@@ -415,6 +502,96 @@ function DeviceCheck() {
   function toggleHand() {
     if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "hand", raised: !handRaised });
   }
+  // Stop the local screen capture and clear the held stream. Used by an explicit stop, by the native
+  // browser "Stop sharing" affordance (the track's `ended` event), by the host-pull roster sync, and
+  // on teardown. Idempotent — safe to call when nothing is captured.
+  function stopScreenCapture() {
+    if (pendingShareReconcileRef.current) {
+      clearTimeout(pendingShareReconcileRef.current);
+      pendingShareReconcileRef.current = null;
+    }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+  }
+  // sessionLive reports whether the signaling socket is usable right now (open + publishing). Read at
+  // CALL time (via pubStateRef) so async + once-registered screen-capture closures never send on a
+  // dropped/reconnecting/CONNECTING socket, which would throw.
+  function sessionLive() {
+    return !!sessionRef.current && pubStateRef.current === "live";
+  }
+  // stopScreenShare announces {t:screen-stop} (best-effort) and ALWAYS releases the local capture.
+  // The send is wrapped because the WS can be mid-close — out of OPEN before onClose flips pubStateRef
+  // away from "live" — so sessionLive() can still pass yet ws.send() throw; the local teardown must
+  // run regardless, or the getDisplayMedia tracks (and the OS indicator) leak. The server drops us
+  // from the pool on disconnect anyway, so a missed screen-stop is harmless.
+  function stopScreenShare() {
+    try {
+      if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
+    } catch {
+      /* socket already closing/closed — fall through to the unconditional local stop */
+    }
+    stopScreenCapture();
+  }
+  // canStartShare reports whether STARTING a screen capture is allowed right now, from refs (so it's
+  // correct after an `await`): the session must be live + not terminated/unmounting, and this guest's
+  // OWN current roster entry must still be screenshare-eligible and not force-no-share'd (EN-7 — the
+  // server rejects an ineligible/locked screen-start anyway, but capturing locally would leak behind a
+  // share control that the revoke just hid). The host can revoke while the picker is open, so this is
+  // re-checked after getDisplayMedia resolves, not only before.
+  function canStartShare() {
+    if (!sessionLive() || cancelledRef.current || terminatedRef.current) return false;
+    const me = peersRef.current.find((p) => p.self || p.id === selfIdRef.current);
+    if (!me || !me.canScreen) return false;
+    return !(me.locks || []).some((l) => l.kind === "share");
+  }
+  // Screenshare capture toggle (AC-13/D-21). Video-only getDisplayMedia (D-41) — start grabs the
+  // display surface, registers the native-stop `ended` handler, and announces {t:screen-start} so the
+  // server adds us to the backstage preview pool; stop tears the capture down and announces
+  // {t:screen-stop}. The host alone promotes a sharer to the live slot (host-only {t:screen-select}),
+  // so starting only ever yields the "backstage" self-state until the server says otherwise.
+  async function toggleScreen() {
+    if (!sessionRef.current) return;
+    if (screenStreamRef.current) {
+      stopScreenShare(); // best-effort {t:screen-stop} + unconditional local capture release
+      return;
+    }
+    if (!canStartShare()) return;
+    if (screenRequestingRef.current) return; // a getDisplayMedia is already in flight (double-click)
+    screenRequestingRef.current = true;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    } catch {
+      return; // user cancelled the picker or capture failed — stay idle, no frame sent
+    } finally {
+      screenRequestingRef.current = false;
+    }
+    // The picker can resolve long after it opened: if we unmounted, the session dropped/terminated,
+    // the host revoked eligibility / force-no-share'd us, or another capture already won the slot
+    // meanwhile, release this stream instead of leaking it (and don't send on a dead/rejecting
+    // socket). Mirrors the cancelledRef guard on the camera's getUserMedia.
+    if (screenStreamRef.current || !canStartShare()) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    screenStreamRef.current = stream;
+    // Native browser "Stop sharing" — mirror it back to the server so the pool drops us (only if the
+    // socket is still live at that moment — pubStateRef, not a stale capture-time pubState).
+    const vt = stream.getVideoTracks()[0];
+    if (vt) {
+      vt.onended = () => stopScreenShare(); // native "Stop sharing": same best-effort stop + release
+    }
+    // Announce we're sharing. The send can throw in the mid-close window (socket out of OPEN before
+    // onClose flips pubStateRef) — the server then never registered us, so release the just-captured
+    // stream rather than leaving it running orphaned with no pool entry.
+    try {
+      sessionRef.current.send({ t: "screen-start" });
+    } catch {
+      stopScreenCapture();
+    }
+  }
 
   // Backstage thumbnail moderation: a co-host (viewerRole "cohost") acts on a guest's tile within
   // rank (AC-11) — the reducer enforces authority (EN-7); these only fire when the socket is live.
@@ -440,11 +617,15 @@ function DeviceCheck() {
   // session close() runs teardown → stops the watch + closes the dead pcs) and return to the
   // device-check preview, so the guest can switch networks (Wi-Fi → phone hotspot) and re-enter. The
   // camera stays live for the preview, and POST /enter is idempotent, so re-entering just re-publishes.
+  // The camera is kept for the preview, but any screen capture is released: this path closes the
+  // session without unmounting / onTerminal / a roster clear, so it's the only place a held capture
+  // would otherwise leak (the getDisplayMedia tracks + the OS indicator).
   function retryNetwork() {
     if (sessionRef.current) {
       sessionRef.current.close();
       sessionRef.current = null;
     }
+    stopScreenCapture();
     setNetBlocked(false);
     setPhase("preview");
   }
@@ -502,6 +683,8 @@ function DeviceCheck() {
         handRaised={handRaised}
         onSendChat={sendChat}
         onToggleHand={toggleHand}
+        screenShare={screenShare}
+        onToggleScreen={toggleScreen}
         selfDegraded={selfDegraded}
         thumbnails={thumbnails}
         viewerRole={viewerRole}

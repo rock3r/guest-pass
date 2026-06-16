@@ -48,6 +48,7 @@ function onAirLabel(onAir) {
  *   selfStream: MediaStream|null, peers: any[], selfId: string,
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
+ *   screenShare: string, onToggleScreen: ()=>void,
  *   selfDegraded: {dir:string,reason:string}|null,
  *   thumbnails: Array<{id:string, entry:any, stream:MediaStream|null}>, viewerRole: string,
  *   onThumbForce: (id:string, m:string)=>void, onThumbRelease: (id:string, m:string)=>void,
@@ -68,6 +69,8 @@ export function GuestSession({
   handRaised,
   onSendChat,
   onToggleHand,
+  screenShare,
+  onToggleScreen,
   selfDegraded,
   thumbnails,
   viewerRole,
@@ -97,10 +100,13 @@ export function GuestSession({
   const notices = (lockedMods || []).map((m) => LOCK_COPY[m]).filter(Boolean);
 
   // Screenshare eligibility (EN-23/AC-9): the host grants/revokes can_screen live; the guest sees it
-  // on its OWN roster entry, gating the share affordance. The actual capture lands in PR-12 — for now
-  // the affordance reflects eligibility so the host's grant/revoke is visible to the guest.
+  // on its OWN roster entry, gating the share affordance.
   const self = (peers || []).find((p) => p.id === selfId);
   const canShareScreen = !!(self && self.canScreen);
+  // Screenshare self-state (AC-13): "" idle, "backstage" capturing but not selected for the live
+  // slot, "live" the host promoted this sharer to /s/screen. Derived solely from the server-folded
+  // self pointer — the sharer never asserts "live" optimistically (the host alone selects live).
+  const sharing = screenShare === "backstage" || screenShare === "live";
 
   // The chat and raise-hand actions send over the signaling socket, which throws while it is still
   // CONNECTING (and is dead once disconnected) — so they are disabled until the room is live.
@@ -157,9 +163,34 @@ export function GuestSession({
             </p>
           ) : null}
           {canShareScreen ? (
-            <p class="gs-screen-elig" data-eligible="1">
-              Screen sharing enabled by the host.
-            </p>
+            <div class="gs-screen" data-eligible="1" data-screen-state={screenShare || "idle"}>
+              <button
+                type="button"
+                class="gs-screen-toggle"
+                data-sharing={sharing ? "1" : "0"}
+                /* STARTING needs a live socket (the announce); STOPPING must stay enabled even while
+                   reconnecting — the capture is kept alive for recovery, and the sharer must always be
+                   able to release it (the stop is best-effort over the socket + an unconditional local
+                   teardown), so a reconnecting sharer is never stuck unable to stop. */
+                disabled={!sharing && !live}
+                onClick={onToggleScreen}
+              >
+                {sharing ? "Stop sharing" : "Share screen"}
+              </button>
+              {screenShare === "live" ? (
+                <p class="gs-screen-status" data-screen-status="live">
+                  Your screen is on the live output.
+                </p>
+              ) : screenShare === "backstage" ? (
+                <p class="gs-screen-status" data-screen-status="backstage">
+                  Screen ready — the host can put it live.
+                </p>
+              ) : (
+                <p class="gs-screen-status" data-screen-status="idle">
+                  Screen sharing enabled by the host.
+                </p>
+              )}
+            </div>
           ) : null}
           <button
             type="button"
