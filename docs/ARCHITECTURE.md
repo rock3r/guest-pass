@@ -1244,8 +1244,12 @@ any live `/s/{slot}` subscription with a terminal `token-rotated` terminate
 (`Hub.TerminateSourceIfLive` → `Room.RotateSource`; the OBS source page stops, not
 reconnects, and the host re-pastes the fresh URL), and reveals the new URL once via the
 same PRG reveal nonce. Binding, nameplate, and the quality ceiling still live only in the
-host-only greenroom People controls, which each card links to (EN-23/EN-26). The settings
-surface hangs off the same prefix as it lands.
+host-only greenroom People controls, which each card links to (EN-23/EN-26). `GET
+/app/settings` is the account settings page (AC-10): a read-only account card (the host's
+own Google identity — name/email, never logged, EN-16), a pointer to the per-stream quality
+ceiling (greenroom-managed, D-19), and **GDPR stub** entry points (export/amend/delete) that
+are non-functional in M4 — disabled, with copy stating self-service lands in a later release
+(no functional purge yet; the 24h guest auto-purge is D-37/DEPLOYMENT).
 No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
 `SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
 separate CSRF token is needed. After Google sign-in the host lands on `/app`.
