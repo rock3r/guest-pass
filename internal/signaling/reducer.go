@@ -643,6 +643,36 @@ func (s *roomState) recoverQuality() []outbound {
 	return out
 }
 
+// setCeiling broadcasts the stream's program quality ceiling (D-19/AC-8) to every participant so
+// each publisher caps its program/monitor encoder at it and its degradation ladder recovers no
+// higher. Like recoverQuality it carries no room state and touches no media (D-23) — the actual
+// encoder cap is per-publisher-local. OBS source pages don't publish, so they never receive it.
+func (s *roomState) setCeiling(maxRes, maxFps, maxBitrateKbps int) []outbound {
+	var out []outbound
+	for pid, p := range s.peers {
+		if !isParticipant(p.role) {
+			continue
+		}
+		out = append(out, outbound{to: pid, frame: Frame{T: "ceiling", MaxRes: maxRes, MaxFps: maxFps, MaxBitrateKbps: maxBitrateKbps}})
+	}
+	return out
+}
+
+// sourceQuality relays an OBS cam source's per-source program-resolution override (D-19/AC-8, its
+// ?res URL param) to the slot's bound occupant, stamped with the SOURCE's id so the occupant caps
+// the sender feeding that specific source (pub:<sourceId>) — a per-guest cap layered on the ceiling.
+// Resolving the target via the slot the source feeds (EN-1) means the source never addresses the
+// occupant directly and a non-source peer can't spoof it. A no-op when the source feeds no slot or
+// that slot is unbound (no publisher to cap).
+func (s *roomState) sourceQuality(source PeerID, res int) []outbound {
+	for _, st := range s.slots {
+		if st.source == source && st.occupant != "" {
+			return []outbound{{to: st.occupant, frame: Frame{T: "source-quality", PeerID: string(source), Res: res}}}
+		}
+	}
+	return nil
+}
+
 // sessionLive notifies the host that its session just went live (D-40). A greenroom that was open
 // BEFORE Go live drops its optimistic pre-live slot overrides on this signal and reconciles to the
 // now-authoritative roster (the Go-live replay's live bindings), so a pass unassigned/displaced

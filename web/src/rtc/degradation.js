@@ -169,6 +169,88 @@ export class DegradationController {
     this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
     /** @type {ReturnType<typeof setInterval>|undefined} */
     this._timer = undefined;
+    // Program quality ceiling (D-19/AC-8): the MAX encoding the program/monitor (protected) senders
+    // run at, so the program encoder is actually capped and degradation recovery never exceeds it.
+    // null = no ceiling yet (browser default). Per-source overrides cap one specific source's sender
+    // tighter (its ?res). _capApplied memoizes the last applied ceiling signature keyed by the SENDER
+    // OBJECT (a reconnect makes a NEW sender for the same pub:<id> key — it must re-cap), recorded
+    // only AFTER setParameters resolves, so the ceiling isn't re-pushed every sample yet a recreated
+    // or rejected sender is re-capped. A WeakMap so dropped senders don't leak.
+    /** @type {{maxRes:number, maxFps:number, maxBitrateKbps:number}|null} */
+    this._ceiling = null;
+    /** @type {Record<string, number>} sender key ("pub:<id>") → per-source max height override */
+    this._overrides = {};
+    /** @type {WeakMap<RTCRtpSender, string>} sender → last successfully applied ceiling signature */
+    this._capApplied = new WeakMap();
+  }
+
+  /**
+   * setCeiling sets the program quality ceiling (D-19/AC-8) and immediately caps every protected
+   * (program/monitor) sender at it. A falsy/zero ceiling clears it (back to browser default).
+   * @param {{maxRes:number, maxFps:number, maxBitrateKbps:number}|null} c
+   */
+  setCeiling(c) {
+    this._ceiling = c && c.maxRes ? { maxRes: c.maxRes, maxFps: c.maxFps, maxBitrateKbps: c.maxBitrateKbps } : null;
+    this._capApplied = new WeakMap(); // a new ceiling must re-push to every sender
+    this._enforceCeiling();
+  }
+
+  /**
+   * setSourceOverride caps ONE source's program sender (keyed "pub:<sourceId>") at `res` px — the
+   * source's ?res URL param (D-19/AC-8), layered under the stream ceiling. res<=0 clears it.
+   * @param {string} key sender key "pub:<sourceId>"
+   * @param {number} res max height in px (0 = clear)
+   */
+  setSourceOverride(key, res) {
+    if (res > 0) this._overrides[key] = res;
+    else delete this._overrides[key];
+    // No memo clear needed: the override changes the computed ceiling signature for that sender, so
+    // _enforceCeiling re-applies it (a stale memo only matches an identical signature).
+    this._enforceCeiling();
+  }
+
+  /**
+   * _ceilingParamsFor computes the ceiling encoding for a protected sender from its captured height,
+   * the stream ceiling, and any per-source override (the tighter of the two resolutions). Returns
+   * null when no ceiling is set.
+   * @param {{key:string, sender:RTCRtpSender}} target
+   */
+  _ceilingParamsFor(target) {
+    const c = this._ceiling;
+    if (!c) return null;
+    const settings = target.sender.track && target.sender.track.getSettings ? target.sender.track.getSettings() : {};
+    const h = settings.height || 0;
+    const override = this._overrides[target.key];
+    const maxRes = override ? Math.min(c.maxRes, override) : c.maxRes; // per-source override is res-only
+    const scaleResolutionDownBy = h && maxRes ? Math.max(1, h / maxRes) : 1;
+    return { scaleResolutionDownBy, maxFramerate: c.maxFps, maxBitrate: c.maxBitrateKbps * 1000 };
+  }
+
+  /**
+   * _enforceCeiling caps each PROTECTED (program/monitor) sender at the ceiling baseline, UNLESS the
+   * bandwidth ladder has it shed BELOW the ceiling already (don't raise a shed sender). Idempotent
+   * via _capApplied so identical params aren't re-pushed every sample. The mesh thumbnails are NOT
+   * capped here — they ride their own low-res shedding, not the program ceiling.
+   */
+  _enforceCeiling() {
+    if (!this._ceiling) return;
+    for (const t of this.getTargets()) {
+      if (!t.protected) continue;
+      if ((this.state.bw[t.key] || 0) > 0) continue; // shed below the ceiling — leave it lower
+      const params = this._ceilingParamsFor(t);
+      const sig = `${params.scaleResolutionDownBy}|${params.maxFramerate}|${params.maxBitrate}`;
+      const sender = t.sender;
+      if (this._capApplied.get(sender) === sig) continue; // already capped (this exact sender object)
+      // Record the memo ONLY after setParameters resolves: a recreated sender (reconnect) is a fresh
+      // object so it misses the memo and re-caps, and a transient rejection (renegotiation) leaves no
+      // memo so the next sample retries — the recreated/uncapped program sender can't outrun the cap.
+      sender
+        .setParameters(encodingParams(sender, { params }))
+        .then(() => this._capApplied.set(sender, sig))
+        .catch(() => {
+          /* renegotiating / closed — leave it unmemoized so the next sample retries */
+        });
+    }
   }
 
   start() {
@@ -197,6 +279,11 @@ export class DegradationController {
       applyAction(t.sender, { active: true, params: { scaleResolutionDownBy: 1 } });
     }
     this.state = { cpuLevel: 0, bw: {}, recoverStreak: 0, lastReason: null };
+    // "Bump quality now" restores to the program CEILING, never above it (D-19/AC-8): re-cap the
+    // protected senders we just reset to scaleResolutionDownBy:1 so the override can't exceed the
+    // host's ceiling. _capApplied is cleared so the re-cap actually pushes.
+    this._capApplied = new WeakMap();
+    this._enforceCeiling();
     // Report recovered IMMEDIATELY (don't wait for the next ~2s sample) so the host's badge and the
     // guest's own degradation clear right away — that's the point of the override. If the pressure
     // persists, the next sample re-degrades.
@@ -250,8 +337,17 @@ export class DegradationController {
     this.state = plan.state;
     for (const a of plan.actions) {
       const target = byKey[a.key];
-      if (target) applyAction(target.sender, a);
+      if (!target) continue;
+      applyAction(target.sender, a);
+      // A shed/recover action touched a protected sender → its applied params no longer match the
+      // ceiling memo, so clear it; _enforceCeiling below re-caps it to the ceiling if it recovered
+      // to baseline, or leaves it shed below the ceiling.
+      if (target.protected) this._capApplied.delete(target.sender);
     }
+    // Cap any protected sender at the program ceiling (D-19/AC-8): catches a newly-connected program
+    // consumer and a sender that just recovered to baseline, so the program encoder never runs above
+    // the ceiling and recovery clamps to it (shed-below senders are left untouched).
+    this._enforceCeiling();
     // Debug/test observability: expose this sample's reason + decision (matches the wsRecorder seam
     // used by the browser tests). No behavior, no secrets — just this publisher's own numbers.
     if (typeof window !== "undefined") {
@@ -285,11 +381,13 @@ function readSenderStats(stats) {
 }
 
 /**
- * applyAction applies one ladder action to a sender via setParameters (the proven AD-21 mechanism).
+ * encodingParams folds one action into a sender's current RTCRtpSendParameters (encodings[0]),
+ * returning the object to hand to setParameters. Split out so _enforceCeiling can apply the same
+ * encoding shape but observe setParameters success/failure itself (success-gated ceiling memo).
  * @param {RTCRtpSender} sender
  * @param {{active?:boolean, params?:object}} action
  */
-function applyAction(sender, action) {
+function encodingParams(sender, action) {
   const p = sender.getParameters();
   if (!p.encodings || !p.encodings.length) p.encodings = [{}];
   const enc = p.encodings[0];
@@ -301,7 +399,16 @@ function applyAction(sender, action) {
     if (action.params.maxBitrate !== undefined) enc.maxBitrate = action.params.maxBitrate;
     else delete enc.maxBitrate;
   }
-  return sender.setParameters(p).catch(() => {
+  return p;
+}
+
+/**
+ * applyAction applies one ladder action to a sender via setParameters (the proven AD-21 mechanism).
+ * @param {RTCRtpSender} sender
+ * @param {{active?:boolean, params?:object}} action
+ */
+function applyAction(sender, action) {
+  return sender.setParameters(encodingParams(sender, action)).catch(() => {
     /* setParameters can reject on a renegotiating sender; the next sample retries */
   });
 }

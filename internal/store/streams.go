@@ -34,15 +34,18 @@ func (s *Store) CreateStream(ctx context.Context, p CreateStreamParams) (*Stream
 		status = StreamDraft
 	}
 	st := &Stream{
-		ID:               id,
-		HostID:           p.HostID,
-		Title:            p.Title,
-		ScheduledAt:      p.ScheduledAt,
-		DurationMin:      p.DurationMin,
-		Status:           status,
-		MaxRes:           p.MaxRes,
-		MaxFPS:           p.MaxFPS,
-		MaxBitrateKbps:   p.MaxBitrateKbps,
+		ID:          id,
+		HostID:      p.HostID,
+		Title:       p.Title,
+		ScheduledAt: p.ScheduledAt,
+		DurationMin: p.DurationMin,
+		Status:      status,
+		// A new stream ships with the default program quality ceiling (D-19/AC-8) unless the caller
+		// set one, so the program encoder is always bounded and the degradation ladder has a recovery
+		// ceiling. The host adjusts it live via the greenroom People tab.
+		MaxRes:           defaultInt64(p.MaxRes, DefaultMaxRes),
+		MaxFPS:           defaultInt64(p.MaxFPS, DefaultMaxFPS),
+		MaxBitrateKbps:   defaultInt64(p.MaxBitrateKbps, DefaultMaxBitrateKbps),
 		TwitchYTChannel:  p.TwitchYTChannel,
 		TwitchYTPlatform: p.TwitchYTPlatform,
 		CreatedAt:        time.Now().Unix(),
@@ -57,6 +60,16 @@ func (s *Store) CreateStream(ctx context.Context, p CreateStreamParams) (*Stream
 		return nil, fmt.Errorf("inserting stream: %w", err)
 	}
 	return st, nil
+}
+
+// defaultInt64 returns v when non-nil, else a pointer to def — so a caller that leaves a nullable
+// ceiling column unset gets the product default while an explicit value (incl. a deliberate one) is
+// preserved.
+func defaultInt64(v *int64, def int64) *int64 {
+	if v != nil {
+		return v
+	}
+	return &def
 }
 
 // GetStream returns the stream with the given id, or ErrNotFound.

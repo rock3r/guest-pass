@@ -36,6 +36,11 @@ function start() {
   const showName = nameVal !== null && nameVal !== "0" && nameVal !== "false";
   /** @type {HTMLElement|null} the nameplate overlay; styled by the host via OBS Custom CSS */
   const nameplate = document.getElementById("obs-nameplate");
+  // Per-source program-resolution override (D-19/AC-8): an optional ?res URL param caps the bound
+  // occupant's program encoder for THIS source tighter than the stream ceiling. We don't re-encode
+  // (a source only consumes) — we tell the server, which relays it to the occupant so it caps the
+  // sender feeding us. 0/invalid = no override.
+  const resOverride = Math.max(0, parseInt(params.get("res") || "", 10) || 0);
 
   // State that must survive a reconnect (a fresh Room is built on each retry).
   /** @type {PeerLink|null} */
@@ -146,6 +151,12 @@ function start() {
         if (l.pc.iceConnectionState === "failed") l.restartIce();
       };
       l.offer();
+      // Per-source resolution override (?res, D-19/AC-8): on every real (re)bind tell the server our
+      // override so it relays the cap to the (new) occupant, which caps the sender feeding us. ALWAYS
+      // sent — res 0 when ?res is absent — so a source whose URL DROPS ?res (host reload) clears any
+      // override the prior occupant/sender still held, instead of leaving a stale tighter cap. The
+      // server resolves us→occupant via the slot (EN-1); we never address the occupant directly.
+      relay({ t: "source-quality", res: resOverride });
     }
 
     function unbind(ep) {

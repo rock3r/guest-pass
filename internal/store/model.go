@@ -20,6 +20,13 @@ const (
 	StreamLive      = "live"
 	StreamEnded     = "ended"
 
+	// Default program quality ceiling for a new stream (D-19/AC-8): 720p / 30 fps / ~2500 kbps.
+	// The publisher caps its program encoder at this and the M3 degradation ladder recovers no
+	// higher; the host can adjust it live. Applied by CreateStream when the caller leaves it unset.
+	DefaultMaxRes         = 720
+	DefaultMaxFPS         = 30
+	DefaultMaxBitrateKbps = 2500
+
 	PassCreated  = "created"
 	PassSent     = "sent"
 	PassOpened   = "opened"

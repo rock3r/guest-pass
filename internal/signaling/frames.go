@@ -37,10 +37,21 @@ type Frame struct {
 	Active    bool     `json:"active,omitempty"`
 	OnAir     string   `json:"onAir,omitempty"`
 	Reason    string   `json:"reason,omitempty"`
-	Kind      string   `json:"kind,omitempty"`   // {t:release} modality: mic | cam | share (D-13)
-	Role      string   `json:"role,omitempty"`   // {t:role} target role: cohost | guest (host-only, D-15)
-	Text      string   `json:"text,omitempty"`   // {t:chat} backstage message — relayed only, NEVER persisted or logged (EN-20)
-	Raised    bool     `json:"raised,omitempty"` // {t:hand} hand-raise state — true = raise (self), false = lower (self) / dismiss (host)
+	Kind      string   `json:"kind,omitempty"` // {t:release} modality: mic | cam | share (D-13)
+	Role      string   `json:"role,omitempty"` // {t:role} target role: cohost | guest (host-only, D-15)
+	// Program quality ceiling (D-19/AC-8) on a {t:"ceiling"} frame, server → a publishing participant
+	// (guest/co-host): the stream-wide MAX the publisher caps its program/monitor encoder at and the M3
+	// degradation ladder recovers no higher (shed below is fine). Delivered on join + re-broadcast when
+	// the host adjusts it live. The server never touches media (D-23) — it only relays the numbers.
+	MaxRes         int `json:"maxRes,omitempty"`         // max program height in px (e.g. 720)
+	MaxFps         int `json:"maxFps,omitempty"`         // max program framerate (e.g. 30)
+	MaxBitrateKbps int `json:"maxBitrateKbps,omitempty"` // max program bitrate in kbps (e.g. 2500)
+	// Res carries a per-source program-resolution override (D-19/AC-8) on a {t:"source-quality"} frame:
+	// an OBS cam source's ?res URL param, relayed by the server to that slot's bound occupant so the
+	// occupant caps the sender feeding THAT source to res px — a per-guest cap on top of the ceiling.
+	Res    int    `json:"res,omitempty"`
+	Text   string `json:"text,omitempty"`   // {t:chat} backstage message — relayed only, NEVER persisted or logged (EN-20)
+	Raised bool   `json:"raised,omitempty"` // {t:hand} hand-raise state — true = raise (self), false = lower (self) / dismiss (host)
 	// Self-presence on an inbound {t:"state"} frame (EN-7): the sender's own cam/mic/screen
 	// and the local audio meter. These are POINTERS so an ABSENT field means "leave it
 	// unchanged" — a meter-only update ({"t":"state","level":…}) must not clobber presence to

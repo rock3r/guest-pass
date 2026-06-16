@@ -138,6 +138,12 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Host's persisted pass→slot bindings, so the greenroom can seed its picker on load and a
 			// pre-live (DB-only) selection survives a refresh / new tab (codex).
 			hr.Get("/api/passes/slot-bindings", api.listSlotBindings)
+			// Quality ceiling (D-19/AC-8): adjust a stream's program-encoder cap → persist streams.max_*
+			// + re-cap the live room's publishers. Host-only (RequireHost), RF-2.
+			hr.Put("/api/streams/{id}/ceiling", api.putStreamCeiling)
+			// Active session's stream id + current ceiling, so the greenroom populates + targets its
+			// ceiling control (404 until Go live). Host-only.
+			hr.Get("/api/session/ceiling", api.getSessionCeiling)
 
 			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).

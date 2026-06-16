@@ -142,6 +142,12 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 			room.ResumeBind(slot, id.peer)
 		}
 		unlock()
+		// Deliver the program quality ceiling (D-19/AC-8) so the publisher caps its program encoder
+		// the moment it publishes (and its degradation ladder recovers no higher). Resolved from the
+		// guest's own stream, so it applies pre-live too; a later host adjustment re-broadcasts.
+		if mr, mf, mb, ok := h.resolver.passCeiling(ctx, string(id.peer)); ok {
+			room.DeliverTo(id.peer, signaling.Frame{T: "ceiling", MaxRes: mr, MaxFps: mf, MaxBitrateKbps: mb})
+		}
 	} else if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
 		// reconnect and close; we never registered, so there's no writer to drain.
@@ -291,6 +297,14 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 			room.ObsStreaming(true)
 		case "streamingStopped":
 			room.ObsStreaming(false)
+		}
+	case "source-quality":
+		// A cam source's per-source program-resolution override (D-19/AC-8, its ?res URL param):
+		// relay it to the slot's bound occupant so it caps the sender feeding this source. Sources
+		// only (EN-7); the room resolves the target via the slot the source feeds (EN-1), so the
+		// source never addresses the occupant directly. A non-positive res is a clear (no override).
+		if id.isSource() && f.Res >= 0 {
+			room.SourceQuality(id.peer, f.Res)
 		}
 	}
 }

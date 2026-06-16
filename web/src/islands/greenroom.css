@@ -140,6 +140,43 @@
   background: var(--paper);
   cursor: pointer;
 }
+
+/* Host-only stream-wide program quality ceiling control (D-19/AC-8). */
+.gr-ceiling {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.gr-ceiling-label {
+  font-weight: 600;
+  opacity: 0.8;
+}
+.gr-ceiling-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.gr-ceiling-field input {
+  font: inherit;
+  width: 5ch;
+  padding: 3px 5px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.gr-ceiling-unit {
+  opacity: 0.7;
+}
+.gr-ceiling-apply {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
 .gr-degraded {
   margin: 0;
   font-size: 0.8rem;
