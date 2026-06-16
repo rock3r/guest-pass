@@ -128,6 +128,11 @@ export class Publisher {
     }
   }
 
+  /** consumerIds returns the peer ids of every live consumer connection (for authorization pruning). */
+  consumerIds() {
+    return Object.keys(this.pcs);
+  }
+
   /**
    * dropConsumer tears down one consumer's connection when the server says that consumer departed
    * (a host monitor via {t:peer-left}, an OBS source via {t:consumer-left}). It closes + forgets the

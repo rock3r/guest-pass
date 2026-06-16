@@ -121,4 +121,12 @@ func TestScreenShareMedia_RailSelectLiveEveryone(t *testing.T) {
 	if err := chromedp.Run(aCtx, chromedp.WaitNotPresent(`.gs-livescreen`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("guest A's live render did not clear after take-off-air: %v", err)
 	}
+	// Both sharers are still backstage, so the host's rail keeps rendering both previews (the host
+	// consumer survives the publisher's prune-to-host of non-host viewers on going off air).
+	if err := chromedp.Run(hCtx,
+		renders(railA+` .gr-screen-video`),
+		renders(railB+` .gr-screen-video`),
+	); err != nil {
+		t.Fatalf("host rail did not keep rendering backstage previews after take-off-air: %v", err)
+	}
 }

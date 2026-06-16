@@ -382,6 +382,11 @@ function DeviceCheck() {
                 }, SHARE_RECONCILE_MS);
               }
             }
+            // While we are sharing but NOT the live share, only the host may consume our screen (the
+            // backstage rail); force-drop any other established consumer so a viewer that watched us
+            // live can't keep receiving our now-backstage screen (the relay gate only blocks new
+            // signals). A no-op while live (everyone may consume) or when not publishing.
+            if (screenStreamRef.current && share !== "live") pruneScreenConsumersToHost();
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
           // RF-8 (receiver-side): detach each OTHER peer's force-suppressed thumbnail track from the
@@ -585,6 +590,20 @@ function DeviceCheck() {
     if (screenPubRef.current) {
       screenPubRef.current.close();
       screenPubRef.current = null;
+    }
+  }
+  // pruneScreenConsumersToHost drops every established screen-publisher consumer pc EXCEPT the host's
+  // (D-21/EN-7). The relay authorization only blocks NEW screen signals, so when we stop being the
+  // live sharer (live → backstage) an already-connected viewer would otherwise keep receiving our now
+  // backstage screen at the media layer if it doesn't voluntarily close its link. Only the host may
+  // consume a backstage preview (the host-only rail), so everyone else is force-dropped here. Host
+  // consumer ids are resolved from the roster (the host is a participant, visible to guests).
+  function pruneScreenConsumersToHost() {
+    const pub = screenPubRef.current;
+    if (!pub) return;
+    const hostIds = new Set(peersRef.current.filter((p) => p.role === "host").map((p) => p.id));
+    for (const id of pub.consumerIds()) {
+      if (!hostIds.has(id)) pub.dropConsumer(id);
     }
   }
   // closeScreenConsumers tears down every live-share consumer link (the screen we render from another
