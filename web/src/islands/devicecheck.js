@@ -324,7 +324,14 @@ function DeviceCheck() {
               if (locked.includes("share")) {
                 stopScreenCapture();
               } else if (canStartShare()) {
-                sessionRef.current.send({ t: "screen-start" });
+                // Recover into the pool. A throw here means the socket died again mid-recovery;
+                // swallow and keep the capture — the next reconnect's roster re-asserts, or
+                // onTerminal releases it. (Unlike the start path, we already hold a valid capture.)
+                try {
+                  sessionRef.current.send({ t: "screen-start" });
+                } catch {
+                  /* socket mid-close; a later roster re-asserts or onTerminal releases */
+                }
               } else {
                 pendingShareReconcileRef.current = setTimeout(() => {
                   pendingShareReconcileRef.current = null;
@@ -568,7 +575,14 @@ function DeviceCheck() {
     if (vt) {
       vt.onended = () => stopScreenShare(); // native "Stop sharing": same best-effort stop + release
     }
-    sessionRef.current.send({ t: "screen-start" });
+    // Announce we're sharing. The send can throw in the mid-close window (socket out of OPEN before
+    // onClose flips pubStateRef) — the server then never registered us, so release the just-captured
+    // stream rather than leaving it running orphaned with no pool entry.
+    try {
+      sessionRef.current.send({ t: "screen-start" });
+    } catch {
+      stopScreenCapture();
+    }
   }
 
   // Backstage thumbnail moderation: a co-host (viewerRole "cohost") acts on a guest's tile within
