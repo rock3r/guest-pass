@@ -23,7 +23,7 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	// Guest A enters (its guest-session view). seedDeviceCheck's pass is not screenshare-eligible, so
 	// the affordance starts absent.
 	aCtx := enterGuestSession(t, s.base, s.rawToken, "A")
-	if err := chromedp.Run(aCtx, chromedp.WaitNotPresent(`.gs-screen-elig`, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(aCtx, chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("the share affordance should be absent before the host grants eligibility: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	if err := chromedp.Run(hCtx, chromedp.Click(toggle, chromedp.ByQuery)); err != nil {
 		t.Fatalf("grant click: %v", err)
 	}
-	if err := chromedp.Run(aCtx, chromedp.WaitVisible(`.gs-screen-elig[data-eligible="1"]`, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(aCtx, chromedp.WaitVisible(`.gs-screen[data-eligible="1"]`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("the guest's share affordance did not appear after the host granted eligibility: %v", err)
 	}
 	if err := chromedp.Run(hCtx, chromedp.Poll(`document.querySelector('`+tileA+` .gr-screenelig-input').checked`, nil, chromedp.WithPollingTimeout(10*time.Second))); err != nil {
@@ -65,7 +65,7 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	}
 	var lock string
 	if err := chromedp.Run(aCtx,
-		chromedp.WaitNotPresent(`.gs-screen-elig`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gs-lock`, chromedp.ByQuery),
 		chromedp.Text(`.gs-lock`, &lock, chromedp.ByQuery),
 	); err != nil {

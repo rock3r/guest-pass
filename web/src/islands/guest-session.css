@@ -61,12 +61,39 @@
   color: #8a1f1f;
 }
 
-/* Screenshare eligibility indicator (EN-23/AC-9): shown when the host grants can_screen. The
-   functional share control lands in PR-12; this reflects the host's live grant/revoke. */
-.gs-screen-elig {
+/* Screenshare control (EN-23/AC-9/AC-13): shown when the host grants can_screen. The button drives
+   getDisplayMedia capture; the status line reflects the server-folded self-state (idle/backstage/
+   live) — the sharer never asserts "live" without the roster pointer. */
+.gs-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+}
+.gs-screen-toggle {
+  align-self: flex-start;
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.gs-screen-toggle[data-sharing="1"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.gs-screen-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gs-screen-status {
   margin: 0;
   font-weight: 600;
   color: #1f6b3a;
+}
+.gs-screen[data-screen-state="live"] .gs-screen-status {
+  color: #8a1f1f;
 }
 
 .gs-hand {

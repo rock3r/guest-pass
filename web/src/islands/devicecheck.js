@@ -73,6 +73,11 @@ function DeviceCheck() {
   // (the round-trip: the local controller sheds + reports {t:stats}, the server folds it, and the
   // roster reflects it here) — a guest sees only its OWN degradation (AC-15).
   const [selfDegraded, setSelfDegraded] = useState(/** @type {{dir:string,reason:string}|null} */ (null));
+  // This guest's OWN screenshare self-state (AC-13), read back from its self roster entry's
+  // screenShare pointer: "" not sharing, "backstage" capturing-but-not-selected, "live" the host
+  // promoted this sharer to the screen slot. The sharer never asserts "live" optimistically — it is
+  // derived solely from the server-folded self pointer (screen-roster is host-only, EN-8).
+  const [screenShare, setScreenShare] = useState(/** @type {string} */ (""));
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -94,6 +99,11 @@ function DeviceCheck() {
   const degRef = useRef(null);
   /** @type {{current: import("../rtc/connectivity.js").ConnectivityWatch|null}} */
   const watchRef = useRef(null);
+  // The guest's video-only screen-capture stream while it is sharing (D-21/AC-13); null when not.
+  // Held here so the sharer can stop it on screen-stop, on a host force-no-share/revoke pull (the
+  // server clears its roster screenShare pointer → we stop capturing), and on teardown.
+  /** @type {{current: MediaStream|null}} */
+  const screenStreamRef = useRef(null);
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -266,6 +276,13 @@ function DeviceCheck() {
             }
             setLockedMods(locked);
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
+            // Screenshare self-state (AC-13), folded into our OWN entry by the server. If it clears
+            // to "" while we still hold a capture, the host pulled us (force-no-share, eligibility
+            // revoke, or a re-select) — stop capturing locally. We do NOT echo {t:screen-stop} here:
+            // the server already dropped us from the pool, this is the cooperative source-side stop.
+            const share = me.screenShare || "";
+            setScreenShare(share);
+            if (share === "" && screenStreamRef.current) stopScreenCapture();
           }
           mesh.sync(selfIdRef.current, ps); // open/drop mesh links for the current backstage set
           // RF-8 (receiver-side): detach each OTHER peer's force-suppressed thumbnail track from the
@@ -374,8 +391,10 @@ function DeviceCheck() {
       onState: (st) => setPubState(st), // "live" once up, "reconnecting" while a drop retries
       onTerminal: (reason) => {
         // The session is over for good — release the camera/mic so the device light goes off behind
-        // the error screen (the session won't reconnect, so nothing re-publishes this stream).
+        // the error screen (the session won't reconnect, so nothing re-publishes this stream). The
+        // screen capture is released too: no reconnect means no roster to drive the cooperative stop.
         stopStream();
+        stopScreenCapture();
         setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
       },
     });
@@ -414,6 +433,44 @@ function DeviceCheck() {
   }
   function toggleHand() {
     if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "hand", raised: !handRaised });
+  }
+  // Stop the local screen capture and clear the held stream. Used by an explicit stop, by the native
+  // browser "Stop sharing" affordance (the track's `ended` event), by the host-pull roster sync, and
+  // on teardown. Idempotent — safe to call when nothing is captured.
+  function stopScreenCapture() {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+  }
+  // Screenshare capture toggle (AC-13/D-21). Video-only getDisplayMedia (D-41) — start grabs the
+  // display surface, registers the native-stop `ended` handler, and announces {t:screen-start} so the
+  // server adds us to the backstage preview pool; stop tears the capture down and announces
+  // {t:screen-stop}. The host alone promotes a sharer to the live slot (host-only {t:screen-select}),
+  // so starting only ever yields the "backstage" self-state until the server says otherwise.
+  async function toggleScreen() {
+    if (!(sessionRef.current && pubState === "live")) return;
+    if (screenStreamRef.current) {
+      sessionRef.current.send({ t: "screen-stop" });
+      stopScreenCapture();
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    } catch {
+      return; // user cancelled the picker or capture failed — stay idle, no frame sent
+    }
+    screenStreamRef.current = stream;
+    // Native browser "Stop sharing" — mirror it back to the server so the pool drops us.
+    const vt = stream.getVideoTracks()[0];
+    if (vt) {
+      vt.onended = () => {
+        if (sessionRef.current && pubState === "live") sessionRef.current.send({ t: "screen-stop" });
+        stopScreenCapture();
+      };
+    }
+    sessionRef.current.send({ t: "screen-start" });
   }
 
   // Backstage thumbnail moderation: a co-host (viewerRole "cohost") acts on a guest's tile within
@@ -502,6 +559,8 @@ function DeviceCheck() {
         handRaised={handRaised}
         onSendChat={sendChat}
         onToggleHand={toggleHand}
+        screenShare={screenShare}
+        onToggleScreen={toggleScreen}
         selfDegraded={selfDegraded}
         thumbnails={thumbnails}
         viewerRole={viewerRole}
