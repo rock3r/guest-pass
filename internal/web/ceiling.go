@@ -50,10 +50,12 @@ func (a *apiServer) putStreamCeiling(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	// An omitted dimension preserves the stored value (then clamp); only a named one changes.
-	mr := clampInt(intOr(req.MaxRes, derefInt(stream.MaxRes)), minMaxRes, maxMaxRes)
-	mf := clampInt(intOr(req.MaxFps, derefInt(stream.MaxFPS)), minMaxFps, maxMaxFps)
-	mb := clampInt(intOr(req.MaxBitrateKbps, derefInt(stream.MaxBitrateKbps)), minMaxBitrateKbps, maxMaxBitrateKbps)
+	// An omitted dimension preserves the stored value, falling back to the default for a legacy NULL
+	// column (then clamp); only a named one changes.
+	cr, cf, cb := ceilingOf(stream)
+	mr := clampInt(intOr(req.MaxRes, cr), minMaxRes, maxMaxRes)
+	mf := clampInt(intOr(req.MaxFps, cf), minMaxFps, maxMaxFps)
+	mb := clampInt(intOr(req.MaxBitrateKbps, cb), minMaxBitrateKbps, maxMaxBitrateKbps)
 
 	r64, f64, b64 := int64(mr), int64(mf), int64(mb)
 	stream.MaxRes, stream.MaxFPS, stream.MaxBitrateKbps = &r64, &f64, &b64
@@ -103,18 +105,25 @@ func (a *apiServer) getSessionCeiling(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load stream")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionCeilingResponse{
-		StreamID:       stream.ID,
-		MaxRes:         derefInt(stream.MaxRes),
-		MaxFps:         derefInt(stream.MaxFPS),
-		MaxBitrateKbps: derefInt(stream.MaxBitrateKbps),
-	})
+	mr, mf, mb := ceilingOf(stream)
+	writeJSON(w, http.StatusOK, sessionCeilingResponse{StreamID: stream.ID, MaxRes: mr, MaxFps: mf, MaxBitrateKbps: mb})
 }
 
-// derefInt narrows a nullable int64 column to int (0 when nil).
-func derefInt(v *int64) int {
+// ceilingOf resolves a stream's EFFECTIVE program quality ceiling, falling back to the product
+// default for any column that is NULL — a legacy stream created before D-19 (the nullable columns
+// pre-existed, and the old CreateStream wrote nils). So a guest of such a stream still receives a
+// ceiling, the greenroom shows real values not zeros, and a partial PUT preserves a default rather
+// than clamping a NULL dimension to the minimum (codex).
+func ceilingOf(s *store.Stream) (maxRes, maxFps, maxBitrateKbps int) {
+	return intOrDefault(s.MaxRes, store.DefaultMaxRes),
+		intOrDefault(s.MaxFPS, store.DefaultMaxFPS),
+		intOrDefault(s.MaxBitrateKbps, store.DefaultMaxBitrateKbps)
+}
+
+// intOrDefault narrows a nullable int64 column to int, substituting def when NULL.
+func intOrDefault(v *int64, def int) int {
 	if v == nil {
-		return 0
+		return def
 	}
 	return int(*v)
 }

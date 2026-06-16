@@ -102,6 +102,46 @@ func TestSessionCeiling_GET(t *testing.T) {
 	}
 }
 
+// codex (upgrade path): a legacy stream with NULL ceiling columns (created before D-19) still
+// resolves to the product default everywhere — the greenroom GET and the join delivery (passCeiling)
+// both fall back to 720/30/2500 instead of returning zeros / no ceiling.
+func TestCeiling_LegacyNullDefaults(t *testing.T) {
+	a := newAPIHarness(t)
+	host, alice := a.host(t, "alice")
+	streamID := a.createStream(t, alice, "Legacy")
+	ctx := context.Background()
+
+	// Simulate a pre-D-19 row: NULL out the ceiling columns.
+	st, _ := a.store.GetStream(ctx, streamID)
+	st.MaxRes, st.MaxFPS, st.MaxBitrateKbps = nil, nil, nil
+	if err := a.store.UpdateStream(ctx, st); err != nil {
+		t.Fatalf("UpdateStream: %v", err)
+	}
+
+	if _, err := a.store.StartSession(ctx, streamID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	rec := a.req(t, http.MethodGet, "/api/session/ceiling", "", alice)
+	var resp sessionCeilingResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.MaxRes != 720 || resp.MaxFps != 30 || resp.MaxBitrateKbps != 2500 {
+		t.Fatalf("legacy NULL GET = %+v, want defaults 720/30/2500", resp)
+	}
+
+	// The join-delivery resolver falls back to defaults too.
+	pass, err := a.store.CreatePass(ctx, store.CreatePassParams{StreamID: streamID, Role: store.RoleGuest, TokenHash: a.hasher.Hash("legacy"), Status: store.PassSent})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+	wr := &wsResolver{store: a.store}
+	mr, mf, mb, ok := wr.passCeiling(ctx, pass.ID)
+	if !ok || mr != 720 || mf != 30 || mb != 2500 {
+		t.Fatalf("legacy passCeiling = %d/%d/%d ok=%v, want defaults 720/30/2500", mr, mf, mb, ok)
+	}
+}
+
 // AC-8 / T-8: a guest receives the stream's ceiling on JOIN (so it caps its program encoder the
 // moment it publishes), and a live host adjustment re-broadcasts {t:ceiling} to the connected
 // publisher. The full encoder-cap proof is the [BROWSER] test.

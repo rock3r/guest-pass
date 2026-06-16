@@ -214,10 +214,13 @@ func (wr *wsResolver) passCeiling(ctx context.Context, passID string) (maxRes, m
 		return 0, 0, 0, false
 	}
 	stream, err := wr.store.GetStream(ctx, pass.StreamID)
-	if err != nil || stream.MaxRes == nil || stream.MaxFPS == nil || stream.MaxBitrateKbps == nil {
+	if err != nil {
 		return 0, 0, 0, false
 	}
-	return int(*stream.MaxRes), int(*stream.MaxFPS), int(*stream.MaxBitrateKbps), true
+	// A legacy stream (created before D-19) can carry NULL ceiling columns; ceilingOf falls back to
+	// the product default so the publisher always gets a usable ceiling (codex).
+	mr, mf, mb := ceilingOf(stream)
+	return mr, mf, mb, true
 }
 
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {
