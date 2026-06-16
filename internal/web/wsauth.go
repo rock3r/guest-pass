@@ -33,6 +33,10 @@ type wsIdentity struct {
 	name string
 	// slot is the slot an OBS source subscribes to ("cam-1"/"host"/"screen"); "" otherwise.
 	slot signaling.SlotID
+	// canScreen is the guest/co-host's screenshare eligibility from passes.can_screen (EN-23/AC-9),
+	// seeded into the room's roster after join so the guest's share affordance reflects it. false for
+	// the host and OBS sources.
+	canScreen bool
 }
 
 // isSource reports whether this identity is an OBS browser-source page. Only sources may
@@ -151,7 +155,7 @@ func (wr *wsResolver) resolvePass(ctx context.Context, raw string) (wsIdentity, 
 	if pass.Name != nil {
 		name = *pass.Name
 	}
-	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name}, nil
+	return wsIdentity{session: stream.HostID, peer: signaling.PeerID(pass.ID), role: pass.Role, name: name, canScreen: pass.CanScreen}, nil
 }
 
 // guestAdmissible re-checks at JOIN time (under the per-host binding lock) that a guest/co-host may

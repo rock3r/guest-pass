@@ -102,6 +102,30 @@ function NameOverride({ entry, onSetName }) {
 }
 
 /**
+ * EligibilityToggle is the host-only People control that grants/revokes a guest's screenshare
+ * eligibility (can_screen, EN-23/AC-9). Toggling PATCHes /api/passes/{id} (via onSetCanScreen); the
+ * server persists + re-projects the room (a revoke runs force-no-share). CONTROLLED by
+ * entry.canScreen (roster-driven) — a connected guest always re-projects, so the box reflects the
+ * authoritative value with no snap-back.
+ * @param {{entry:any, onSetCanScreen:(can:boolean)=>void}} props
+ * @returns {import("preact").VNode}
+ */
+function EligibilityToggle({ entry, onSetCanScreen }) {
+  return (
+    <label class="gr-screenelig">
+      <input
+        type="checkbox"
+        class="gr-screenelig-input"
+        data-guest={entry.id}
+        checked={!!entry.canScreen}
+        onChange={(e) => onSetCanScreen(/** @type {HTMLInputElement} */ (e.currentTarget).checked)}
+      />
+      <span>Can share screen</span>
+    </label>
+  );
+}
+
+/**
  * onAirLabel maps the three-state on-air to its pill copy (D-24). status-unavailable means no live
  * OBS signal — never asserted as on/off.
  * @param {string} onAir
@@ -181,10 +205,10 @@ function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismi
  * Tile renders one participant's P2P video plus its roster-driven status chrome and moderation
  * controls. The stream attaches via an effect so a re-render (e.g. an on-air change) never reloads
  * the <video>. The Reconnect control forces an ICE restart for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void}} props
+ * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName }) {
+export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   useEffect(() => {
@@ -221,6 +245,9 @@ export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onFo
       ) : null}
       {viewerRole === "host" && onBindSlot ? <SlotPicker entry={entry} live={live} onBindSlot={onBindSlot} /> : null}
       {viewerRole === "host" && onSetName ? <NameOverride entry={entry} onSetName={onSetName} /> : null}
+      {viewerRole === "host" && onSetCanScreen && entry.role === "guest" ? (
+        <EligibilityToggle entry={entry} onSetCanScreen={onSetCanScreen} />
+      ) : null}
       <Controls
         entry={entry}
         viewerRole={viewerRole}

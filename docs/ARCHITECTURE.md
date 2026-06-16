@@ -436,6 +436,18 @@ tile. Each slot carries a monotonic **epoch**.
 One constant screenshare OBS URL (`/s/screen`). `can_screen` gates eligibility;
 **video-only in v1** (guest voice stays on the cam source; D-41).
 
+- **Eligibility is live + host-managed (EN-23/AC-9).** The host grants/revokes
+  `can_screen` from the greenroom People tab via **`PATCH /api/passes/{id}`** (no
+  `grant-screen` frame — removed); it persists `passes.can_screen` and re-projects
+  the room so the guest's own roster entry carries `canScreen` (host sees every
+  guest's, a guest only its own — stripped from a non-host's view of others) and its
+  share affordance reflects it. The re-projection fires whenever the guest is
+  connected (not gated on the active session, unlike slot binding — eligibility
+  touches no on-air pool). A **revoke runs the force-no-share path** as a server
+  policy action (host-authority share lock, no connected host peer required) — it
+  pulls an active share and suppresses the screen presence; a grant clears that
+  host-floor lock (a co-host's lower-floor moderation lock is left in place).
+
 - **Multiple eligible guests may share simultaneously.** Each active share flows to
   a **host-only preview rail** (thumbnails, low-bitrate). The host
   **selects/swaps which active share is *live*** in the slot (preview→program
@@ -1091,6 +1103,11 @@ rank:
 > (EN-13). Fields that later PRs drive are present in the shape from PR-1 but unset until their
 > PR populates them: `locks` (PR-3), `handRaised` (PR-7), `signal`/`rttMs`/`degraded` (PR-13);
 > the audio meter rides the `{t:levels}` tick (PR-2), not the roster.
+>
+> **M4 host-only per-entry fields** (stripped from a non-host's view of OTHERS, mirroring the
+> `obs` peers): `boundSlot` — the cam slot a participant occupies (PR-6/D-20); `canScreen` —
+> screenshare eligibility (PR-9/EN-23), which a guest ALSO sees on its OWN entry (gating its share
+> affordance) but never on another participant's.
 
 Full `roster` / `peer-joined` / `peer-left` frames go out only on structural change
 (join/leave/presence/lock/role/on-air/slot): a join/leave uses the `peer-joined`/`peer-left`

@@ -148,6 +148,11 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		if mr, mf, mb, ok := h.resolver.passCeiling(ctx, string(id.peer)); ok {
 			room.DeliverTo(id.peer, signaling.Frame{T: "ceiling", MaxRes: mr, MaxFps: mf, MaxBitrateKbps: mb})
 		}
+		// Seed the guest's screenshare eligibility (EN-23/AC-9) into the roster so its share affordance
+		// reflects passes.can_screen from the start (projection only — no force-no-share side-effect).
+		if id.canScreen {
+			room.SetScreenEligible(id.peer, true)
+		}
 	} else if !room.Join(id.peer, id.role, id.name, id.slot, out) {
 		// The room started draining between hub.Room and Join. Tell the client to
 		// reconnect and close; we never registered, so there's no writer to drain.

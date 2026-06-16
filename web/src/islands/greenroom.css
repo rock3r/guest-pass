@@ -248,3 +248,15 @@
   color: var(--ink);
   cursor: pointer;
 }
+
+/* Host-only screenshare eligibility toggle (EN-23/AC-9). */
+.gr-screenelig {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.gr-screenelig-input {
+  cursor: pointer;
+}

@@ -358,6 +358,17 @@ func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
 	return errIfNoRows(res)
 }
 
+// SetPassCanScreen grants or revokes a pass's screenshare eligibility (can_screen, EN-23/AC-9). It
+// is host-managed live in the greenroom (PATCH), not an invite attribute; the live room is
+// re-projected separately (Room.SetScreenEligibleLive).
+func (s *Store) SetPassCanScreen(ctx context.Context, id string, canScreen bool) error {
+	res, err := s.writer.ExecContext(ctx, "UPDATE passes SET can_screen = ? WHERE id = ?", boolToInt(canScreen), id)
+	if err != nil {
+		return fmt.Errorf("setting pass can_screen: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
 // SetPassName overrides a pass's sticky display name — the nameplate (D-16/AC-7). passes.name is
 // the single source of truth for the name string (default = the invite name); a host override is a
 // sticky write here, surviving reconnect and restart (the live room is refreshed separately via

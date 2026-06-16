@@ -96,6 +96,12 @@ export function GuestSession({
 
   const notices = (lockedMods || []).map((m) => LOCK_COPY[m]).filter(Boolean);
 
+  // Screenshare eligibility (EN-23/AC-9): the host grants/revokes can_screen live; the guest sees it
+  // on its OWN roster entry, gating the share affordance. The actual capture lands in PR-12 — for now
+  // the affordance reflects eligibility so the host's grant/revoke is visible to the guest.
+  const self = (peers || []).find((p) => p.id === selfId);
+  const canShareScreen = !!(self && self.canScreen);
+
   // The chat and raise-hand actions send over the signaling socket, which throws while it is still
   // CONNECTING (and is dead once disconnected) — so they are disabled until the room is live.
   const live = pubState === "live";
@@ -148,6 +154,11 @@ export function GuestSession({
           {notices.length > 0 ? (
             <p class="gs-lock" data-locked="1">
               {notices.join(" · ")}
+            </p>
+          ) : null}
+          {canShareScreen ? (
+            <p class="gs-screen-elig" data-eligible="1">
+              Screen sharing enabled by the host.
             </p>
           ) : null}
           <button

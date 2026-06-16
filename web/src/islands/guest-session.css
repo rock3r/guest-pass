@@ -61,6 +61,14 @@
   color: #8a1f1f;
 }
 
+/* Screenshare eligibility indicator (EN-23/AC-9): shown when the host grants can_screen. The
+   functional share control lands in PR-12; this reflects the host's live grant/revoke. */
+.gs-screen-elig {
+  margin: 0;
+  font-weight: 600;
+  color: #1f6b3a;
+}
+
 .gs-hand {
   align-self: flex-start;
   font: inherit;
