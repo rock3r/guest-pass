@@ -247,8 +247,10 @@ function DeviceCheck() {
           onBlocked: () => {
             // The network-blocked overlay (D-38) takes render precedence over the in-session view,
             // hiding the .gs-screen control — and a STUN-only blocked path can't carry the share
-            // anyway. Release any held capture so it isn't left running invisibly until Retry.
-            stopScreenCapture();
+            // anyway. D-38 is a MEDIA (P2P) failure: the SIGNALING socket is typically still live, so
+            // the server still has us in the preview pool — use stopScreenShare (best-effort
+            // {t:screen-stop} + local release), not a bare local stop, so the pool drops us too.
+            stopScreenShare();
             setNetBlocked(true);
           },
           onRecovered: () => setNetBlocked(false),
