@@ -29,6 +29,93 @@ const getDisplayMediaStubJS = `
 })();
 `
 
+// getDisplayMediaDeferredStubJS stubs getDisplayMedia to return a promise that resolves only when the
+// test calls window.__gpResolveShare() — so the test can hold the picker "open" while the host pulls
+// eligibility, then resolve it and assert the late-resolving capture is released, not leaked. The
+// resolved stream is parked on window.__gpShareStream so the test can read its track readyState.
+const getDisplayMediaDeferredStubJS = `
+(() => {
+  navigator.mediaDevices.getDisplayMedia = () => new Promise((resolve) => {
+    window.__gpResolveShare = () => {
+      const c = document.createElement('canvas');
+      c.width = 64; c.height = 64;
+      c.getContext('2d').fillRect(0, 0, 64, 64);
+      const s = c.captureStream(5);
+      window.__gpShareStream = s;
+      resolve(s);
+    };
+  });
+})();
+`
+
+// T-13 / AC-13 (edge): the host force-no-shares the guest WHILE its screen picker is still open. When
+// the picker later resolves, the capture must be released (not stored or announced) — otherwise the
+// getDisplayMedia tracks leak behind a now-locked share control. Proves the post-picker re-validation
+// (canStartShare) stops the late stream: its video track ends rather than staying live.
+func TestScreenShare_RevokeDuringPickerReleasesCapture(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	aCtx, cancelA := chromedp.NewContext(alloc)
+	defer cancelA()
+	aCtx, cancelAT := context.WithTimeout(aCtx, 150*time.Second)
+	defer cancelAT()
+	injectStub := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(getDisplayMediaDeferredStubJS).Do(ctx)
+		return err
+	})
+	if err := chromedp.Run(aCtx,
+		injectStub,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"] .gs-selfview`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="idle"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest A enter: %v", err)
+	}
+
+	// Open the picker (it stays pending until the test resolves it) and confirm it actually opened.
+	if err := chromedp.Run(aCtx,
+		chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+		chromedp.Poll(`typeof window.__gpResolveShare === 'function'`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("screen picker did not open: %v", err)
+	}
+
+	// Host force-no-shares A while the picker is still open → A gets the share suppression lock.
+	hostConn := dialHostWS(t, s)
+	defer hostConn.Close(websocket.StatusNormalClosure, "done")
+	writeFrame(t, hostConn, signaling.Frame{T: "force-no-share", PeerID: s.passID})
+	if err := chromedp.Run(aCtx, chromedp.WaitVisible(`.gs-lock[data-locked="1"]`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("force-no-share lock notice did not appear: %v", err)
+	}
+
+	// Now resolve the picker. The late capture must be released (track ended) — not stored, not
+	// announced — and the guest must never enter the backstage state.
+	if err := chromedp.Run(aCtx,
+		chromedp.Evaluate(`window.__gpResolveShare()`, nil),
+		chromedp.Poll(`!!window.__gpShareStream && window.__gpShareStream.getVideoTracks()[0].readyState === 'ended'`,
+			nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("the capture that resolved after the revoke was not released: %v", err)
+	}
+	var state string
+	if err := chromedp.Run(aCtx, chromedp.AttributeValue(`.gs-screen`, "data-screen-state", &state, nil, chromedp.ByQuery)); err != nil {
+		t.Fatalf("read screen state: %v", err)
+	}
+	if state != "idle" {
+		t.Fatalf("screen state after revoked-mid-picker share = %q, want idle (never backstage)", state)
+	}
+}
+
 // T-13 / AC-13: the sharer's screenshare SELF-state. A screenshare-eligible guest starts capture
 // (the stubbed getDisplayMedia), which announces {t:screen-start} → the server folds "backstage" into
 // the sharer's OWN roster entry (the canonical screen-roster is host-only, EN-8). The host alone

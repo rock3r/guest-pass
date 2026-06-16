@@ -111,6 +111,10 @@ function DeviceCheck() {
   // track's `onended`, both captured at share-start) consult the CURRENT connection state instead of
   // a stale "live" — a send on a dropped/reconnecting socket would throw.
   const pubStateRef = useRef("connecting");
+  // Set once the session ends for good (onTerminal). The screen picker can resolve AFTER a terminal,
+  // and pubStateRef may still read "live" (no non-live onState precedes every terminal), so the
+  // post-picker re-validation consults this to avoid capturing behind the terminal screen.
+  const terminatedRef = useRef(false);
   // Ref mirrors of the roster + own id, so the once-registered signal handler routes by the CURRENT
   // roster (a guest/co-host peer → the mesh; the host or an OBS source → the Publisher).
   /** @type {{current: any[]}} */
@@ -405,6 +409,7 @@ function DeviceCheck() {
         // The session is over for good — release the camera/mic so the device light goes off behind
         // the error screen (the session won't reconnect, so nothing re-publishes this stream). The
         // screen capture is released too: no reconnect means no roster to drive the cooperative stop.
+        terminatedRef.current = true; // a pending picker that resolves after this must not capture
         stopStream();
         stopScreenCapture();
         setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
@@ -461,18 +466,32 @@ function DeviceCheck() {
   function sessionLive() {
     return !!sessionRef.current && pubStateRef.current === "live";
   }
+  // canStartShare reports whether STARTING a screen capture is allowed right now, from refs (so it's
+  // correct after an `await`): the session must be live + not terminated/unmounting, and this guest's
+  // OWN current roster entry must still be screenshare-eligible and not force-no-share'd (EN-7 — the
+  // server rejects an ineligible/locked screen-start anyway, but capturing locally would leak behind a
+  // share control that the revoke just hid). The host can revoke while the picker is open, so this is
+  // re-checked after getDisplayMedia resolves, not only before.
+  function canStartShare() {
+    if (!sessionLive() || cancelledRef.current || terminatedRef.current) return false;
+    const me = peersRef.current.find((p) => p.self || p.id === selfIdRef.current);
+    if (!me || !me.canScreen) return false;
+    return !(me.locks || []).some((l) => l.kind === "share");
+  }
   // Screenshare capture toggle (AC-13/D-21). Video-only getDisplayMedia (D-41) — start grabs the
   // display surface, registers the native-stop `ended` handler, and announces {t:screen-start} so the
   // server adds us to the backstage preview pool; stop tears the capture down and announces
   // {t:screen-stop}. The host alone promotes a sharer to the live slot (host-only {t:screen-select}),
   // so starting only ever yields the "backstage" self-state until the server says otherwise.
   async function toggleScreen() {
-    if (!sessionLive()) return;
+    if (!sessionRef.current) return;
     if (screenStreamRef.current) {
-      sessionRef.current.send({ t: "screen-stop" });
+      // Stopping is always allowed when we hold a capture; only the server send is gated on liveness.
+      if (sessionLive()) sessionRef.current.send({ t: "screen-stop" });
       stopScreenCapture();
       return;
     }
+    if (!canStartShare()) return;
     if (screenRequestingRef.current) return; // a getDisplayMedia is already in flight (double-click)
     screenRequestingRef.current = true;
     let stream;
@@ -483,10 +502,11 @@ function DeviceCheck() {
     } finally {
       screenRequestingRef.current = false;
     }
-    // The picker can resolve long after it opened: if we unmounted, the socket dropped, or another
-    // capture already won the slot meanwhile, release this stream instead of leaking it (and don't
-    // send on a dead socket). Mirrors the cancelledRef guard on the camera's getUserMedia.
-    if (cancelledRef.current || screenStreamRef.current || !sessionLive()) {
+    // The picker can resolve long after it opened: if we unmounted, the session dropped/terminated,
+    // the host revoked eligibility / force-no-share'd us, or another capture already won the slot
+    // meanwhile, release this stream instead of leaking it (and don't send on a dead/rejecting
+    // socket). Mirrors the cancelledRef guard on the camera's getUserMedia.
+    if (screenStreamRef.current || !canStartShare()) {
       stream.getTracks().forEach((t) => t.stop());
       return;
     }
