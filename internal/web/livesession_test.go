@@ -391,6 +391,59 @@ func TestSession_EvictNonSessionPeersFailsClosedOnLoadError(t *testing.T) {
 	}
 }
 
+// Re-issuing a LIVE-bound guest vacates its OBS slot, keeping the DB and room in sync (codex): the
+// re-issue clears slot_id, so the live binding must drop too rather than keep rendering the guest.
+func TestSession_ReissueVacatesLiveSlot(t *testing.T) {
+	ctx := context.Background()
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "reissue-vacate", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	srcRaw, slot := h.seedCamSlot(t, host.ID, 1)
+	if _, err := h.store.StartSession(ctx, stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc)
+	sc := h.dialOK(t, "src="+srcRaw, http.Header{"Origin": {"null"}})
+	defer sc.CloseNow()
+	if f := wsReadFrame(t, sc); f.T != "slot-unbound" {
+		t.Fatalf("source first frame = %q, want slot-unbound", f.T)
+	}
+
+	// Bind A → cam-1 live (picker PUT): the source routes to A.
+	put, _ := http.NewRequest(http.MethodPut, h.srv.URL+"/api/passes/"+pass.ID+"/slot", strings.NewReader(`{"slot":"cam-1"}`))
+	put.AddCookie(cookie)
+	put.Header.Set("Content-Type", "application/json")
+	if resp, err := http.DefaultClient.Do(put); err != nil {
+		t.Fatalf("bind: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+	if f := readFrameOfType(t, sc, "slot-rebind"); f.OccupantPeerID != pass.ID {
+		t.Fatalf("cam-1 not bound to A; got %q", f.OccupantPeerID)
+	}
+	_ = slot
+
+	// Re-issue A: the binding is cleared AND the live slot vacated → the source falls to placeholder.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	ri, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/app/streams/"+stream.ID+"/passes/"+pass.ID+"/reissue", nil)
+	ri.AddCookie(cookie)
+	if resp, err := noRedirect.Do(ri); err != nil {
+		t.Fatalf("reissue: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+	if f := readFrameOfType(t, sc, "slot-unbound"); f.Epoch == nil {
+		t.Fatalf("re-issue did not vacate the live slot (source still on the guest); got %+v", f)
+	}
+	if got, _ := h.store.GetPass(ctx, pass.ID); got.SlotID != nil {
+		t.Fatalf("re-issued pass still bound in the DB: %v", got.SlotID)
+	}
+}
+
 // Go-live is host-scoped (RF-2): a host can't start a session for someone else's stream.
 func TestSession_GoLiveForeignStream404(t *testing.T) {
 	a := newAPIHarness(t)

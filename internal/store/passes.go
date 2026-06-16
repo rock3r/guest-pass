@@ -362,15 +362,15 @@ func (s *Store) SetPassRole(ctx context.Context, id, role string) error {
 // "sent" state, stamping sent_at (PD-2). The previous hash is overwritten, so the old link
 // stops resolving — one active token per pass (EN-5). It also CLEARS expires_at so the
 // fresh link can't be born already-expired (D-5: re-issuing an expired pass mints a fresh,
-// usable token); a later expiry-derivation pass re-stamps a deadline. It deliberately leaves
-// slot_id ALONE: re-issuing a currently-bound, connected guest must NOT silently unbind them
-// (that would diverge from the live room, which keeps rendering them on /s/cam-* — codex). A
-// stale binding on a retired-then-reissued pass can't collide because AssignPassSlot already
-// clears any other row on a slot when it's (re)assigned. The rest of the row's history
+// usable token); a later expiry-derivation pass re-stamps a deadline. It also CLEARS slot_id:
+// a re-issued invite is a FRESH start and must not silently inherit the slot the guest held
+// before being kicked/revoked/dropped — otherwise the join replay would auto-rebind a
+// previously-removed guest onto that OBS slot (codex). The caller (reissueInvite) vacates any
+// live binding too, so the DB and room stay in sync. The rest of the row's history
 // (opened_at/accepted_at) is kept (same row).
 func (s *Store) ReissuePass(ctx context.Context, id, newTokenHash string) error {
 	res, err := s.writer.ExecContext(ctx,
-		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL WHERE id = ?",
+		"UPDATE passes SET token_hash = ?, status = ?, sent_at = ?, expires_at = NULL, slot_id = NULL WHERE id = ?",
 		newTokenHash, PassSent, time.Now().Unix(), id)
 	if err != nil {
 		return fmt.Errorf("reissuing pass: %w", err)

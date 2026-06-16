@@ -594,6 +594,30 @@ func TestPassRepo_BoundCamPassesExcludesDeadlineExpired(t *testing.T) {
 	}
 }
 
+// Re-issue clears slot_id so a re-issued invite starts UNBOUND (codex): a guest kicked/revoked
+// from a slot must not auto-reclaim it on the fresh link via the join replay — the host re-binds.
+func TestPassRepo_ReissueClearsSlot(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-reissue-clear")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S"})
+	slot, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "src-rc"})
+	a, _ := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "a-tok"})
+	if err := st.AssignPassSlot(ctx, a.ID, slot.ID); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	// Kicked/revoked, then re-issued: the binding must NOT carry over to the fresh invite.
+	if err := st.SetPassStatus(ctx, a.ID, PassRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := st.ReissuePass(ctx, a.ID, "a-tok-2"); err != nil {
+		t.Fatalf("ReissuePass: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, a.ID); got.SlotID != nil {
+		t.Fatalf("re-issued pass must start unbound, got slot %v", got.SlotID)
+	}
+}
+
 // MarkPassOpened is atomic exactly-once: it transitions only from created/sent, returns
 // whether it did, never re-stamps opened_at, and never regresses a further-along pass.
 func TestPassRepo_MarkPassOpenedIsAtomicOnce(t *testing.T) {

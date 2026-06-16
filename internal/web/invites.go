@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rock3r/guest-pass/internal/mail"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -168,10 +169,21 @@ func (s *appServer) reissueInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not mint token", http.StatusInternalServerError)
 		return
 	}
+	// Clear the binding (ReissuePass nulls slot_id) AND vacate any LIVE slot the guest held, under
+	// the per-host binding lock so it orders with the /ws join-replay + picker PUTs (D-20). A
+	// re-issued invite starts unbound — the host re-binds in the greenroom if needed (codex).
+	unlock := s.binds.lock(st.HostID)
 	if err := s.store.ReissuePass(r.Context(), pass.ID, s.hasher.Hash(raw)); err != nil {
+		unlock()
 		http.Error(w, "could not re-issue invite", http.StatusInternalServerError)
 		return
 	}
+	if s.hub != nil {
+		if room := s.hub.RoomIfLive(st.HostID); room != nil {
+			room.VacateOccupant(signaling.PeerID(pass.ID))
+		}
+	}
+	unlock()
 	name, email := passNameEmail(pass)
 	link := s.baseURL + "/p/" + raw
 	delivered := s.deliverInvite(r.Context(), st, name, email, link) == nil
