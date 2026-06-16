@@ -336,6 +336,32 @@ func TestRelaySignalFromSourceOnlyReachesCurrentOccupant(t *testing.T) {
 	}
 }
 
+// D-21 screen media path: relaySignal must PRESERVE the channel discriminator (Ch), so a peer pair's
+// SECOND P2P connection (the screenshare track, ch="screen") is distinguishable from the camera
+// (ch="") at both ends. The clean outbound frame still carries only {t,from,to,sdp,ice,ch}.
+func TestRelaySignalPreservesChannel(t *testing.T) {
+	s := newRoomState()
+	s.join("a", "guest", "")
+	s.join("b", "guest", "")
+
+	out := s.relaySignal("a", Frame{To: "b", Ch: "screen", SDP: []byte(`"x"`)})
+	if len(out) != 1 || out[0].to != "b" {
+		t.Fatalf("a screen-channel signal must relay to b, got %+v", out)
+	}
+	if out[0].frame.Ch != "screen" {
+		t.Fatalf("relaySignal must preserve the channel discriminator, got Ch=%q", out[0].frame.Ch)
+	}
+	if out[0].frame.From != "a" {
+		t.Fatalf("from must be stamped, got From=%q", out[0].frame.From)
+	}
+
+	// A camera signal (no channel) relays with an empty Ch, unchanged.
+	cam := s.relaySignal("a", Frame{To: "b", SDP: []byte(`"x"`)})
+	if len(cam) != 1 || cam[0].frame.Ch != "" {
+		t.Fatalf("a camera signal must carry no channel, got %+v", cam)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {

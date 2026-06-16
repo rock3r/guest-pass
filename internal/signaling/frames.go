@@ -10,13 +10,17 @@ import "encoding/json"
 // Frame is the flat JSON envelope for all signaling messages. The server relays
 // SDP/ICE verbatim as opaque payloads and never inspects them (D-23).
 type Frame struct {
-	T              string          `json:"t"`
-	To             string          `json:"to,omitempty"`
-	From           string          `json:"from,omitempty"`
-	SDP            json.RawMessage `json:"sdp,omitempty"`
-	ICE            json.RawMessage `json:"ice,omitempty"`
-	Slot           string          `json:"slot,omitempty"`
-	OccupantPeerID string          `json:"occupantPeerId,omitempty"`
+	T    string          `json:"t"`
+	To   string          `json:"to,omitempty"`
+	From string          `json:"from,omitempty"`
+	SDP  json.RawMessage `json:"sdp,omitempty"`
+	ICE  json.RawMessage `json:"ice,omitempty"`
+	// Ch is the signaling CHANNEL discriminator (D-21): a peer pair can run a SECOND P2P connection
+	// for the screenshare track ("screen") distinct from the camera (""). It is relayed verbatim so
+	// both ends route the inbound signal to the right link/publisher; the server never acts on it.
+	Ch             string `json:"ch,omitempty"`
+	Slot           string `json:"slot,omitempty"`
+	OccupantPeerID string `json:"occupantPeerId,omitempty"`
 	// Name carries the bound occupant's display name to an OBS source on a {t:slot-rebind} (the
 	// nameplate, D-16): the source page gets no roster (EN-13), so the name rides the binding frame.
 	// It renders as escaped textContent only, gated by the source's show/hide URL param (EN-15); a

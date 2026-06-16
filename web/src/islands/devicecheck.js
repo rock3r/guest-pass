@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { Publisher } from "../rtc/publisher.js";
+import { PeerLink } from "../rtc/peerlink.js";
 import { ReconnectingSession, TERMINAL_REASONS } from "../rtc/session.js";
 import { MeshManager, isMeshRole } from "../rtc/mesh.js";
 import { DegradationController } from "../rtc/degradation.js";
@@ -85,6 +86,10 @@ function DeviceCheck() {
   // promoted this sharer to the screen slot. The sharer never asserts "live" optimistically — it is
   // derived solely from the server-folded self pointer (screen-roster is host-only, EN-8).
   const [screenShare, setScreenShare] = useState(/** @type {string} */ (""));
+  // The live screen share to render for everyone (AC-11): {id, name, stream} of the host-selected
+  // live sharer (consumed over a screen-channel PeerLink), or null when no share is live. A guest
+  // learns the live sharer from the roster's screenShare:"live" fold (the screen-roster is host-only).
+  const [liveScreen, setLiveScreen] = useState(/** @type {{id:string,name:string,stream:MediaStream}|null} */ (null));
   const [error, setError] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
@@ -114,6 +119,20 @@ function DeviceCheck() {
   // In-flight guard for the screen-capture request, so a rapid double-click can't start two
   // concurrent getDisplayMedia calls (the second stream would leak — mirrors requestingRef on cam).
   const screenRequestingRef = useRef(false);
+  // Our SECOND publisher (D-21): publishes screenStreamRef on the "screen" channel so the host rail
+  // (and the live render + /s/screen) can consume our screen track distinct from the camera. Created
+  // on screen-start, closed on every stop/pull/teardown — its lifecycle tracks the capture.
+  /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
+  const screenPubRef = useRef(null);
+  // The CONSUMER side of the screenshare for THIS client: a screen-channel PeerLink to whoever the
+  // roster marks as the live sharer (screenShare:"live"), so the live share renders for everyone
+  // (AC-11) — not just the host. Keyed by the sharer's peer id; at most one (the single live slot).
+  /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
+  const screenConsumersRef = useRef(new Map());
+  // The current signaling room (set by setup() on each (re)connect), so the component-level screen
+  // publish/consume helpers can build links/publishers on the LIVE room without re-running setup.
+  /** @type {{current: import("../rtc/room.js").Room|null}} */
+  const roomRef = useRef(null);
   // Pending timer id for the deferred "release a stranded capture" reconcile (see SHARE_RECONCILE_MS).
   /** @type {{current: ReturnType<typeof setTimeout>|null}} */
   const pendingShareReconcileRef = useRef(null);
@@ -180,6 +199,7 @@ function DeviceCheck() {
       if (sessionRef.current) sessionRef.current.close();
       stopStream();
       stopScreenCapture();
+      closeScreenConsumers();
     },
     [],
   );
@@ -239,6 +259,7 @@ function DeviceCheck() {
     sessionRef.current = new ReconnectingSession({
       query: `pass=${encodeURIComponent(passTokenFromPath())}`,
       setup: (room) => {
+        roomRef.current = room; // the live room for the component-level screen publish/consume helpers
         // D-38 network-blocked watchdog: watch every consumer/peer pc this guest creates. On a
         // STUN-only path behind symmetric NAT / a UDP-blocking firewall NONE ever connects, so the
         // guest would otherwise sit on a false "you're live" — surface the network-blocked screen
@@ -278,6 +299,16 @@ function DeviceCheck() {
         // (lower id offers) means we only ever receive a mesh ANSWER/ICE from a higher-id peer and a
         // mesh OFFER from a lower-id peer, so a single connection per pair — no ambiguity (D-23).
         room.on("signal", (f) => {
+          // Screen channel (D-21): a peer pair can run a second P2P link for the screenshare track.
+          // Route by `from`: an answer/ICE from the live sharer we're consuming goes to that consumer
+          // link; anything else on the screen channel is a consumer (host / OBS) negotiating OUR
+          // screen track → our screen Publisher (created only while we share).
+          if (f.ch === "screen") {
+            const consumer = screenConsumersRef.current.get(f.from);
+            if (consumer) consumer.onSignal(f);
+            else if (screenPubRef.current) screenPubRef.current.onSignal(f);
+            return;
+          }
           const peer = peersRef.current.find((p) => p.id === f.from);
           if (peer && isMeshRole(peer.role) && f.from !== selfIdRef.current) mesh.handleSignal(f);
           else publisher.onSignal(f);
@@ -357,6 +388,7 @@ function DeviceCheck() {
             }
           }
           syncThumbnails();
+          syncLiveScreen(ps); // open/drop the live-share consumer link (AC-11: live share for everyone)
         });
         // Backstage chat relay (EN-20): append each relayed message to the in-memory log. The
         // server broadcasts to every participant INCLUDING the sender, so the guest's own messages
@@ -437,6 +469,10 @@ function DeviceCheck() {
                 return { key: t.key, scaleResolutionDownBy: e.scaleResolutionDownBy, maxFramerate: e.maxFramerate, maxBitrate: e.maxBitrate };
               });
         }
+        // If a screen capture survived a reconnect, re-publish it on this fresh room so the share
+        // recovers (parity with the camera Publisher above); the roster re-assert re-adds us to the
+        // pool. The live-share consumer links re-open from the next roster (syncLiveScreen).
+        if (screenStreamRef.current) startScreenPublisher();
       },
       teardown: () => {
         // The link dropped (or we're closing): stop the degradation sampler, stop publishing + tear
@@ -447,6 +483,10 @@ function DeviceCheck() {
         if (watchRef.current) watchRef.current.stop();
         if (pubRef.current) pubRef.current.close();
         if (meshRef.current) meshRef.current.close();
+        // Drop the dead-room screen publisher + live-share consumer links; the capture stream is KEPT
+        // (re-published on reconnect by setup), and the consumer links re-open from the fresh roster.
+        closeScreenPublisher();
+        closeScreenConsumers();
         setThumbnails([]);
         setOnAir("status-unavailable");
         setStreaming(false);
@@ -463,6 +503,7 @@ function DeviceCheck() {
         terminatedRef.current = true; // a pending picker that resolves after this must not capture
         stopStream();
         stopScreenCapture();
+        closeScreenConsumers(); // stop rendering any live share behind the terminal screen
         setTerminated(reason); // kicked/expired/revoked/session-ended/token-rotated/unreachable
       },
     });
@@ -510,10 +551,70 @@ function DeviceCheck() {
       clearTimeout(pendingShareReconcileRef.current);
       pendingShareReconcileRef.current = null;
     }
+    closeScreenPublisher(); // drop our screen-channel publisher (consumers see the track end)
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
     }
+  }
+  // startScreenPublisher (re)creates our screen-channel Publisher on the CURRENT room, publishing the
+  // held capture (D-21). Called when capture starts and again on reconnect (a fresh room) so the
+  // share survives a blip. A no-op without a room or a capture. The screen pcs are deliberately NOT
+  // watched by the D-38 watchdog (the camera owns connectivity detection) nor the degradation ladder.
+  function startScreenPublisher() {
+    if (!roomRef.current || !screenStreamRef.current) return;
+    closeScreenPublisher();
+    screenPubRef.current = new Publisher(roomRef.current, screenStreamRef.current, undefined, undefined, "screen");
+  }
+  function closeScreenPublisher() {
+    if (screenPubRef.current) {
+      screenPubRef.current.close();
+      screenPubRef.current = null;
+    }
+  }
+  // closeScreenConsumers tears down every live-share consumer link (the screen we render from another
+  // peer) and clears the rendered live share. Called on each disconnect (the links bind to the dropped
+  // room; a fresh roster re-opens them on the new room via syncLiveScreen) and on unmount/terminal.
+  function closeScreenConsumers() {
+    for (const link of screenConsumersRef.current.values()) link.close();
+    screenConsumersRef.current.clear();
+    setLiveScreen(null);
+  }
+  // syncLiveScreen reconciles THIS client's live-share consumer link against the roster (AC-11): open
+  // a screen-channel PeerLink to the peer the server marks live (screenShare:"live", visible to ALL —
+  // the screen-roster itself is host-only), render its track, and drop the link when the live share
+  // clears or moves. Never consumes our OWN screen (we publish it; our self-state shows it instead).
+  function syncLiveScreen(ps) {
+    const room = roomRef.current;
+    const livePeer = ps.find((p) => p.screenShare === "live" && p.id !== selfIdRef.current);
+    const keep = livePeer ? livePeer.id : "";
+    for (const [id, link] of screenConsumersRef.current) {
+      if (id !== keep) {
+        link.close();
+        screenConsumersRef.current.delete(id);
+      }
+    }
+    if (!keep || !room) {
+      if (!keep) setLiveScreen(null);
+      return;
+    }
+    if (!screenConsumersRef.current.has(keep)) {
+      const link = new PeerLink(room, keep, room.iceServers, "screen");
+      screenConsumersRef.current.set(keep, link);
+      link.pc.ontrack = (e) => setLiveScreen({ id: keep, name: nameOf(keep), stream: e.streams[0] });
+      link.pc.oniceconnectionstatechange = () => {
+        if (link.pc.iceConnectionState === "failed") link.restartIce();
+      };
+      link.offer();
+    } else {
+      // Keep the live link across roster updates; refresh just the nameplate (a host rename).
+      setLiveScreen((prev) => (prev && prev.id === keep ? { ...prev, name: nameOf(keep) } : prev));
+    }
+  }
+  // nameOf resolves a peer id to its current roster display name (for the live-share nameplate).
+  function nameOf(id) {
+    const p = peersRef.current.find((x) => x.id === id);
+    return (p && p.name) || "";
   }
   // sessionLive reports whether the signaling socket is usable right now (open + publishing). Read at
   // CALL time (via pubStateRef) so async + once-registered screen-capture closures never send on a
@@ -577,6 +678,7 @@ function DeviceCheck() {
       return;
     }
     screenStreamRef.current = stream;
+    startScreenPublisher(); // publish the capture on the screen channel so consumers can render it
     // Native browser "Stop sharing" — mirror it back to the server so the pool drops us (only if the
     // socket is still live at that moment — pubStateRef, not a stale capture-time pubState).
     const vt = stream.getVideoTracks()[0];
@@ -685,6 +787,7 @@ function DeviceCheck() {
         onToggleHand={toggleHand}
         screenShare={screenShare}
         onToggleScreen={toggleScreen}
+        liveScreen={liveScreen}
         selfDegraded={selfDegraded}
         thumbnails={thumbnails}
         viewerRole={viewerRole}

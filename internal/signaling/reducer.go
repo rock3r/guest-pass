@@ -773,9 +773,11 @@ func (s *roomState) sessionLive() []outbound {
 
 // relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
 // The sdp/ice payloads are opaque (json.RawMessage) and relayed byte-for-byte; the server
-// never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice} —
+// never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice, ch} —
 // never the sender's other fields — so a peer can't inject roster/slot/control fields into
-// a frame the addressee acts on. A signal to an unknown/departed peer is dropped.
+// a frame the addressee acts on (the addressee learns the sender from `from`, not `to`). Ch (the
+// screen-vs-camera channel, D-21) is relayed verbatim so both ends route the signal to the right
+// link/publisher; the server never acts on it. A signal to an unknown/departed peer is dropped.
 func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	to := PeerID(f.To)
 	if _, ok := s.peers[to]; !ok {
@@ -789,7 +791,7 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
 		return nil
 	}
-	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
+	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE, Ch: f.Ch}}}
 }
 
 // sourceServes reports whether source is the OBS source of a slot whose CURRENT occupant is occupant

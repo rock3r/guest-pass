@@ -69,6 +69,39 @@ function CeilingControl({ ceiling, onApply }) {
 }
 
 /**
+ * ScreenTile renders one sharer in the host's screenshare rail (D-21/AC-11): the consumed screen
+ * video (attached via an effect so a re-render doesn't reload it), the sharer's name, and either a
+ * "Put live" select control or the live badge. Select-live is host-only (D-11 exception); the server
+ * enforces authority (EN-7). The screen capture is video-only (D-41), so the video is muted.
+ * @param {{tile:{id:string,name:string,stream:MediaStream|null,live:boolean}, onSelect:()=>void}} props
+ * @returns {import("preact").VNode}
+ */
+function ScreenTile({ tile, onSelect }) {
+  /** @type {{current: HTMLVideoElement|null}} */
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = tile.stream || null;
+  }, [tile.stream]);
+  return (
+    <figure class="gr-screen-tile" data-sharer={tile.id} data-live={tile.live ? "1" : "0"}>
+      <video ref={ref} class="gr-screen-video" autoplay playsinline muted />
+      <figcaption class="gr-screen-cap">
+        <span class="gr-screen-name">{tile.name || "Guest"}</span>
+        {tile.live ? (
+          <span class="gr-screen-livebadge" data-live="1">
+            ● Live
+          </span>
+        ) : (
+          <button type="button" class="gr-screen-select" onClick={onSelect}>
+            Put live
+          </button>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
+
+/**
  * Greenroom is the grid island.
  * @returns {import("preact").VNode}
  */
@@ -94,12 +127,28 @@ function Greenroom() {
   // maxBitrateKbps} when a session is live, else null (the control is hidden until Go live). Fetched
   // from GET /api/session/ceiling on mount + on session-live, and updated from each adjust's response.
   const [ceiling, setCeiling] = useState(null);
+  // Screenshare preview-switcher (D-21/AC-11): the host-only rail of every active sharer + the live
+  // selection. screenTiles is the rendered list [{id,name,stream,live}] (sharers ∪ the live one), and
+  // screenLive marks which is on-air. Driven by the host-only {t:screen-roster} broadcast.
+  /** @type {[Array<{id:string,name:string,stream:MediaStream|null,live:boolean}>, Function]} */
+  const [screenTiles, setScreenTiles] = useState([]);
+  const [screenLive, setScreenLive] = useState("");
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
   const linksRef = useRef(new Map());
   /** @type {{current: Map<string, MediaStream>}} */
   const streamsRef = useRef(new Map());
+  // Screen-channel consumer links + their tracks, keyed by sharer id (separate from the camera maps:
+  // a sharer has BOTH a camera tile link and a screen rail link, distinguished by the ch field).
+  /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
+  const screenLinksRef = useRef(new Map());
+  /** @type {{current: Map<string, MediaStream>}} */
+  const screenStreamsRef = useRef(new Map());
+  // Current preview pool + live selection (refs so the async ontrack + the roster handler agree).
+  /** @type {{current: string[]}} */
+  const screenPoolRef = useRef([]);
+  const screenLiveRef = useRef("");
   /** @type {{current: Map<string, any>}} */
   const entriesRef = useRef(new Map());
   // Bind ordering: the host can change pickers quickly, so multiple PUTs are in flight and (pre-live,
@@ -160,6 +209,9 @@ function Greenroom() {
       linksRef.current.delete(id);
       streamsRef.current.delete(id);
       entriesRef.current.delete(id);
+      // A departing guest also drops out of the screenshare rail; the authoritative screen-roster
+      // re-broadcast clears the pool too, but tear the link down here so a dead pc isn't left behind.
+      dropScreenLink(id);
     }
 
     function upsert(entry) {
@@ -168,6 +220,62 @@ function Greenroom() {
       ensureLink(entry.id);
       applyLocks(entry.id); // a roster / peer-joined update may have changed locks → enforce (RF-8)
     }
+
+    // syncScreenTiles rebuilds the rendered screenshare rail (D-21/AC-11) from the current pool + the
+    // live selection + the consumed streams, in a stable id order so the rail doesn't reshuffle. The
+    // sharer's display name comes from its camera roster entry (a sharer is always a roster guest).
+    function syncScreenTiles() {
+      const live = screenLiveRef.current;
+      const ids = [...new Set([...screenPoolRef.current, ...(live ? [live] : [])])].sort();
+      setScreenTiles(
+        ids.map((id) => ({
+          id,
+          name: (entriesRef.current.get(id) || {}).name || "",
+          stream: screenStreamsRef.current.get(id) || null,
+          live: id === live,
+        })),
+      );
+      setScreenLive(live);
+    }
+
+    // ensureScreenLink opens a screen-channel consumer PeerLink to a sharer (the rail thumbnail + the
+    // live render both read its track). Kept across roster updates so a re-select doesn't churn links.
+    function ensureScreenLink(id) {
+      if (screenLinksRef.current.has(id)) return;
+      const link = new PeerLink(room, id, room.iceServers, "screen");
+      screenLinksRef.current.set(id, link);
+      link.pc.ontrack = (e) => {
+        screenStreamsRef.current.set(id, e.streams[0]);
+        syncScreenTiles();
+      };
+      link.pc.oniceconnectionstatechange = () => {
+        if (link.pc.iceConnectionState === "failed") link.restartIce();
+      };
+      link.offer();
+    }
+
+    function dropScreenLink(id) {
+      const link = screenLinksRef.current.get(id);
+      if (link) link.close();
+      screenLinksRef.current.delete(id);
+      screenStreamsRef.current.delete(id);
+    }
+
+    // The host-only screenshare roster (D-21): a FULL snapshot of the preview pool + the live sharer.
+    // Open a screen link to every sharer (pool ∪ live), drop links for sharers that left, and rebuild
+    // the rail. An omitted previews/live means "empty"/"none" (full-state snapshot, not a delta).
+    room.on("screen-roster", (f) => {
+      const pool = f.previews || [];
+      const live = f.live || "";
+      screenPoolRef.current = pool;
+      screenLiveRef.current = live;
+      const want = new Set([...pool, ...(live ? [live] : [])]);
+      for (const id of want) ensureScreenLink(id);
+      for (const id of [...screenLinksRef.current.keys()]) {
+        if (!want.has(id)) dropScreenLink(id);
+      }
+      syncScreenTiles();
+    });
 
     room.on("roster", (f) => {
       // The roster is authoritative: add/update guest entries, and drop any peer no longer in it.
@@ -230,11 +338,18 @@ function Greenroom() {
       syncTiles();
     });
     room.on("signal", (f) => {
+      // Route by channel (D-21): a screen-channel signal goes to the sharer's screen rail link, a
+      // camera signal to its grid-tile link — the two links to the same sharer never cross.
+      if (f.ch === "screen") {
+        const sl = screenLinksRef.current.get(f.from);
+        if (sl) sl.onSignal(f);
+        return;
+      }
       const link = linksRef.current.get(f.from);
       if (link) link.onSignal(f);
     });
     room.onIce((servers) => {
-      for (const link of linksRef.current.values()) {
+      for (const link of [...linksRef.current.values(), ...screenLinksRef.current.values()]) {
         try {
           link.pc.setConfiguration({ iceServers: servers });
         } catch (_) {
@@ -245,15 +360,23 @@ function Greenroom() {
     room.ready.then(() => setState((s) => (s === "connecting" ? "live" : s))).catch(() => setState("error"));
     room.onClose(() => {
       for (const link of linksRef.current.values()) link.close();
+      for (const link of screenLinksRef.current.values()) link.close();
       linksRef.current.clear();
       streamsRef.current.clear();
       entriesRef.current.clear();
+      screenLinksRef.current.clear();
+      screenStreamsRef.current.clear();
+      screenPoolRef.current = [];
+      screenLiveRef.current = "";
       setTiles([]);
+      setScreenTiles([]);
+      setScreenLive("");
       setState("error");
     });
 
     return () => {
       for (const link of linksRef.current.values()) link.close();
+      for (const link of screenLinksRef.current.values()) link.close();
       room.close();
     };
   }, []);
@@ -406,6 +529,14 @@ function Greenroom() {
       });
   }
 
+  // selectScreen is the host-only select-live control (D-21/D-11 exception): promote a backstage
+  // sharer to the live "screen" slot, or "" to take the current share off air (no auto-advance). The
+  // server enforces host-only authority + that the target is in the pool (EN-7); a co-host's click
+  // would be a server no-op. The authoritative {t:screen-roster} re-broadcast updates the rail.
+  function selectScreen(peerId) {
+    roomRef.current?.send({ t: "screen-select", peerId });
+  }
+
   // rollbackPicker forces a grid re-render so a rejected pick reverts to the authoritative
   // entry.boundSlot. setBindError alone is a no-op when the SAME message is already shown (e.g.
   // every unprovisioned slot returns the same 404), and then Preact wouldn't reconcile the
@@ -463,6 +594,26 @@ function Greenroom() {
           </p>
         ) : null}
       </div>
+      {/* Screenshare preview-switcher rail (D-21/AC-11): every active sharer as a thumbnail; the host
+          picks which one is live (the live render is the badged tile, shown to everyone backstage +
+          on /s/screen). Host-only — guests never see the rail (the screen-roster is host-only). */}
+      {screenTiles.length > 0 ? (
+        <section class="gr-screen" data-live={screenLive ? "1" : "0"} data-count={screenTiles.length}>
+          <div class="gr-screen-head">
+            <span class="gr-screen-label">Screen shares</span>
+            {screenLive ? (
+              <button type="button" class="gr-screen-off" onClick={() => selectScreen("")}>
+                Take screen off air
+              </button>
+            ) : null}
+          </div>
+          <div class="gr-screen-rail">
+            {screenTiles.map((t) => (
+              <ScreenTile key={t.id} tile={t} onSelect={() => selectScreen(t.id)} />
+            ))}
+          </div>
+        </section>
+      ) : null}
       <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
         {tiles.length === 0 ? (
           <p class="gr-empty" data-state={state}>

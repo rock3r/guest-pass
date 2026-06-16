@@ -22,9 +22,17 @@ const getDisplayMediaStubJS = `
 (() => {
   navigator.mediaDevices.getDisplayMedia = async () => {
     const c = document.createElement('canvas');
-    c.width = 64; c.height = 64;
-    c.getContext('2d').fillRect(0, 0, 64, 64);
-    const s = c.captureStream(5);
+    c.width = 320; c.height = 180;
+    const ctx = c.getContext('2d');
+    // Animate so captureStream delivers fresh frames a remote consumer can actually decode
+    // (videoWidth > 0) — the live-share render path (AC-11) is asserted end-to-end over P2P.
+    let i = 0;
+    setInterval(() => {
+      i = (i + 9) % 256;
+      ctx.fillStyle = "rgb(" + i + ",90,170)";
+      ctx.fillRect(0, 0, 320, 180);
+    }, 100);
+    const s = c.captureStream(10);
     window.__gpShareStream = s; // parked so a test can read the capture track's readyState
     return s;
   };

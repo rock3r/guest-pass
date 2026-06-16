@@ -922,9 +922,13 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
   (consent — D-13).
 - **Role-filtered roster** (EN-8). The roster is a per-recipient server projection.
 - **Signal relay carries only the payload** (D-23). A `{t:"signal"}` is re-emitted as a
-  clean `{t, from, sdp|ice}` frame: the opaque sdp/ice is relayed byte-for-byte and
+  clean `{t, from, sdp|ice, ch}` frame: the opaque sdp/ice is relayed byte-for-byte and
   stamped with the sender; no other client-supplied fields are echoed, so a peer can't
-  inject roster/slot/control fields into a frame the addressee acts on.
+  inject roster/slot/control fields into a frame the addressee acts on. The `ch` (channel)
+  field is the only routing metadata preserved (D-21): a peer pair runs a SECOND P2P
+  connection for the screenshare track (`ch:"screen"`) distinct from the camera (`ch:""`),
+  and both ends route the inbound signal to the right link/publisher by `(from, ch)`. The
+  server never acts on `ch`.
 - **One writer goroutine per connection** (EN-12) — fan-out to a peer is serialized.
 - **Tokens redacted from logs**; `{t:"chat"}.text` is relayed, never persisted,
   never logged (EN-20).
@@ -935,6 +939,7 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
 {"t":"join"}                                              // enter the room for my session
 {"t":"signal","to":"<peerId>","sdp":…}                    // relayed verbatim, server never inspects
 {"t":"signal","to":"<peerId>","ice":…}
+{"t":"signal","to":"<peerId>","ch":"screen","sdp":…}      // screen channel: the 2nd P2P conn (D-21)
 {"t":"state","cam":true,"mic":false,"screen":false,"level":0.42}
                                                           // self-presence, throttled. Rejected per-modality
                                                           // if a suppression lock is active (EN-7)
@@ -1041,6 +1046,7 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
                                                           // untracks the source pc; sources aren't in the
                                                           // roster (EN-13), so this is their peer-left analogue
 {"t":"signal","from":"<peerId>","sdp"|"ice":…}            // relayed SDP/ICE
+{"t":"signal","from":"<peerId>","ch":"screen","sdp"|"ice":…} // screen-channel SDP/ICE (D-21)
 {"t":"chat","from":"<peerId>","text":"…"}                 // relayed only (EN-20)
 
 // Batched audio-meter tick (AD-13) — every participant's last-reported {t:state} level coalesced

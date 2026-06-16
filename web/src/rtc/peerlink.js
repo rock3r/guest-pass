@@ -10,17 +10,22 @@ export class PeerLink {
    * @param {import("./room.js").Room} room
    * @param {string} remoteId the peer id to consume from
    * @param {RTCIceServer[]} [iceServers] ICE config from the Room's join-ack
+   * @param {string} [channel] the signaling channel (D-21): "screen" consumes the remote's
+   *   SECOND publisher (the screenshare track) distinct from the camera (default ""). Every
+   *   outbound signal carries this `ch`, and the consumer routes inbound signals to this link
+   *   by matching (from, ch), so two links to the same peer (camera + screen) don't cross.
    */
-  constructor(room, remoteId, iceServers) {
+  constructor(room, remoteId, iceServers, channel) {
     this.room = room;
     this.remoteId = remoteId;
+    this.channel = channel || "";
     this.closed = false;
     /** @type {RTCIceCandidateInit[]} ICE that arrived before the remote description */
     this.pendingIce = [];
     this.pc = new RTCPeerConnection({ iceServers: iceServers || [] });
     this.pc.onicecandidate = (e) => {
       if (e.candidate && !this.closed) {
-        room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON() });
+        room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON(), ch: this.channel });
       }
     };
   }
@@ -71,7 +76,7 @@ export class PeerLink {
     if (this.closed) return;
     await this.pc.setLocalDescription(o);
     if (this.closed) return;
-    this.room.send({ t: "signal", to: this.remoteId, sdp: this.pc.localDescription });
+    this.room.send({ t: "signal", to: this.remoteId, sdp: this.pc.localDescription, ch: this.channel });
   }
 
   /** Handle a relayed signal frame from the remote peer. */

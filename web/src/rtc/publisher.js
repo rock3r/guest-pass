@@ -14,10 +14,14 @@ export class Publisher {
    * @param {(pc: RTCPeerConnection, id: string) => void} [onPc] notified when a consumer pc is
    *   created, so the guest can watch it for connectivity (D-38 network-blocked detection).
    * @param {(id: string) => void} [onUntrack] notified when a consumer pc is torn down.
+   * @param {string} [channel] the signaling channel (D-21): a "screen" Publisher answers offers on
+   *   the screen channel and stamps every outbound signal with this `ch`, so a sharer can run BOTH a
+   *   camera Publisher ("") and a screen Publisher ("screen") to the same consumer without crossing.
    */
-  constructor(room, stream, onPc, onUntrack) {
+  constructor(room, stream, onPc, onUntrack, channel) {
     this.room = room;
     this.stream = stream;
+    this.channel = channel || "";
     this.closed = false;
     this.onPc = onPc || (() => {});
     this.onUntrack = onUntrack || (() => {});
@@ -89,7 +93,7 @@ export class Publisher {
       delete this._earlyIce[f.from];
       this.pcs[f.from] = pc;
       pc.onicecandidate = (e) => {
-        if (e.candidate) this.room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON() });
+        if (e.candidate) this.room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON(), ch: this.channel });
       };
       this.onPc(pc, f.from); // watch this consumer connection for D-38 network-blocked detection
     }
@@ -101,7 +105,7 @@ export class Publisher {
         }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        this.room.send({ t: "signal", to: f.from, sdp: pc.localDescription });
+        this.room.send({ t: "signal", to: f.from, sdp: pc.localDescription, ch: this.channel });
       }
       for (const cand of pc._pendingIce) {
         try {
