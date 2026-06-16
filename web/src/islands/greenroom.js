@@ -374,6 +374,38 @@ function Greenroom() {
       .catch(() => setBindError("Couldn't reach the server to update the nameplate."));
   }
 
+  // setCanScreen grants/revokes a guest's screenshare eligibility (EN-23/AC-9): PATCH
+  // /api/passes/{id}. The server persists can_screen and re-projects the room (a revoke runs
+  // force-no-share), so the authoritative roster updates the controlled checkbox — no local override.
+  function setCanScreen(passId, canScreen) {
+    fetch(`/api/passes/${encodeURIComponent(passId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ canScreen }),
+    })
+      .then(async (r) => {
+        if (r.ok) {
+          setBindError("");
+          return;
+        }
+        let msg = "Couldn't update screenshare eligibility.";
+        try {
+          const body = await r.json();
+          if (body && body.error) msg = body.error;
+        } catch (_) {
+          /* non-JSON body: keep the generic message */
+        }
+        setBindError(msg);
+        rollbackPicker(); // re-render so the controlled checkbox reverts to the authoritative value
+      })
+      .catch(() => {
+        // A network failure leaves the DB unchanged + no roster update, so the controlled checkbox
+        // would otherwise stay on the host's click — re-render so it reverts to the authoritative value.
+        setBindError("Couldn't reach the server to update screenshare eligibility.");
+        rollbackPicker();
+      });
+  }
+
   // rollbackPicker forces a grid re-render so a rejected pick reverts to the authoritative
   // entry.boundSlot. setBindError alone is a no-op when the SAME message is already shown (e.g.
   // every unprovisioned slot returns the same 404), and then Preact wouldn't reconcile the
@@ -454,6 +486,7 @@ function Greenroom() {
             onDismissHand={() => roomRef.current?.send({ t: "hand", peerId: t.id, raised: false })}
             onBindSlot={(slot) => bindSlot(t.id, slot)}
             onSetName={(name) => setName(t.id, name)}
+            onSetCanScreen={(can) => setCanScreen(t.id, can)}
           />
           ))
         )}

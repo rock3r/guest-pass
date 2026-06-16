@@ -408,6 +408,32 @@ func (r *Room) SetName(id PeerID, name string) {
 	})
 }
 
+// SetScreenEligible seeds a participant's screenshare eligibility from passes.can_screen on join
+// (EN-23/AC-9) — projection only, no force-no-share side-effect (a baseline-ineligible guest is
+// un-afforded, not force-locked). See roomState.setScreenEligible.
+func (r *Room) SetScreenEligible(id PeerID, canScreen bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setScreenEligible(id, canScreen))
+	})
+}
+
+// SetScreenEligibleLive is the host's LIVE grant/revoke (the PATCH path, AC-9): set can_screen + run
+// the revoke side-effect (force-no-share on revoke / clear it on grant) and persist the share lock
+// change (AD-22), so a revoke survives a restart like any force. Host authority is enforced at the
+// web layer (RequireHost). See roomState.setScreenEligibleLive.
+func (r *Room) SetScreenEligibleLive(id PeerID, canScreen bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		before := st.lockOn(id, "share")
+		deliver(conns, st.setScreenEligibleLive(id, canScreen))
+		switch after := st.lockOn(id, "share"); {
+		case after != nil && after != before:
+			r.persistLock(true, id, "share", after) // revoke applied a host share lock
+		case before != nil && after == nil:
+			r.persistLock(false, id, "share", nil) // grant cleared it
+		}
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection

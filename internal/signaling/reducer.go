@@ -13,6 +13,10 @@ type peerInfo struct {
 	// folded into the roster; handRaised is the soft "bring me in" nudge (PR-7).
 	cam, mic, screen bool
 	handRaised       bool
+	// canScreen is the host-managed screenshare ELIGIBILITY (EN-23/AC-9), distinct from `screen`
+	// (the live presence). Seeded from passes.can_screen on join and toggled live by the host's
+	// PATCH; it gates the guest's share affordance. Default false.
+	canScreen bool
 	// level is the last reported audio meter (0..1), held in-memory only (EN-11: never
 	// persisted) and coalesced onto the batched {t:levels} tick (AD-13), never the roster.
 	level float64
@@ -427,6 +431,57 @@ func (s *roomState) setName(id PeerID, name string) []outbound {
 		}
 	}
 	return append(out, s.rebroadcastRoster()...)
+}
+
+// setScreenEligible sets a participant's screenshare ELIGIBILITY (can_screen, EN-23/AC-9) and
+// re-broadcasts the roster so the host's grant/revoke toggle and the guest's own share affordance
+// reflect it. Projection ONLY — no force-no-share side-effect — so it is safe to seed from
+// passes.can_screen on join (a baseline-ineligible guest must NOT be force-locked, only un-afforded).
+// No-op for an absent peer or an unchanged value.
+func (s *roomState) setScreenEligible(id PeerID, canScreen bool) []outbound {
+	p := s.peers[id]
+	if p == nil || p.canScreen == canScreen {
+		return nil
+	}
+	p.canScreen = canScreen
+	return s.rebroadcastRoster()
+}
+
+// setScreenEligibleLive is the host's LIVE eligibility change (the PATCH path, AC-9): it sets
+// can_screen AND runs the revoke side-effect. A REVOKE applies the host-authority share suppression
+// lock (force-no-share, D-13) — pulling an active share + suppressing screen presence at source — as
+// a SERVER POLICY action that needs no connected host peer (unlike a peer moderation force). A GRANT
+// clears the host-floor share lock so the guest may share again (a co-host's lower-floor moderation
+// lock is left in place). Always re-broadcasts (the host explicitly toggled) and re-projects the
+// lock change to the occupant's OBS source(s) (RF-8). The Room persists the lock change.
+func (s *roomState) setScreenEligibleLive(id PeerID, canScreen bool) []outbound {
+	p := s.peers[id]
+	if p == nil {
+		return nil
+	}
+	p.canScreen = canScreen
+	lockChanged := false
+	if !canScreen {
+		// Revoke → force-no-share, but ONLY when no share lock exists: if the guest is ALREADY
+		// share-locked (e.g. a co-host's moderation force-no-share, floor < host), the share is
+		// already suppressed — do NOT overwrite that lock with a host-floor one, or a later grant
+		// (which clears only the host-floor lock) would erase the co-host's moderation entirely (codex).
+		if s.lockOn(id, "share") == nil {
+			s.setLock(id, "share", &lockState{applier: "host", floor: rankHost})
+			p.screen = false // suppress the share presence at source
+			lockChanged = true
+		}
+	} else if cur := s.lockOn(id, "share"); cur != nil && cur.floor >= rankHost {
+		// Grant → clear the host-applied eligibility share lock; leave a co-host's lower-floor
+		// moderation lock in place (eligibility and moderation are separate authorities).
+		s.clearLock(id, "share")
+		lockChanged = true
+	}
+	out := s.rebroadcastRoster()
+	if lockChanged {
+		out = append(out, s.sourceLockFrames(id)...)
+	}
+	return out
 }
 
 // occupantLocksFrame projects a bound occupant's active lock KINDS to that slot's OBS source page

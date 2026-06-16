@@ -223,6 +223,15 @@ func (wr *wsResolver) passCeiling(ctx context.Context, passID string) (maxRes, m
 	return mr, mf, mb, true
 }
 
+// passCanScreen re-reads a guest's CURRENT screenshare eligibility (passes.can_screen) at REPLAY
+// time — under the per-host binding lock, AFTER Join — so a host PATCH during the join window can't
+// seed a stale handshake snapshot. It mirrors guestBoundSlot's re-read-under-lock discipline (D-20).
+// Best-effort: a lookup miss answers false (no eligibility).
+func (wr *wsResolver) passCanScreen(ctx context.Context, passID string) bool {
+	pass, err := wr.store.GetPass(ctx, passID)
+	return err == nil && pass.CanScreen
+}
+
 func (wr *wsResolver) resolveSource(ctx context.Context, raw string, r *http.Request) (wsIdentity, *wsAuthError) {
 	slot, err := wr.store.GetSlotBySourceTokenHash(ctx, wr.hasher.Hash(raw))
 	if errors.Is(err, store.ErrNotFound) {

@@ -109,6 +109,7 @@ type RosterEntry struct {
 	Degraded   *DegradedView `json:"degraded,omitempty"`
 	Locks      []LockView    `json:"locks,omitempty"`
 	BoundSlot  string        `json:"boundSlot,omitempty"` // HOST-ONLY: the cam slot this participant occupies live (e.g. "cam-1"), for the greenroom People controls (D-15/D-20); stripped from non-host projections
+	CanScreen  bool          `json:"canScreen,omitempty"` // screenshare eligibility (EN-23/AC-9): host-managed policy — visible to the HOST (every entry, for the grant/revoke toggle) and to a guest on its OWN entry (its share affordance); stripped from a non-host's view of OTHERS
 	Self       bool          `json:"self,omitempty"`      // true only on the recipient's own entry in its projection
 }
 

@@ -141,6 +141,13 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
 			room.ResumeBind(slot, id.peer)
 		}
+		// Seed the guest's screenshare eligibility (EN-23/AC-9) into the roster UNDER the lock,
+		// re-reading passes.can_screen at seed time (like the slot replay) — so a host PATCH in the
+		// join window is ordered with this seed (both take the per-host lock) and can't be undone by a
+		// stale handshake snapshot. Projection only — no force-no-share side-effect on a fresh join.
+		if h.resolver.passCanScreen(ctx, string(id.peer)) {
+			room.SetScreenEligible(id.peer, true)
+		}
 		unlock()
 		// Deliver the program quality ceiling (D-19/AC-8) so the publisher caps its program encoder
 		// the moment it publishes (and its degradation ladder recovers no higher). Resolved from the

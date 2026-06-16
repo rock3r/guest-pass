@@ -513,6 +513,37 @@ func TestPassRepo_SetName(t *testing.T) {
 	}
 }
 
+// SetPassCanScreen grants/revokes screenshare eligibility (EN-23/AC-9), the live host control.
+func TestPassRepo_SetCanScreen(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-screen")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show"})
+	p, err := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, TokenHash: "tok-screen"})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+	if p.CanScreen {
+		t.Fatal("a pass defaults to not screenshare-eligible")
+	}
+
+	if err := st.SetPassCanScreen(ctx, p.ID, true); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, p.ID); !got.CanScreen {
+		t.Fatal("grant did not persist can_screen")
+	}
+	if err := st.SetPassCanScreen(ctx, p.ID, false); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if got, _ := st.GetPass(ctx, p.ID); got.CanScreen {
+		t.Fatal("revoke did not persist can_screen")
+	}
+	if err := st.SetPassCanScreen(ctx, "nope", true); err == nil {
+		t.Fatal("SetPassCanScreen on a missing id should error")
+	}
+}
+
 // Re-assigning a slot clears it from EVERY other row on that (stream, slot) — including a
 // retired row that kept a stale slot_id when it was revoked/expired (codex, M4 PR-6). Without
 // that cleanup the stale binding survives, and a later Re-issue re-activates the row back into

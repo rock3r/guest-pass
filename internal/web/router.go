@@ -135,6 +135,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Nameplate override (D-16/AC-7): set a guest's sticky display name (capped EN-15) →
 			// persist to passes.name + refresh the live OBS nameplate. Host-only (RequireHost), RF-2.
 			hr.Put("/api/passes/{id}/name", api.putPassName)
+			// Screenshare eligibility (EN-23/AC-9): grant/revoke can_screen live → persist + re-project
+			// the room (a revoke runs force-no-share). Host-only (RequireHost), RF-2.
+			hr.Patch("/api/passes/{id}", api.patchPass)
 			// Host's persisted pass→slot bindings, so the greenroom can seed its picker on load and a
 			// pre-live (DB-only) selection survives a refresh / new tab (codex).
 			hr.Get("/api/passes/slot-bindings", api.listSlotBindings)

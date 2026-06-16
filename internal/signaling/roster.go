@@ -45,6 +45,7 @@ func (s *roomState) entryFor(p *peerInfo) RosterEntry {
 		e.Locks = s.locksOf(p.id)                                     // live-visible suppression locks (D-13/EN-7), with applierRank
 		e.Signal, e.RttMs, e.Degraded = p.signal, p.rttMs, p.degraded // degradation health (AD-21)
 		e.BoundSlot = s.boundSlotFor(p.id)                            // host-only; stripped from non-host projections in rosterFor
+		e.CanScreen = p.canScreen                                     // host-managed eligibility (AC-9); host sees all, a guest only its own (stripped in rosterFor)
 	}
 	return e
 }
@@ -106,6 +107,9 @@ func (s *roomState) rosterFor(recipientID PeerID, recipientRole string) []Roster
 		e := s.entryFor(p)
 		if recipientRole != "host" {
 			e.BoundSlot = "" // slot bindings are host-only (the People controls are host-only, D-15)
+			if id != recipientID {
+				e.CanScreen = false // eligibility is host policy: a non-host sees only its OWN (EN-7)
+			}
 		}
 		if id == recipientID {
 			e.Self = true
