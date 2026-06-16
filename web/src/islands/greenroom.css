@@ -170,3 +170,44 @@
   background: var(--paper);
   color: var(--ink);
 }
+
+/* Host-only nameplate override (D-16/AC-7): a small inline edit-and-Set form on the tile. */
+.gr-nameedit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.gr-nameedit-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.gr-nameedit-text {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.gr-nameedit-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.gr-nameedit-set {
+  font: inherit;
+  padding: 3px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}

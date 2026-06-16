@@ -16,6 +16,35 @@ body {
   background: transparent;
 }
 
+/* Nameplate (D-16): the bound occupant's display name, shown only when the source URL carries the
+   ?name show/hide param (hidden by default). Rendered by obs.js as escaped textContent (EN-15).
+
+   DOCUMENTED OBS CUSTOM CSS SELECTOR: hosts restyle/reposition the nameplate by targeting
+   `#obs-nameplate` in their OBS browser-source Custom CSS — e.g.
+     #obs-nameplate { bottom: 8%; left: 6%; font-size: 2rem; background: #c00; }
+   This default is a readable lower-left chip the host is free to override entirely. */
+#obs-nameplate {
+  position: fixed;
+  left: 4%;
+  bottom: 6%;
+  max-width: 60%;
+  padding: 0.3em 0.7em;
+  box-sizing: border-box;
+  border-radius: 0.4em;
+  font-family: system-ui, sans-serif;
+  font-size: 1.6rem;
+  line-height: 1.2;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#obs-nameplate[hidden] {
+  display: none;
+}
+
 /* A terminal state (e.g. the slot token was rotated, D-22) — the source stopped and the host
    must re-paste the fresh URL. Shown over the (now cleared) video so it's visible in OBS. */
 #obs-terminal {

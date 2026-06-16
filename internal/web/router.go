@@ -132,6 +132,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Live slot↔guest (re)bind from the greenroom People controls (D-20): persist +
 			// re-route /s/{slot} with no OBS edit (EN-3). Host-only (RequireHost), RF-2.
 			hr.Put("/api/passes/{id}/slot", api.putPassSlot)
+			// Nameplate override (D-16/AC-7): set a guest's sticky display name (capped EN-15) →
+			// persist to passes.name + refresh the live OBS nameplate. Host-only (RequireHost), RF-2.
+			hr.Put("/api/passes/{id}/name", api.putPassName)
 			// Host's persisted pass→slot bindings, so the greenroom can seed its picker on load and a
 			// pre-live (DB-only) selection survives a refresh / new tab (codex).
 			hr.Get("/api/passes/slot-bindings", api.listSlotBindings)

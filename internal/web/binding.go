@@ -117,6 +117,69 @@ func (a *apiServer) putPassSlot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, putPassSlotResponse{BoundSlot: newLabel, Live: live})
 }
 
+// putPassNameRequest sets (or clears) a guest's sticky nameplate name (D-16/AC-7). A blank name
+// clears the override to NULL (no nameplate text).
+type putPassNameRequest struct {
+	Name string `json:"name"`
+}
+
+// putPassNameResponse echoes the CANONICAL name now in effect — the server-capped form (EN-15),
+// which may differ from the request (control chars stripped, length bounded) — and whether the
+// change also refreshed the LIVE room nameplate (true) or was persisted DB-only (false).
+type putPassNameResponse struct {
+	Name string `json:"name"`
+	Live bool   `json:"live"`
+}
+
+// putPassName overrides a guest's sticky display name — the nameplate (AC-7/D-16). It caps the name
+// server-side (EN-15: control/non-printable stripped, length-bounded) and persists it to
+// passes.name; if the pass's stream is the host's live session, it ALSO refreshes the live OBS
+// nameplate via Room.SetName — a same-occupant + same-epoch slot-rebind, so the source updates the
+// text WITHOUT re-linking media. Host-only (RequireHost); RF-2 same-host (ownedPass). Serialized
+// with the host's other binding ops so the DB write and the live command keep DB-commit order.
+func (a *apiServer) putPassName(w http.ResponseWriter, r *http.Request) {
+	host, ok := auth.HostFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	defer a.binds.lock(host.ID)()
+	pass, _, ok := a.ownedPass(w, r)
+	if !ok {
+		return
+	}
+	var req putPassNameRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+
+	name := signaling.CapDisplayName(req.Name)
+	if err := a.store.SetPassName(r.Context(), pass.ID, name); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set name")
+		return
+	}
+	// Refresh the LIVE nameplate only when this pass's stream is the host's active session
+	// (symmetric with the slot-bind gate): touching the host-global room for an upcoming stream's
+	// guest would disturb the on-air pool. The DB write above always persists, regardless.
+	live := a.streamIsLive(r.Context(), host.ID, pass.StreamID)
+	if live {
+		a.liveSetName(host.ID, pass.ID, name)
+	}
+	writeJSON(w, http.StatusOK, putPassNameResponse{Name: name, Live: live})
+}
+
+// liveSetName refreshes the guest's nameplate in the live room (if any). The live peer id is the
+// pass id (the same identity liveRebind binds). No-op when no stream is live (DB-only until it
+// starts; the join carries the persisted name then).
+func (a *apiServer) liveSetName(hostID, passID, name string) {
+	if a.hub == nil {
+		return
+	}
+	if room := a.hub.RoomIfLive(hostID); room != nil {
+		room.SetName(signaling.PeerID(passID), name)
+	}
+}
+
 // streamIsLive reports whether streamID is the host's currently-live session (EN-2/D-20). The
 // greenroom picker persists a binding for any of the host's streams, but a LIVE reroute of the
 // host-global room must only fire for the live stream — otherwise (re)binding an upcoming

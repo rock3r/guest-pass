@@ -126,7 +126,10 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 	// any presence/hand state a still-registered peer already had (a rejoin keeps its slot
 	// binding, so it keeps its folded on-air too — carried in the fresh roster, not replayed).
 	prev, rejoining := s.peers[id]
-	p := &peerInfo{id: id, role: role, name: name}
+	// Cap the name as it enters room state (EN-15): every nameplate the source renders — whether
+	// the invite default arriving here or a later host override — is then charset/length-bounded by
+	// construction, independent of how the name reached the DB.
+	p := &peerInfo{id: id, role: role, name: CapDisplayName(name)}
 	if prev != nil {
 		p.cam, p.mic, p.screen, p.handRaised = prev.cam, prev.mic, prev.screen, prev.handRaised
 	}
@@ -391,9 +394,39 @@ func epochPtr(e int) *int { return &e }
 
 func (s *roomState) bindingFrame(sid SlotID, st *slotState) Frame {
 	if st.occupant != "" {
-		return Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(st.occupant), Epoch: epochPtr(st.epoch)}
+		return Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(st.occupant), Name: s.occupantName(st.occupant), Epoch: epochPtr(st.epoch)}
 	}
 	return Frame{T: "slot-unbound", Slot: string(sid), Epoch: epochPtr(st.epoch)}
+}
+
+// occupantName returns a slot occupant's current display name, for the nameplate carried on
+// {t:slot-rebind} (D-16). "" when the peer isn't (yet) a room member.
+func (s *roomState) occupantName(occupant PeerID) string {
+	if p := s.peers[occupant]; p != nil {
+		return p.name
+	}
+	return ""
+}
+
+// setName overrides a participant's sticky display name (the nameplate, D-16/AC-7): it updates the
+// peer's name, re-broadcasts the roster so the greenroom reflects it, and — for every slot the peer
+// occupies — re-sends {t:slot-rebind} with the SAME occupant + epoch so the live OBS source refreshes
+// the nameplate WITHOUT re-linking media (no flicker). No-op for an absent peer or an unchanged name.
+// The name is escaped at the source (EN-15); the server caps charset/length before this is called.
+func (s *roomState) setName(id PeerID, name string) []outbound {
+	name = CapDisplayName(name) // EN-15: cap at the boundary, so the override matches the join cap
+	p := s.peers[id]
+	if p == nil || p.name == name {
+		return nil
+	}
+	p.name = name
+	var out []outbound
+	for sid, st := range s.slots {
+		if st.occupant == id && st.source != "" {
+			out = append(out, outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(id), Name: name, Epoch: epochPtr(st.epoch)}})
+		}
+	}
+	return append(out, s.rebroadcastRoster()...)
 }
 
 // occupantLocksFrame projects a bound occupant's active lock KINDS to that slot's OBS source page
@@ -447,7 +480,7 @@ func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	// locked occupant detaches the locked track at once, and a rebind to a fresh occupant clears any
 	// stale lock view the source held for the previous occupant (empty kinds → re-enable all).
 	return append(out,
-		outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Epoch: epochPtr(st.epoch)}},
+		outbound{to: st.source, frame: Frame{T: "slot-rebind", Slot: string(sid), OccupantPeerID: string(occupant), Name: s.occupantName(occupant), Epoch: epochPtr(st.epoch)}},
 		outbound{to: st.source, frame: s.occupantLocksFrame(sid, st)},
 	)
 }

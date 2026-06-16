@@ -454,6 +454,43 @@ func TestPassRepo_SetRoleAndReissue(t *testing.T) {
 	}
 }
 
+// SetPassName overrides the sticky nameplate name (D-16/AC-7): it persists over the invite name,
+// and an empty string clears the override back to NULL so the nameplate falls back to the invite.
+func TestPassRepo_SetName(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-name")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show"})
+	invite := "Greta"
+	p, err := st.CreatePass(ctx, CreatePassParams{StreamID: stream.ID, Name: &invite, TokenHash: "tok-name"})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+
+	// Override the name → persists.
+	if err := st.SetPassName(ctx, p.ID, "Margaret"); err != nil {
+		t.Fatalf("SetPassName: %v", err)
+	}
+	got, _ := st.GetPass(ctx, p.ID)
+	if got.Name == nil || *got.Name != "Margaret" {
+		t.Fatalf("after override, name = %v, want Margaret", got.Name)
+	}
+
+	// Clearing (empty) drops the override back to NULL (fall back to the invite name at render).
+	if err := st.SetPassName(ctx, p.ID, ""); err != nil {
+		t.Fatalf("SetPassName clear: %v", err)
+	}
+	got, _ = st.GetPass(ctx, p.ID)
+	if got.Name != nil {
+		t.Fatalf("after clear, name = %q, want NULL", *got.Name)
+	}
+
+	// Errors on an unknown id (errIfNoRows).
+	if err := st.SetPassName(ctx, "nope", "X"); err == nil {
+		t.Fatal("SetPassName on missing id should error")
+	}
+}
+
 // Re-assigning a slot clears it from EVERY other row on that (stream, slot) — including a
 // retired row that kept a stale slot_id when it was revoked/expired (codex, M4 PR-6). Without
 // that cleanup the stale binding survives, and a later Re-issue re-activates the row back into
