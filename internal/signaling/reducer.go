@@ -159,6 +159,13 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 		if s.streaming {
 			out = append(out, outbound{to: id, frame: Frame{T: "streaming", Active: true}})
 		}
+		// A joining (or reconnecting) HOST replays the current screenshare preview-switcher state
+		// (D-21/AC-11) so its preview rail + live selection populate immediately — not only after the
+		// next start/stop/select (codex). screenRoster is host-only and reaches THIS host (now a peer).
+		// Sent only when something is shared; an empty pool needs no replay (the rail starts empty).
+		if role == "host" && (len(s.screenPreviews) > 0 || s.screenLiveID() != "") {
+			out = append(out, s.screenRoster()...)
+		}
 	}
 	if rejoining {
 		return out

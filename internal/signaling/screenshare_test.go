@@ -164,3 +164,69 @@ func TestScreenRosterHostOnly(t *testing.T) {
 		t.Fatal("screen-roster must reach the host")
 	}
 }
+
+// codex: {t:screen-roster} is a full-state SNAPSHOT — when the last sharer stops (clearing the pool
+// and the live slot), the broadcast carries the empty pool + no live, so the host resets its rail.
+func TestScreenRosterClearSnapshot(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "g1")
+	s.screenStart("g1")
+	s.screenSelect("host", "g1")
+
+	out := s.screenStop("g1") // last sharer + the live one
+	f, ok := firstFrameOfType(out, "host", "screen-roster")
+	if !ok || len(f.Previews) != 0 || f.Live != "" {
+		t.Fatalf("clearing screen-roster = previews:%v live:%q, want an empty snapshot", f.Previews, f.Live)
+	}
+}
+
+// codex: a HOST joining (or reconnecting) while guests are already sharing must REPLAY the current
+// screen-roster, so its preview rail populates immediately — not only after the next start/select.
+func TestHostJoinReplaysScreenRoster(t *testing.T) {
+	s := newRoomState()
+	joinSharer(s, "g1")
+	s.screenStart("g1") // sharing before any host socket is present
+
+	out := s.join("host", "host", "")
+	f, ok := firstFrameOfType(out, "host", "screen-roster")
+	if !ok || len(f.Previews) != 1 || f.Previews[0] != "g1" {
+		t.Fatalf("host join must replay the screen-roster, got %+v", f)
+	}
+	// A host joining a room with nothing shared gets no replay (the rail starts empty).
+	s2 := newRoomState()
+	if out := s2.join("host", "host", ""); hasFrameOfType(out, "screen-roster") {
+		t.Fatal("a host joining with nothing shared must not get a screen-roster replay")
+	}
+}
+
+// codex: a GENERIC {t:rebind,slot:"screen"} must be REJECTED — the screenshare slot is managed ONLY
+// by screen-select over the pool, so a stale/hostile generic rebind can't mark an arbitrary peer the
+// live share without pool membership. (Driven through the Room actor: the rejected rebind emits no
+// slot-rebind, so the screen source's FIRST slot-rebind names the screen-SELECTed peer.)
+func TestRoomGenericRebindRejectsScreenSlot(t *testing.T) {
+	r := newRoom("screengate", nil, nil)
+	go r.run()
+	defer r.Close()
+
+	r.Join("host", "host", "", "", make(chan Frame, 16))
+	r.Join("g1", "guest", "", "", make(chan Frame, 16))
+	r.Join("g2", "guest", "", "", make(chan Frame, 16))
+	r.SetScreenEligible("g1", true)
+	r.SetScreenEligible("g2", true)
+
+	srcOut := make(chan Frame, 16)
+	r.Join("src-screen", "obs", "", "screen", srcOut)
+	if f := recvFrame(t, srcOut); f.T != "slot-unbound" {
+		t.Fatalf("screen source initial frame = %q, want slot-unbound", f.T)
+	}
+
+	r.ScreenStart("g1")
+	r.ScreenStart("g2")
+	r.Rebind("screen", "g1")     // GENERIC rebind of the screen slot — must be rejected (no frame, no bind)
+	r.ScreenSelect("host", "g2") // the sanctioned path → binds the slot to g2
+
+	if f := recvFrameOfType(t, srcOut, "slot-rebind"); f.OccupantPeerID != "g2" {
+		t.Fatalf("screen source first slot-rebind occupant = %q, want g2 — a generic {t:rebind,slot:screen} must not bind g1", f.OccupantPeerID)
+	}
+}

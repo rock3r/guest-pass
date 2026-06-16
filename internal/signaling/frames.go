@@ -78,6 +78,11 @@ type Frame struct {
 	// one the host selected on-air ("" = none, no auto-advance). {t:"screen-select"} carries the
 	// target in PeerID ("" clears the slot). A sharer learns its OWN active-live bit from the
 	// screenShare pointer folded into its roster entry (AC-13), NOT from this host-only frame.
+	//
+	// {t:"screen-roster"} is a FULL-STATE SNAPSHOT, not a delta: the host client REPLACES its rail +
+	// live selection on every frame, so an OMITTED previews means "empty pool" and an OMITTED live
+	// means "no live share" (omitempty drops []/""). A clearing — last sharer stops or the slot is
+	// cleared — therefore arrives as {t:"screen-roster"} with these fields absent, and the host resets.
 	Previews   []string    `json:"previews,omitempty"`
 	Live       string      `json:"live,omitempty"`
 	Recipient  string      `json:"self,omitempty"` // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
