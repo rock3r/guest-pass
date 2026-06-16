@@ -74,13 +74,20 @@ type roomState struct {
 	// (re)spawn and persisted on force/release (AD-22), so a force-muted guest stays muted
 	// across a restart.
 	locks map[PeerID]map[string]*lockState
+	// screenPreviews is the screenshare PREVIEW POOL (D-21/AC-11): the set of eligible participants
+	// currently sharing a screen (each a low-bitrate backstage preview to the host-only rail). The
+	// host promotes ONE to live via {t:screen-select}; the live share is the occupant of the "screen"
+	// slot (so /s/screen re-routes slot-rebind-style, and on-air folds in like any source — D-24).
+	// There is NO separate "live" field: slot("screen").occupant is the single source of truth.
+	screenPreviews map[PeerID]bool
 }
 
 func newRoomState() *roomState {
 	return &roomState{
-		peers: map[PeerID]*peerInfo{},
-		slots: map[SlotID]*slotState{},
-		locks: map[PeerID]map[string]*lockState{},
+		peers:          map[PeerID]*peerInfo{},
+		slots:          map[SlotID]*slotState{},
+		locks:          map[PeerID]map[string]*lockState{},
+		screenPreviews: map[PeerID]bool{},
 	}
 }
 
@@ -151,6 +158,13 @@ func (s *roomState) join(id PeerID, role, name string) []outbound {
 		// roster), so it is still replayed to a participant joining mid-stream (D-24).
 		if s.streaming {
 			out = append(out, outbound{to: id, frame: Frame{T: "streaming", Active: true}})
+		}
+		// A joining (or reconnecting) HOST replays the current screenshare preview-switcher state
+		// (D-21/AC-11) so its preview rail + live selection populate immediately — not only after the
+		// next start/stop/select (codex). screenRoster is host-only and reaches THIS host (now a peer).
+		// Sent only when something is shared; an empty pool needs no replay (the rail starts empty).
+		if role == "host" && (len(s.screenPreviews) > 0 || s.screenLiveID() != "") {
+			out = append(out, s.screenRoster()...)
 		}
 	}
 	if rejoining {
@@ -306,6 +320,11 @@ func (s *roomState) buildLevels() []outbound {
 func (s *roomState) leave(id PeerID) []outbound {
 	p := s.peers[id]
 	delete(s.peers, id)
+	// A leaver also drops out of the screenshare preview pool (D-21). If it held the live "screen"
+	// slot, the slot iteration below vacates it (placeholder, no auto-advance) — so here we only
+	// drop the pool membership; the host-only screen-roster is appended at the end.
+	pulledFromShare := s.screenPreviews[id] || s.screenLiveID() == id
+	delete(s.screenPreviews, id)
 	var out []outbound
 	for sid, st := range s.slots {
 		if st.source == id {
@@ -344,7 +363,12 @@ func (s *roomState) leave(id PeerID) []outbound {
 	}
 	// The leaver is already removed, so the re-broadcast excludes it; remaining viewers see any
 	// freed slot / degraded on-air folded into their roster (alongside the peer-left delta).
-	return append(out, s.rebroadcastRoster()...)
+	out = append(out, s.rebroadcastRoster()...)
+	// If the leaver was sharing, the host's screen-roster (pool/live) changed — re-send it (host-only).
+	if pulledFromShare {
+		out = append(out, s.screenRoster()...)
+	}
+	return out
 }
 
 // attachSource subscribes an OBS source page to a slot and immediately tells it the current
@@ -461,6 +485,7 @@ func (s *roomState) setScreenEligibleLive(id PeerID, canScreen bool) []outbound 
 	}
 	p.canScreen = canScreen
 	lockChanged := false
+	var pull []outbound
 	if !canScreen {
 		// Revoke → force-no-share, but ONLY when no share lock exists: if the guest is ALREADY
 		// share-locked (e.g. a co-host's moderation force-no-share, floor < host), the share is
@@ -471,6 +496,9 @@ func (s *roomState) setScreenEligibleLive(id PeerID, canScreen bool) []outbound 
 			p.screen = false // suppress the share presence at source
 			lockChanged = true
 		}
+		// Revoke ALSO pulls the guest from the screenshare preview pool + the live slot if held (D-21,
+		// no auto-advance). Mutates before the roster re-broadcast so the screenShare fold reflects it.
+		pull = s.pullFromShare(id)
 	} else if cur := s.lockOn(id, "share"); cur != nil && cur.floor >= rankHost {
 		// Grant → clear the host-applied eligibility share lock; leave a co-host's lower-floor
 		// moderation lock in place (eligibility and moderation are separate authorities).
@@ -481,7 +509,7 @@ func (s *roomState) setScreenEligibleLive(id PeerID, canScreen bool) []outbound 
 	if lockChanged {
 		out = append(out, s.sourceLockFrames(id)...)
 	}
-	return out
+	return append(out, pull...)
 }
 
 // occupantLocksFrame projects a bound occupant's active lock KINDS to that slot's OBS source page

@@ -434,6 +434,30 @@ func (r *Room) SetScreenEligibleLive(id PeerID, canScreen bool) {
 	})
 }
 
+// ScreenStart adds a participant to the screenshare preview pool (D-21/AC-11) — it began sharing.
+// Server-enforced eligibility (can_screen + not share-locked); see roomState.screenStart.
+func (r *Room) ScreenStart(id PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenStart(id))
+	})
+}
+
+// ScreenStop removes a participant from the preview pool — it stopped sharing; the live "screen"
+// slot vacates if it held it (no auto-advance). See roomState.screenStop.
+func (r *Room) ScreenStop(id PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenStop(id))
+	})
+}
+
+// ScreenSelect promotes a backstage sharer to live in the "screen" slot, or clears it (peer=""). The
+// actor must be the host (enforced in the reducer too, EN-7). See roomState.screenSelect.
+func (r *Room) ScreenSelect(actor, peer PeerID) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.screenSelect(actor, peer))
+	})
+}
+
 // DeliverTo enqueues a frame to one peer's connection (non-blocking, AD-12). It runs on
 // the room goroutine — the sole owner of the conn table and the out channels — so it can
 // never race the channel close on eviction/leave/terminate. Used for per-connection
@@ -481,7 +505,17 @@ func (r *Room) RotateSource(source PeerID) {
 	})
 }
 
+// isGenericSlot rejects the "screen" slot from the generic cam-slot (re)bind entrypoints: the
+// screenshare slot is managed ONLY by screen-select over the preview pool (D-21), so a host's
+// generic {t:rebind,slot:"screen"} (or a stale slot UI) must not mark an arbitrary peer the live
+// share without pool membership / a screen-select (codex). screenSelect calls the reducer
+// rebindSlot/unbindSlot directly, bypassing these guards.
+func isGenericSlot(slot SlotID) bool { return slot != screenSlot }
+
 func (r *Room) Rebind(slot SlotID, occupant PeerID) {
+	if !isGenericSlot(slot) {
+		return
+	}
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.rebindSlot(slot, occupant))
 	})
@@ -491,6 +525,9 @@ func (r *Room) Rebind(slot SlotID, occupant PeerID) {
 // different live occupant — see roomState.resumeBind. Used by the /ws join replay; the host's
 // explicit greenroom (re)bind still displaces via Rebind/RebindOrVacate.
 func (r *Room) ResumeBind(slot SlotID, occupant PeerID) {
+	if !isGenericSlot(slot) {
+		return
+	}
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.resumeBind(slot, occupant))
 	})
@@ -500,12 +537,18 @@ func (r *Room) ResumeBind(slot SlotID, occupant PeerID) {
 // greenroom (re)bind whose new occupant is OFFLINE drops the slot to placeholder instead of
 // stranding the displaced prior occupant live (see rebindOrVacate).
 func (r *Room) RebindOrVacate(slot SlotID, occupant PeerID) {
+	if !isGenericSlot(slot) {
+		return
+	}
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.rebindOrVacate(slot, occupant))
 	})
 }
 
 func (r *Room) Unbind(slot SlotID) {
+	if !isGenericSlot(slot) {
+		return
+	}
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.unbindSlot(slot))
 	})

@@ -46,6 +46,7 @@ func (s *roomState) entryFor(p *peerInfo) RosterEntry {
 		e.Signal, e.RttMs, e.Degraded = p.signal, p.rttMs, p.degraded // degradation health (AD-21)
 		e.BoundSlot = s.boundSlotFor(p.id)                            // host-only; stripped from non-host projections in rosterFor
 		e.CanScreen = p.canScreen                                     // host-managed eligibility (AC-9); host sees all, a guest only its own (stripped in rosterFor)
+		e.ScreenShare = s.screenShareStateFor(p.id)                   // "live" (all see it) | "backstage" (host + self only; stripped in rosterFor) | "" (D-21/AC-13)
 	}
 	return e
 }
@@ -109,6 +110,9 @@ func (s *roomState) rosterFor(recipientID PeerID, recipientRole string) []Roster
 			e.BoundSlot = "" // slot bindings are host-only (the People controls are host-only, D-15)
 			if id != recipientID {
 				e.CanScreen = false // eligibility is host policy: a non-host sees only its OWN (EN-7)
+				if e.ScreenShare == "backstage" {
+					e.ScreenShare = "" // the preview rail is host-only: a non-host sees others' LIVE share but not their backstage previews (D-21)
+				}
 			}
 		}
 		if id == recipientID {

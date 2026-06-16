@@ -313,6 +313,25 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if id.isSource() && f.Res >= 0 {
 			room.SourceQuality(id.peer, f.Res)
 		}
+	case "screen-start":
+		// A participant begins sharing its screen (D-21/AC-11) → joins the preview pool. The reducer
+		// enforces eligibility (can_screen + not share-locked, EN-7). OBS sources don't share.
+		if !id.isSource() {
+			room.ScreenStart(id.peer)
+		}
+	case "screen-stop":
+		// A participant stops sharing → leaves the pool; the live "screen" slot clears if it held it
+		// (no auto-advance). OBS sources don't share.
+		if !id.isSource() {
+			room.ScreenStop(id.peer)
+		}
+	case "screen-select":
+		// HOST-ONLY (D-21/D-11 exception): promote one backstage sharer to live in the "screen" slot,
+		// or clear it (peerId ""). The reducer also enforces host authority (EN-7); this gate is
+		// convenience. A co-host may force-no-share but never select-live.
+		if id.role == "host" {
+			room.ScreenSelect(id.peer, signaling.PeerID(f.PeerID))
+		}
 	}
 }
 

@@ -67,15 +67,27 @@ type Frame struct {
 	// connection-health signal (1..5), RTT estimate, and active shedding state (Degraded nil = not
 	// degraded). Folded into the sender's roster entry; held in memory only (EN-11). Signal/RttMs
 	// reuse the RosterEntry json keys so a stats frame and a roster entry read the same.
-	Signal     int           `json:"signal,omitempty"`
-	RttMs      int           `json:"rttMs,omitempty"`
-	Degraded   *DegradedView `json:"degraded,omitempty"`
-	Peers      []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
-	Peer       *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID     string        `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
-	Recipient  string        `json:"self,omitempty"`   // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
-	ICEServers []ICEServer   `json:"iceServers,omitempty"`
-	TTLSec     int           `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
+	Signal   int           `json:"signal,omitempty"`
+	RttMs    int           `json:"rttMs,omitempty"`
+	Degraded *DegradedView `json:"degraded,omitempty"`
+	Peers    []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer     *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID   string        `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
+	// Screenshare preview-switcher (D-21/AC-11). Previews + Live ride the HOST-ONLY {t:"screen-roster"}
+	// broadcast: Previews is the pool of peer ids actively sharing (the backstage rail), Live is the
+	// one the host selected on-air ("" = none, no auto-advance). {t:"screen-select"} carries the
+	// target in PeerID ("" clears the slot). A sharer learns its OWN active-live bit from the
+	// screenShare pointer folded into its roster entry (AC-13), NOT from this host-only frame.
+	//
+	// {t:"screen-roster"} is a FULL-STATE SNAPSHOT, not a delta: the host client REPLACES its rail +
+	// live selection on every frame, so an OMITTED previews means "empty pool" and an OMITTED live
+	// means "no live share" (omitempty drops []/""). A clearing — last sharer stops or the slot is
+	// cleared — therefore arrives as {t:"screen-roster"} with these fields absent, and the host resets.
+	Previews   []string    `json:"previews,omitempty"`
+	Live       string      `json:"live,omitempty"`
+	Recipient  string      `json:"self,omitempty"` // on a {t:roster}: the recipient's own peer id, so a client can find its self entry (e.g. the guest self on-air pill)
+	ICEServers []ICEServer `json:"iceServers,omitempty"`
+	TTLSec     int         `json:"ttlSec,omitempty"` // TURN credential lifetime on a {t:ice} frame (EN-4)
 }
 
 // ICEServer is one entry of the WebRTC ICE configuration the server hands a peer in the
@@ -110,7 +122,13 @@ type RosterEntry struct {
 	Locks      []LockView    `json:"locks,omitempty"`
 	BoundSlot  string        `json:"boundSlot,omitempty"` // HOST-ONLY: the cam slot this participant occupies live (e.g. "cam-1"), for the greenroom People controls (D-15/D-20); stripped from non-host projections
 	CanScreen  bool          `json:"canScreen,omitempty"` // screenshare eligibility (EN-23/AC-9): host-managed policy — visible to the HOST (every entry, for the grant/revoke toggle) and to a guest on its OWN entry (its share affordance); stripped from a non-host's view of OTHERS
-	Self       bool          `json:"self,omitempty"`      // true only on the recipient's own entry in its projection
+	// ScreenShare is the participant's screenshare preview-switcher state (D-21/AC-11/AC-13):
+	// "backstage" = actively sharing into the host preview rail; "live" = the host selected it on-air;
+	// "" = not sharing. "live" is visible to EVERYONE (so all clients render the live share); "backstage"
+	// is host-only — a non-host sees only its OWN backstage state (its self active-backstage indicator),
+	// never another participant's (the preview rail is host-only, D-21).
+	ScreenShare string `json:"screenShare,omitempty"`
+	Self        bool   `json:"self,omitempty"` // true only on the recipient's own entry in its projection
 }
 
 // LockView is a suppression lock as seen in a roster entry (D-13/EN-7). applierRank tells
