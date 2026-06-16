@@ -171,6 +171,20 @@ func TestScreenShareMedia_ScreenSourceRendersLiveShare(t *testing.T) {
 		t.Fatalf("/s/screen did not render the live sharer's screen over P2P: %v", err)
 	}
 
+	// A CAMERA lock on the live sharer must NOT black out the /s/screen source — the screen link's
+	// only consumed track is the share, so cam/mic locks don't apply to it (D-21). The screen slot's
+	// source still receives the occupant-locks projection (RF-8), so wait for the lock to apply, then
+	// assert the screen video track stays enabled (force-no-share, which would suppress it, instead
+	// pulls the sharer from the live slot, so it never reaches the source as a lock).
+	writeFrame(t, hostConn, signaling.Frame{T: "force-no-cam", PeerID: s.passID})
+	if err := chromedp.Run(srcCtx,
+		chromedp.WaitVisible(`html[data-obs-locks~="cam"]`, chromedp.ByQuery),
+		chromedp.Poll(`(() => { const v = document.querySelector('#obs-video'); const s = v && v.srcObject; const t = s && s.getVideoTracks()[0]; return !!t && t.enabled === true; })()`,
+			nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("a camera lock wrongly disabled the /s/screen share track: %v", err)
+	}
+
 	// Take the share off air → the screen slot unbinds → the source clears its surface.
 	writeFrame(t, hostConn, signaling.Frame{T: "screen-select", PeerID: ""})
 	if err := chromedp.Run(srcCtx, chromedp.Poll(

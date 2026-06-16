@@ -115,6 +115,9 @@ function start() {
   // arrives (ontrack), so a lock that landed BEFORE media — a pre-existing/seeded lock, or one
   // re-projected on reconnect — still takes effect on the program output.
   function applyOccupantLocks() {
+    // Test/host seam (no secret — lock KINDS only, EN-13): expose the applied lock set so a browser
+    // test can assert which modalities are suppressed on this source.
+    document.documentElement.dataset.obsLocks = lockedMods.join(",");
     if (!link) return;
     for (const m of ["mic", "cam", "share"]) link.setRemoteTrackEnabled(m, !lockedMods.includes(m));
   }

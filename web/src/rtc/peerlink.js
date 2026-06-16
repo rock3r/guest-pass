@@ -46,17 +46,27 @@ export class PeerLink {
   /**
    * setRemoteTrackEnabled mutes/unmutes the REMOTE track of a modality on this consuming link, so a
    * suppression lock detaches the locked peer's media from rendering AND OBS output independent of the
-   * (possibly modified) target — receiver-side enforcement (RF-8). mic → the audio receiver, cam → the
-   * video receiver; share has no separately-consumed track in M3 (screenshare is moderation-only), so
-   * it is a no-op, mirroring publisher.setModalityEnabled. It uses receiver.track.enabled, which is
-   * REVERSIBLE (a release re-enables it) — never track.stop(). A disabled remote video track renders
-   * black, exactly as a voluntary source-side cam-off already does.
+   * (possibly modified) target — receiver-side enforcement (RF-8). The mapping is CHANNEL-aware (D-21):
+   * on the SCREEN link the only consumed track IS the share, so "share" → the video receiver and
+   * mic/cam are irrelevant (a camera lock must NOT black out the screen source); on a CAMERA link mic →
+   * the audio receiver, cam → the video receiver, and "share" is a no-op (the camera carries no share
+   * track). It uses receiver.track.enabled, which is REVERSIBLE (a release re-enables it) — never
+   * track.stop(). A disabled remote video track renders black, exactly as a voluntary cam-off does.
    * @param {"mic"|"cam"|"share"} modality
    * @param {boolean} enabled
    */
   setRemoteTrackEnabled(modality, enabled) {
-    const kind = modality === "mic" ? "audio" : modality === "cam" ? "video" : null;
-    if (!kind) return; // share: no consumed track in M3
+    const kind =
+      this.channel === "screen"
+        ? modality === "share"
+          ? "video"
+          : null // a screen link carries only the share video; mic/cam don't apply
+        : modality === "mic"
+          ? "audio"
+          : modality === "cam"
+            ? "video"
+            : null; // camera link: share has no consumed track
+    if (!kind) return;
     for (const r of this.pc.getReceivers()) {
       if (r.track && r.track.kind === kind) r.track.enabled = enabled;
     }
