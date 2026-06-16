@@ -168,7 +168,11 @@ export function GuestSession({
                 type="button"
                 class="gs-screen-toggle"
                 data-sharing={sharing ? "1" : "0"}
-                disabled={!live}
+                /* STARTING needs a live socket (the announce); STOPPING must stay enabled even while
+                   reconnecting — the capture is kept alive for recovery, and the sharer must always be
+                   able to release it (the stop is best-effort over the socket + an unconditional local
+                   teardown), so a reconnecting sharer is never stuck unable to stop. */
+                disabled={!sharing && !live}
                 onClick={onToggleScreen}
               >
                 {sharing ? "Stop sharing" : "Share screen"}

@@ -366,3 +366,34 @@ func TestScreenShare_RevokeWhileDisconnectedStopsCapture(t *testing.T) {
 		t.Fatalf("a capture stranded by a revoke-while-disconnected was not released: %v", err)
 	}
 }
+
+// T-13 / AC-13 (control): while the socket is reconnecting, an active sharer's Stop control must stay
+// ENABLED — the capture is intentionally kept alive for recovery, and stopping is a best-effort send
+// plus an unconditional local teardown (it does not need a live socket), so the sharer is never stuck
+// unable to stop. Distinct from the chat/raise-hand controls, which DO gate on a live socket.
+func TestScreenShare_StopStaysEnabledWhileReconnecting(t *testing.T) {
+	s := seedDeviceCheck(t)
+	if err := s.store.SetPassCanScreen(context.Background(), s.passID, true); err != nil {
+		t.Fatalf("grant can_screen: %v", err)
+	}
+	aCtx := enterEligibleSharer(t, s.base, s.rawToken, wsRecorderJS)
+
+	if err := chromedp.Run(aCtx,
+		chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("share did not reach backstage: %v", err)
+	}
+
+	// Drop the socket and catch a reconnecting tick where the Stop control is NOT disabled. The
+	// conjunction can only hold if the button is ungated from liveness while sharing (the old
+	// disabled={!live} kept it disabled for the whole reconnecting window).
+	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpCloseLastWS()`, nil)); err != nil {
+		t.Fatalf("force-close ws: %v", err)
+	}
+	if err := chromedp.Run(aCtx, chromedp.Poll(
+		`!!document.querySelector('[data-entered][data-pub="reconnecting"]') && !document.querySelector('.gs-screen-toggle').disabled`,
+		nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+		t.Fatalf("the Stop control was disabled while reconnecting (a sharer must always be able to stop): %v", err)
+	}
+}
