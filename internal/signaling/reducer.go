@@ -788,8 +788,21 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	// change; relaying that would let the prior occupant recreate a dead source pc — re-arming the D-38
 	// watchdog even after its {t:consumer-left}. Drop a source→non-occupant signal (a source only ever
 	// negotiates its bound occupant; the occupant→source direction is unaffected).
-	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
-		return nil
+	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") {
+		if !s.sourceServes(from, to) {
+			return nil
+		}
+		// A source is locked to ONE channel by its AUTHENTICATED slot (D-21/EN-7): the screenshare
+		// slot source (obs_screen) may negotiate ONLY the screen channel; a cam/host source ONLY the
+		// camera channel. Without this a screenshare source token could send a camera-channel offer
+		// (ch="") to the live occupant and pull its CAMERA (and vice versa), escaping its slot.
+		wantCh := ""
+		if p.role == "obs_screen" {
+			wantCh = "screen"
+		}
+		if f.Ch != wantCh {
+			return nil
+		}
 	}
 	// Screen-channel authorization (D-21/EN-7): a backstage (non-live) sharer's screen is visible
 	// ONLY to the host (the host-only preview rail, EN-8) — the live sharer's screen is visible to

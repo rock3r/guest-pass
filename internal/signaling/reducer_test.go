@@ -415,6 +415,40 @@ func TestRelaySignalScreenChannelAuthorization(t *testing.T) {
 	}
 }
 
+// D-21/EN-7: an OBS source is locked to ONE channel by its authenticated slot. The screenshare-slot
+// source (obs_screen) may negotiate ONLY the screen channel with its occupant; a cam/host source ONLY
+// the camera channel — so a screenshare source token can't pull its occupant's camera and vice versa.
+func TestRelaySignalSourceChannelBoundToSlot(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "a")
+	s.screenStart("a")
+	s.screenSelect("host", "a") // a is the live screen occupant
+
+	s.join("srcscreen", "obs_screen", "")
+	s.attachSource("screen", "srcscreen")
+	s.join("srccam", "obs", "")
+	s.rebindSlot("cam-1", "a")
+	s.attachSource("cam-1", "srccam")
+
+	scr := func(from, to, ch string) []outbound {
+		return s.relaySignal(PeerID(from), Frame{To: to, Ch: ch, SDP: []byte(`"x"`)})
+	}
+
+	if out := scr("srcscreen", "a", "screen"); len(out) != 1 {
+		t.Fatalf("the screen source on its screen channel must relay, got %+v", out)
+	}
+	if out := scr("srcscreen", "a", ""); len(out) != 0 {
+		t.Fatalf("the screen source must NOT pull the occupant's CAMERA (ch=\"\"), got %+v", out)
+	}
+	if out := scr("srccam", "a", ""); len(out) != 1 {
+		t.Fatalf("the cam source on the camera channel must relay, got %+v", out)
+	}
+	if out := scr("srccam", "a", "screen"); len(out) != 0 {
+		t.Fatalf("the cam source must NOT request the screen channel, got %+v", out)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
