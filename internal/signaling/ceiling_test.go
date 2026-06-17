@@ -46,11 +46,35 @@ func TestSourceQualityRelaysToOccupant(t *testing.T) {
 	if f.PeerID != "src" || f.Res != 480 {
 		t.Fatalf("source-quality to occupant = source %q res %d, want src/480", f.PeerID, f.Res)
 	}
+	if f.Ch != "" {
+		t.Fatalf("a cam source override must carry the camera channel (ch=\"\"), got %q", f.Ch)
+	}
 	// No one else receives it.
 	for _, o := range out {
 		if o.to != "g1" {
 			t.Fatalf("source-quality leaked to %q, want only the occupant", o.to)
 		}
+	}
+}
+
+// D-21/AC-12: a /s/screen source's per-source ?res override must be stamped with the screen channel so
+// the occupant caps its SCREEN sender ("scrn:") rather than its camera ("pub:").
+func TestSourceQualityScreenSlotStampsChannel(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "g1")
+	s.screenStart("g1")
+	s.screenSelect("host", "g1") // g1 is the live screen occupant
+	s.join("srcscreen", "obs_screen", "")
+	s.attachSource("screen", "srcscreen")
+
+	out := s.sourceQuality("srcscreen", 540)
+	f, ok := firstFrameOfType(out, "g1", "source-quality")
+	if !ok {
+		t.Fatalf("the live sharer did not receive the screen-source override, got %+v", out)
+	}
+	if f.Ch != "screen" {
+		t.Fatalf("a screen-source override must carry ch=\"screen\", got %q", f.Ch)
 	}
 }
 

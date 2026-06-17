@@ -748,9 +748,15 @@ func (s *roomState) setCeiling(maxRes, maxFps, maxBitrateKbps int) []outbound {
 // occupant directly and a non-source peer can't spoof it. A no-op when the source feeds no slot or
 // that slot is unbound (no publisher to cap).
 func (s *roomState) sourceQuality(source PeerID, res int) []outbound {
-	for _, st := range s.slots {
+	for sid, st := range s.slots {
 		if st.source == source && st.occupant != "" {
-			return []outbound{{to: st.occupant, frame: Frame{T: "source-quality", PeerID: string(source), Res: res}}}
+			// Stamp the channel (D-21) so the occupant caps the RIGHT sender: a screenshare-slot
+			// source's ?res override caps its screen sender ("scrn:"), a cam/host source its camera.
+			ch := ""
+			if sid == screenSlot {
+				ch = "screen"
+			}
+			return []outbound{{to: st.occupant, frame: Frame{T: "source-quality", PeerID: string(source), Res: res, Ch: ch}}}
 		}
 	}
 	return nil
@@ -773,9 +779,11 @@ func (s *roomState) sessionLive() []outbound {
 
 // relaySignal forwards a peer's SDP/ICE to the addressed peer, stamped with the sender.
 // The sdp/ice payloads are opaque (json.RawMessage) and relayed byte-for-byte; the server
-// never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice} —
+// never inspects them (D-23). It emits a CLEAN frame carrying only {t, from, sdp, ice, ch} —
 // never the sender's other fields — so a peer can't inject roster/slot/control fields into
-// a frame the addressee acts on. A signal to an unknown/departed peer is dropped.
+// a frame the addressee acts on (the addressee learns the sender from `from`, not `to`). Ch (the
+// screen-vs-camera channel, D-21) is relayed verbatim so both ends route the signal to the right
+// link/publisher; the server never acts on it. A signal to an unknown/departed peer is dropped.
 func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	to := PeerID(f.To)
 	if _, ok := s.peers[to]; !ok {
@@ -786,10 +794,30 @@ func (s *roomState) relaySignal(from PeerID, f Frame) []outbound {
 	// change; relaying that would let the prior occupant recreate a dead source pc — re-arming the D-38
 	// watchdog even after its {t:consumer-left}. Drop a source→non-occupant signal (a source only ever
 	// negotiates its bound occupant; the occupant→source direction is unaffected).
-	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") && !s.sourceServes(from, to) {
+	if p := s.peers[from]; p != nil && (p.role == "obs" || p.role == "obs_screen") {
+		if !s.sourceServes(from, to) {
+			return nil
+		}
+		// A source is locked to ONE channel by its AUTHENTICATED slot (D-21/EN-7): the screenshare
+		// slot source (obs_screen) may negotiate ONLY the screen channel; a cam/host source ONLY the
+		// camera channel. Without this a screenshare source token could send a camera-channel offer
+		// (ch="") to the live occupant and pull its CAMERA (and vice versa), escaping its slot.
+		wantCh := ""
+		if p.role == "obs_screen" {
+			wantCh = "screen"
+		}
+		if f.Ch != wantCh {
+			return nil
+		}
+	}
+	// Screen-channel authorization (D-21/EN-7): a backstage (non-live) sharer's screen is visible
+	// ONLY to the host (the host-only preview rail, EN-8) — the live sharer's screen is visible to
+	// everyone (the live render). Without this gate any participant could craft a {t:signal,ch:"screen"}
+	// offer to a peer id and pull a non-live sharer's screen, bypassing the host-only rail.
+	if f.Ch == "screen" && !s.screenSignalAllowed(from, to) {
 		return nil
 	}
-	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE}}}
+	return []outbound{{to: to, frame: Frame{T: "signal", From: string(from), SDP: f.SDP, ICE: f.ICE, Ch: f.Ch}}}
 }
 
 // sourceServes reports whether source is the OBS source of a slot whose CURRENT occupant is occupant

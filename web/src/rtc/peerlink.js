@@ -10,17 +10,22 @@ export class PeerLink {
    * @param {import("./room.js").Room} room
    * @param {string} remoteId the peer id to consume from
    * @param {RTCIceServer[]} [iceServers] ICE config from the Room's join-ack
+   * @param {string} [channel] the signaling channel (D-21): "screen" consumes the remote's
+   *   SECOND publisher (the screenshare track) distinct from the camera (default ""). Every
+   *   outbound signal carries this `ch`, and the consumer routes inbound signals to this link
+   *   by matching (from, ch), so two links to the same peer (camera + screen) don't cross.
    */
-  constructor(room, remoteId, iceServers) {
+  constructor(room, remoteId, iceServers, channel) {
     this.room = room;
     this.remoteId = remoteId;
+    this.channel = channel || "";
     this.closed = false;
     /** @type {RTCIceCandidateInit[]} ICE that arrived before the remote description */
     this.pendingIce = [];
     this.pc = new RTCPeerConnection({ iceServers: iceServers || [] });
     this.pc.onicecandidate = (e) => {
       if (e.candidate && !this.closed) {
-        room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON() });
+        room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON(), ch: this.channel });
       }
     };
   }
@@ -41,17 +46,27 @@ export class PeerLink {
   /**
    * setRemoteTrackEnabled mutes/unmutes the REMOTE track of a modality on this consuming link, so a
    * suppression lock detaches the locked peer's media from rendering AND OBS output independent of the
-   * (possibly modified) target — receiver-side enforcement (RF-8). mic → the audio receiver, cam → the
-   * video receiver; share has no separately-consumed track in M3 (screenshare is moderation-only), so
-   * it is a no-op, mirroring publisher.setModalityEnabled. It uses receiver.track.enabled, which is
-   * REVERSIBLE (a release re-enables it) — never track.stop(). A disabled remote video track renders
-   * black, exactly as a voluntary source-side cam-off already does.
+   * (possibly modified) target — receiver-side enforcement (RF-8). The mapping is CHANNEL-aware (D-21):
+   * on the SCREEN link the only consumed track IS the share, so "share" → the video receiver and
+   * mic/cam are irrelevant (a camera lock must NOT black out the screen source); on a CAMERA link mic →
+   * the audio receiver, cam → the video receiver, and "share" is a no-op (the camera carries no share
+   * track). It uses receiver.track.enabled, which is REVERSIBLE (a release re-enables it) — never
+   * track.stop(). A disabled remote video track renders black, exactly as a voluntary cam-off does.
    * @param {"mic"|"cam"|"share"} modality
    * @param {boolean} enabled
    */
   setRemoteTrackEnabled(modality, enabled) {
-    const kind = modality === "mic" ? "audio" : modality === "cam" ? "video" : null;
-    if (!kind) return; // share: no consumed track in M3
+    const kind =
+      this.channel === "screen"
+        ? modality === "share"
+          ? "video"
+          : null // a screen link carries only the share video; mic/cam don't apply
+        : modality === "mic"
+          ? "audio"
+          : modality === "cam"
+            ? "video"
+            : null; // camera link: share has no consumed track
+    if (!kind) return;
     for (const r of this.pc.getReceivers()) {
       if (r.track && r.track.kind === kind) r.track.enabled = enabled;
     }
@@ -71,7 +86,7 @@ export class PeerLink {
     if (this.closed) return;
     await this.pc.setLocalDescription(o);
     if (this.closed) return;
-    this.room.send({ t: "signal", to: this.remoteId, sdp: this.pc.localDescription });
+    this.room.send({ t: "signal", to: this.remoteId, sdp: this.pc.localDescription, ch: this.channel });
   }
 
   /** Handle a relayed signal frame from the remote peer. */

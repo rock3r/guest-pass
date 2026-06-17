@@ -26,18 +26,19 @@ func ptr[T any](v T) *T { return &v }
 // active host, a stream, a sent guest pass, and one cam slot, plus the credentials the
 // browser tabs need.
 type devSeed struct {
-	store      *store.Store
-	base       string // server base URL
-	rawToken   string // guest A's raw magic-link token (/p/{rawToken})
-	passID     string // guest A's pass id (== A's signaling peer id)
-	rawTokenB  string // guest B's raw magic-link token (a second guest, for live re-route)
-	passIDB    string // guest B's pass id (== B's signaling peer id)
-	hostCookie string // host session JWT for the gp_session cookie (/greenroom + host /ws)
-	srcToken   string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
-	slotLabel  string // the cam slot's signaling label ("cam-1")
-	hostID     string // the host's id (room/session key)
-	streamID   string // the seeded stream's id (host-app routes)
-	slotID     string // the cam-1 slot's DB id (regenerate route)
+	store          *store.Store
+	base           string // server base URL
+	rawToken       string // guest A's raw magic-link token (/p/{rawToken})
+	passID         string // guest A's pass id (== A's signaling peer id)
+	rawTokenB      string // guest B's raw magic-link token (a second guest, for live re-route)
+	passIDB        string // guest B's pass id (== B's signaling peer id)
+	hostCookie     string // host session JWT for the gp_session cookie (/greenroom + host /ws)
+	srcToken       string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
+	slotLabel      string // the cam slot's signaling label ("cam-1")
+	srcTokenScreen string // the screenshare slot's raw source token (/s/screen?token=…)
+	hostID         string // the host's id (room/session key)
+	streamID       string // the seeded stream's id (host-app routes)
+	slotID         string // the cam-1 slot's DB id (regenerate route)
 }
 
 func seedDeviceCheck(t *testing.T) *devSeed {
@@ -99,6 +100,19 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("CreateSlot: %v", err)
 	}
 
+	// The shared screenshare slot with its own source token (signaling label "screen"): the
+	// /s/screen OBS source authenticates with this token and consumes the live sharer's SCREEN
+	// publisher over the screen channel (D-21/AC-12).
+	srcScreenRaw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint screen src: %v", err)
+	}
+	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
+		HostID: host.ID, Kind: store.SlotScreenshare, SourceTokenHash: hasher.Hash(srcScreenRaw),
+	}); err != nil {
+		t.Fatalf("CreateSlot screenshare: %v", err)
+	}
+
 	ring, err := auth.NewKeyRing("devcheck-browser-session-secret-cccccccc")
 	if err != nil {
 		t.Fatalf("key ring: %v", err)
@@ -123,7 +137,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	return &devSeed{
 		store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID,
 		rawTokenB: rawB, passIDB: passB.ID,
-		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1",
+		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1", srcTokenScreen: srcScreenRaw,
 		hostID: host.ID, streamID: stream.ID, slotID: camSlot.ID,
 	}
 }

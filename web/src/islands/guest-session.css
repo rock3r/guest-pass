@@ -180,3 +180,27 @@
   margin: 0;
   font-weight: 600;
 }
+
+/* The live screen share, shown to everyone backstage (D-21/AC-11): a video-only render of the
+   host-selected sharer's screen, above the status block. Muted (D-41 is video-only). */
+.gs-livescreen {
+  margin: 0 0 10px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+}
+.gs-livescreen-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+}
+.gs-livescreen-cap {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--paper);
+  color: var(--ink);
+}

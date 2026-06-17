@@ -336,6 +336,119 @@ func TestRelaySignalFromSourceOnlyReachesCurrentOccupant(t *testing.T) {
 	}
 }
 
+// D-21 screen media path: relaySignal must PRESERVE the channel discriminator (Ch), so a peer pair's
+// SECOND P2P connection (the screenshare track, ch="screen") is distinguishable from the camera
+// (ch="") at both ends. The clean outbound frame still carries only {t,from,sdp,ice,ch}.
+func TestRelaySignalPreservesChannel(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "a")
+	s.screenStart("a")
+	s.screenSelect("host", "a") // a is the live sharer → its screen is consumable by anyone
+
+	out := s.relaySignal("host", Frame{To: "a", Ch: "screen", SDP: []byte(`"x"`)})
+	if len(out) != 1 || out[0].to != "a" {
+		t.Fatalf("a screen-channel signal must relay to a, got %+v", out)
+	}
+	if out[0].frame.Ch != "screen" {
+		t.Fatalf("relaySignal must preserve the channel discriminator, got Ch=%q", out[0].frame.Ch)
+	}
+	if out[0].frame.From != "host" {
+		t.Fatalf("from must be stamped, got From=%q", out[0].frame.From)
+	}
+
+	// A camera signal (no channel) relays with an empty Ch, unchanged.
+	cam := s.relaySignal("host", Frame{To: "a", SDP: []byte(`"x"`)})
+	if len(cam) != 1 || cam[0].frame.Ch != "" {
+		t.Fatalf("a camera signal must carry no channel, got %+v", cam)
+	}
+}
+
+// D-21/EN-7 screen-channel authorization: a backstage (non-live) sharer's screen is consumable ONLY
+// by the host (the host-only preview rail, EN-8); the live sharer's screen is consumable by anyone
+// (the live render). A non-host can't pull a non-live sharer's screen by crafting a ch="screen" offer.
+func TestRelaySignalScreenChannelAuthorization(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "a")
+	joinSharer(s, "b")
+	s.join("g", "guest", "")
+	s.screenStart("a") // a backstage (not live)
+	s.screenStart("b") // b backstage (not live)
+
+	scr := func(from, to string) []outbound {
+		return s.relaySignal(PeerID(from), Frame{To: to, Ch: "screen", SDP: []byte(`"x"`)})
+	}
+
+	if out := scr("host", "a"); len(out) != 1 {
+		t.Fatalf("host may consume a backstage sharer's screen (the rail), got %+v", out)
+	}
+	if out := scr("g", "a"); len(out) != 0 {
+		t.Fatalf("a non-host must NOT consume a backstage sharer's screen, got %+v", out)
+	}
+
+	s.screenSelect("host", "a") // promote a live (b stays a backstage sharer)
+	if out := scr("g", "a"); len(out) != 1 {
+		t.Fatalf("anyone may consume the LIVE sharer's screen, got %+v", out)
+	}
+	if out := scr("a", "g"); len(out) != 1 {
+		t.Fatalf("the live sharer's answer back to a consumer must relay, got %+v", out)
+	}
+	// A backstage sharer (b) renders the LIVE share (a) — both ends are sharers, but the live one is
+	// public, so the connection (and its answer) is authorized.
+	if out := scr("b", "a"); len(out) != 1 {
+		t.Fatalf("a backstage sharer may consume the LIVE sharer's screen, got %+v", out)
+	}
+	if out := scr("a", "b"); len(out) != 1 {
+		t.Fatalf("the live sharer's answer to a backstage-sharer consumer must relay, got %+v", out)
+	}
+	if out := scr("g", "b"); len(out) != 0 {
+		t.Fatalf("a non-host still must NOT consume a different backstage sharer (b), got %+v", out)
+	}
+	// A screen signal between two non-sharers is rejected (no legitimate screen link).
+	if out := scr("g", "host"); len(out) != 0 {
+		t.Fatalf("a screen signal between two non-sharers must be dropped, got %+v", out)
+	}
+	// The camera channel is unaffected by the screen gate.
+	if out := s.relaySignal("g", Frame{To: "a", SDP: []byte(`"x"`)}); len(out) != 1 {
+		t.Fatalf("a camera signal must be unaffected by the screen gate, got %+v", out)
+	}
+}
+
+// D-21/EN-7: an OBS source is locked to ONE channel by its authenticated slot. The screenshare-slot
+// source (obs_screen) may negotiate ONLY the screen channel with its occupant; a cam/host source ONLY
+// the camera channel — so a screenshare source token can't pull its occupant's camera and vice versa.
+func TestRelaySignalSourceChannelBoundToSlot(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	joinSharer(s, "a")
+	s.screenStart("a")
+	s.screenSelect("host", "a") // a is the live screen occupant
+
+	s.join("srcscreen", "obs_screen", "")
+	s.attachSource("screen", "srcscreen")
+	s.join("srccam", "obs", "")
+	s.rebindSlot("cam-1", "a")
+	s.attachSource("cam-1", "srccam")
+
+	scr := func(from, to, ch string) []outbound {
+		return s.relaySignal(PeerID(from), Frame{To: to, Ch: ch, SDP: []byte(`"x"`)})
+	}
+
+	if out := scr("srcscreen", "a", "screen"); len(out) != 1 {
+		t.Fatalf("the screen source on its screen channel must relay, got %+v", out)
+	}
+	if out := scr("srcscreen", "a", ""); len(out) != 0 {
+		t.Fatalf("the screen source must NOT pull the occupant's CAMERA (ch=\"\"), got %+v", out)
+	}
+	if out := scr("srccam", "a", ""); len(out) != 1 {
+		t.Fatalf("the cam source on the camera channel must relay, got %+v", out)
+	}
+	if out := scr("srccam", "a", "screen"); len(out) != 0 {
+		t.Fatalf("the cam source must NOT request the screen channel, got %+v", out)
+	}
+}
+
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {

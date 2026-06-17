@@ -49,6 +49,7 @@ function onAirLabel(onAir) {
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
  *   screenShare: string, onToggleScreen: ()=>void,
+ *   liveScreen: {id:string,name:string,stream:MediaStream}|null,
  *   selfDegraded: {dir:string,reason:string}|null,
  *   thumbnails: Array<{id:string, entry:any, stream:MediaStream|null}>, viewerRole: string,
  *   onThumbForce: (id:string, m:string)=>void, onThumbRelease: (id:string, m:string)=>void,
@@ -71,6 +72,7 @@ export function GuestSession({
   onToggleHand,
   screenShare,
   onToggleScreen,
+  liveScreen,
   selfDegraded,
   thumbnails,
   viewerRole,
@@ -88,6 +90,13 @@ export function GuestSession({
   useEffect(() => {
     if (selfRef.current) selfRef.current.srcObject = selfStream || null;
   }, [selfStream]);
+  // The live screen share, rendered for everyone backstage (AC-11): attach the consumed stream via an
+  // effect keyed by its identity, so a re-render doesn't reload it but a swap to a new sharer does.
+  /** @type {{current: HTMLVideoElement|null}} */
+  const liveScreenRef = useRef(null);
+  useEffect(() => {
+    if (liveScreenRef.current) liveScreenRef.current.srcObject = (liveScreen && liveScreen.stream) || null;
+  }, [liveScreen && liveScreen.id, liveScreen && liveScreen.stream]);
 
   // nameFor resolves a chat sender's peer id to a display name from the roster; the guest's own
   // messages (relayed back by the server) read as "You".
@@ -131,6 +140,15 @@ export function GuestSession({
     >
       <div class="gs-stage">
         <video ref={selfRef} class="gs-selfview" autoplay playsinline muted />
+        {/* The host-selected live screen share, shown to everyone backstage (AC-11). Rendered only
+            while a share is live; muted (video-only capture, D-41) and never reloaded across a
+            re-render (the effect keys on the sharer identity). */}
+        {liveScreen ? (
+          <figure class="gs-livescreen" data-live-screen="1" data-sharer={liveScreen.id}>
+            <video ref={liveScreenRef} class="gs-livescreen-video" autoplay playsinline muted />
+            <figcaption class="gs-livescreen-cap">{liveScreen.name ? `${liveScreen.name}'s screen` : "Screen share"}</figcaption>
+          </figure>
+        ) : null}
         <div class="gs-status">
           {pubState === "live" ? (
             <p>You're in — your camera is live in the greenroom.</p>
