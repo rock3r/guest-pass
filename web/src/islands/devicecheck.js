@@ -518,10 +518,11 @@ function DeviceCheck() {
           if (degRef.current) degRef.current.setCeiling({ maxRes: f.maxRes, maxFps: f.maxFps, maxBitrateKbps: f.maxBitrateKbps });
         });
         // Per-source program-resolution override (D-19/AC-8): an OBS source's ?res, relayed to us as
-        // the bound occupant. Cap the sender feeding THAT source (pub:<sourceId>) tighter; res<=0
-        // clears it. f.peerId is the source's id (the key our Publisher pc for it uses).
+        // the bound occupant. Cap the sender feeding THAT source tighter; res<=0 clears it. The server
+        // stamps the channel (D-21) so a /s/screen override caps our SCREEN sender (scrn:<sourceId>)
+        // and a cam/host source our camera (pub:<sourceId>). f.peerId is the source's id.
         room.on("source-quality", (f) => {
-          if (degRef.current) degRef.current.setSourceOverride("pub:" + f.peerId, f.res);
+          if (degRef.current) degRef.current.setSourceOverride((f.ch === "screen" ? "scrn:" : "pub:") + f.peerId, f.res);
         });
         // Test seam (no behavior, no secrets): expose the current encoding params of our PROGRAM/
         // monitor (protected) senders so a browser test can assert the quality ceiling (D-19/AC-8)

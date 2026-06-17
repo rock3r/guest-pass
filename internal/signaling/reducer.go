@@ -748,9 +748,15 @@ func (s *roomState) setCeiling(maxRes, maxFps, maxBitrateKbps int) []outbound {
 // occupant directly and a non-source peer can't spoof it. A no-op when the source feeds no slot or
 // that slot is unbound (no publisher to cap).
 func (s *roomState) sourceQuality(source PeerID, res int) []outbound {
-	for _, st := range s.slots {
+	for sid, st := range s.slots {
 		if st.source == source && st.occupant != "" {
-			return []outbound{{to: st.occupant, frame: Frame{T: "source-quality", PeerID: string(source), Res: res}}}
+			// Stamp the channel (D-21) so the occupant caps the RIGHT sender: a screenshare-slot
+			// source's ?res override caps its screen sender ("scrn:"), a cam/host source its camera.
+			ch := ""
+			if sid == screenSlot {
+				ch = "screen"
+			}
+			return []outbound{{to: st.occupant, frame: Frame{T: "source-quality", PeerID: string(source), Res: res, Ch: ch}}}
 		}
 	}
 	return nil
