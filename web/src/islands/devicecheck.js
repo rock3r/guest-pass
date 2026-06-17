@@ -235,6 +235,17 @@ function DeviceCheck() {
         if (sender) targets.push({ key: "pub:" + id, priority: 3, protected: true, sender });
       }
     }
+    // The screen-share senders join the ladder too, so a high-res share doesn't add uncapped encoders
+    // that bypass the cpu/bandwidth budget (D-21/AD-21). The live share is on-air (D-34: screenshare >
+    // guest cams), so they are PROTECTED like the program — never hard-disabled by cpu shedding — but
+    // still bandwidth-stepped when constrained and counted in the stats sampler. Present only while sharing.
+    const screenPub = screenPubRef.current;
+    if (screenPub) {
+      for (const id of Object.keys(screenPub.pcs)) {
+        const sender = screenPub.pcs[id].getSenders().find((s) => s.track && s.track.kind === "video");
+        if (sender) targets.push({ key: "scrn:" + id, priority: 3, protected: true, sender });
+      }
+    }
     const mesh = meshRef.current;
     if (mesh) {
       for (const [id, mp] of mesh.peers) {

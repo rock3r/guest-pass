@@ -100,6 +100,14 @@ func TestScreenShareMedia_RailSelectLiveEveryone(t *testing.T) {
 	if err := chromedp.Run(bCtx, renders(`.gs-livescreen[data-sharer="`+s.passID+`"] .gs-livescreen-video`)); err != nil {
 		t.Fatalf("backstage guest B did not render A's live screen (AC-11 everyone): %v", err)
 	}
+	// A's screen-share sender must join the degradation ladder (AD-21/D-34) — not be an uncapped
+	// encoder outside the cpu/bandwidth budget. __gpPubEncodings exposes the PROTECTED (program-tier)
+	// senders; once the host + B consume A's screen, a "scrn:" sender appears there.
+	if err := chromedp.Run(aCtx, chromedp.Poll(
+		`(window.__gpPubEncodings ? window.__gpPubEncodings() : []).some((e) => e.key && e.key.indexOf("scrn:") === 0)`,
+		nil, chromedp.WithPollingTimeout(15*time.Second))); err != nil {
+		t.Fatalf("the sharer's screen sender did not join the degradation ladder: %v", err)
+	}
 
 	// Re-select B live → the host swaps the badge to B (A no longer live), and guest A renders B's screen.
 	if err := chromedp.Run(hCtx,
