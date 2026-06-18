@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // Sentinel errors returned (wrapped, with the offending variable's name) by Load so
@@ -72,11 +73,22 @@ type Config struct {
 	CodecOptin         []string
 	AuthMode           string // "" => production (Google OAuth); "dev" => fake host session (AD-8)
 	DBPath             string // SQLite file path (DB_PATH); defaults to guestpass.db
+
+	// Background-job dials (DESIGN §9.7 / D-37), config-backed with safe defaults.
+	PurgeInterval  time.Duration // PURGE_INTERVAL: how often the guest-PII purge sweeps
+	PurgeRetention time.Duration // PURGE_RETENTION: how long guest PII is kept after stream end
 }
 
 // defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
 // mounted volume (DEPLOYMENT §6).
 const defaultDBPath = "guestpass.db"
+
+// Default background-job dials (DESIGN §9.7). DEPLOYMENT §8 documents PURGE_INTERVAL /
+// PURGE_RETENTION as the overrides.
+const (
+	defaultPurgeInterval  = time.Hour      // "hourly sweep"
+	defaultPurgeRetention = 24 * time.Hour // 24h guest-PII retention (D-37)
+)
 
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
 // STUN-only (D-38) and TURN_SECRET is not required.
@@ -120,10 +132,35 @@ func load(getenv func(string) string) (*Config, error) {
 	if c.DBPath == "" {
 		c.DBPath = defaultDBPath
 	}
+	var err error
+	if c.PurgeInterval, err = parsePositiveDuration("PURGE_INTERVAL", getenv("PURGE_INTERVAL"), defaultPurgeInterval); err != nil {
+		return nil, err
+	}
+	if c.PurgeRetention, err = parsePositiveDuration("PURGE_RETENTION", getenv("PURGE_RETENTION"), defaultPurgeRetention); err != nil {
+		return nil, err
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+// parsePositiveDuration parses an optional Go duration env var, returning def when unset and
+// failing closed (ErrInvalidValue) on an unparseable or non-positive value — a zero/negative
+// purge interval or retention would disable or corrupt the retention guarantee (D-37).
+func parsePositiveDuration(name, raw string, def time.Duration) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q: %w", name, raw, ErrInvalidValue)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("config: %s=%q must be positive: %w", name, raw, ErrInvalidValue)
+	}
+	return d, nil
 }
 
 // validate enforces the step-1 fail-closed invariants. Additional required-var checks

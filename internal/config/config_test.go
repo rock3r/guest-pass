@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // validEnv returns a complete production environment that loads cleanly: all required
@@ -379,5 +380,53 @@ func TestLoad_ParsesFields(t *testing.T) {
 	}
 	if got, want := c.CodecOptin, []string{"vp9", "av1"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("CodecOptin = %v, want %v", got, want)
+	}
+}
+
+func TestLoad_PurgeDefaultsAndOverrides(t *testing.T) {
+	// Defaults when unset.
+	c, err := envLoad(validEnv())
+	if err != nil {
+		t.Fatalf("default load: %v", err)
+	}
+	if c.PurgeInterval != defaultPurgeInterval {
+		t.Errorf("default PurgeInterval = %v, want %v", c.PurgeInterval, defaultPurgeInterval)
+	}
+	if c.PurgeRetention != defaultPurgeRetention {
+		t.Errorf("default PurgeRetention = %v, want %v", c.PurgeRetention, defaultPurgeRetention)
+	}
+
+	// Valid overrides parse.
+	env := validEnv()
+	env["PURGE_INTERVAL"] = "15m"
+	env["PURGE_RETENTION"] = "48h"
+	c, err = envLoad(env)
+	if err != nil {
+		t.Fatalf("override load: %v", err)
+	}
+	if c.PurgeInterval != 15*time.Minute {
+		t.Errorf("PurgeInterval = %v, want 15m", c.PurgeInterval)
+	}
+	if c.PurgeRetention != 48*time.Hour {
+		t.Errorf("PurgeRetention = %v, want 48h", c.PurgeRetention)
+	}
+}
+
+func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
+	cases := []struct{ name, key, val string }{
+		{"unparseable interval", "PURGE_INTERVAL", "soon"},
+		{"zero interval", "PURGE_INTERVAL", "0"},
+		{"negative interval", "PURGE_INTERVAL", "-5m"},
+		{"unparseable retention", "PURGE_RETENTION", "forever"},
+		{"zero retention", "PURGE_RETENTION", "0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := validEnv()
+			env[tc.key] = tc.val
+			if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+				t.Fatalf("%s=%q: err = %v, want ErrInvalidValue", tc.key, tc.val, err)
+			}
+		})
 	}
 }

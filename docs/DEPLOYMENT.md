@@ -106,6 +106,8 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `CODEC_OPTIN` | optional | — | Higher-efficiency codecs offered beyond the H.264/VP8 default (comma list, e.g. `vp9,av1,h265`); **OFF by default** — better compression at guests' CPU/battery cost, negotiated only where both peers support it (D-39). |
 | `AUTH_MODE` | dev-only | **✅ in prod (AD-8)** | `dev` mints a fake host session without Google for local dev + hermetic tests (mirrors `MAIL_MODE=log`). **INVARIANT: the binary refuses to start if `AUTH_MODE=dev` outside dev** (same fail-closed posture as EN-14, AD-8). Never set in production. |
 | `DB_PATH` | optional | — | SQLite file path; defaults to `guestpass.db`. In docker-compose point it at the mounted volume (§6), e.g. `/data/guestpass.db`. |
+| `PURGE_INTERVAL` | optional | — | How often the in-binary guest-PII purge sweeps (§8, D-37). A Go duration (e.g. `1h`, `30m`); **defaults to `1h`**. Must be **positive** — a zero/negative value refuses to boot (it would disable the retention guarantee). |
+| `PURGE_RETENTION` | optional | — | How long guest PII (pass `name` + `email`) is kept **after stream end** before the purge clears it (§8, D-37). A Go duration; **defaults to `24h`**. Must be **positive** — a zero/negative value refuses to boot. Lowering it tightens the window; raising it past 24h weakens the D-37 promise, so the public instance keeps the default. |
 
 ¹ `TURN_SECRET` is unrequired when STUN-only (no TURN), but **fail-closed-critical
 whenever TURN is enabled**. Together with `JWT_SECRET` it is the fail-closed pair
@@ -294,11 +296,14 @@ placement (no provider reports it reliably).
 
 ## 8. Background jobs (§9.7)
 
-Both jobs are **in-binary tickers** — no external scheduler / cron is required.
+Both jobs are **in-binary tickers** (`internal/jobs`) — no external scheduler / cron is
+required. They run on their own goroutines, sweep once on startup (so a restart cleans up
+promptly), then on a fixed interval, and stop when the server drains. They **never log PII
+or tokens** (EN-16/EN-20) — the purge logs only a count of cleared passes.
 
 | Job | Trigger | Action |
 |---|---|---|
-| **24h PII purge (D-37)** | scheduled hourly sweep | Delete guest PII (pass `name` + `email`) **24h after stream end** — no retention reason. For streams that never ran, ≤24h after scheduled-end + grace. Long-term data reduced to anonymous aggregates. Guests are told **before** (invite / device-check) and **after** (leave / session-ended screens) — a copy requirement (§11), not optional. |
+| **24h PII purge (D-37)** | sweep every `PURGE_INTERVAL` (default `1h`) | Clear guest PII (pass `name` + `email`) once the pass's stream is **`PURGE_RETENTION` (default 24h) past its end** — an ended session's `ended_at`, or for a never-run stream its scheduled-end (`scheduled_at + duration_min`) **+ 30m grace** (matching the D-5 pass-expiry grace). Idempotent (already-cleared PII is never re-matched) and surgical: it touches **only** `passes.name`/`email`, never sessions/peers/streams or any other host's rows. A pure draft (no ended session, no scheduled end) has no stream-end to key off and is left for host account deletion (§11). |
 | **Idle-session reaper (D-40)** | per-session timer | Zero connected peers for **N minutes** → auto-end the session, freeing the one-live-session-per-host slot. |
 
 > OPEN: the idle-reaper threshold `N` minutes is not pinned in the frozen design.
