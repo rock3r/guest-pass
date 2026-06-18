@@ -908,3 +908,47 @@ func TestOneLiveSessionPerHost(t *testing.T) {
 		t.Fatalf("ended session should be allowed: %v", err)
 	}
 }
+
+// ActiveSessionHostIDs lists only hosts with an active session (the reaper's input, D-40):
+// ending a host's session drops it from the list; an ended-only host never appears.
+func TestSessionRepo_ActiveSessionHostIDs(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	a := seedHost(t, st, "host-active-a")
+	b := seedHost(t, st, "host-active-b")
+	c := seedHost(t, st, "host-active-c")
+	sa, _ := st.CreateStream(ctx, CreateStreamParams{HostID: a.ID, Title: "A"})
+	sb, _ := st.CreateStream(ctx, CreateStreamParams{HostID: b.ID, Title: "B"})
+
+	if got, err := st.ActiveSessionHostIDs(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("no sessions yet: got %v / %v, want empty", got, err)
+	}
+
+	if _, err := st.StartSession(ctx, sa.ID, a.ID); err != nil {
+		t.Fatalf("start a: %v", err)
+	}
+	if _, err := st.StartSession(ctx, sb.ID, b.ID); err != nil {
+		t.Fatalf("start b: %v", err)
+	}
+	got, err := st.ActiveSessionHostIDs(ctx)
+	if err != nil {
+		t.Fatalf("ActiveSessionHostIDs: %v", err)
+	}
+	set := map[string]bool{}
+	for _, id := range got {
+		set[id] = true
+	}
+	if len(got) != 2 || !set[a.ID] || !set[b.ID] { // ids are random UUIDs; check membership, not order
+		t.Fatalf("active hosts = %v, want {%s, %s}", got, a.ID, b.ID)
+	}
+
+	// Ending a's session drops it; c never had one.
+	if err := st.EndActiveSession(ctx, a.ID); err != nil {
+		t.Fatalf("end a: %v", err)
+	}
+	_ = c
+	got, _ = st.ActiveSessionHostIDs(ctx)
+	if len(got) != 1 || got[0] != b.ID {
+		t.Fatalf("after ending a: active hosts = %v, want [%s]", got, b.ID)
+	}
+}

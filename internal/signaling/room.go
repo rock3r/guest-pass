@@ -645,5 +645,78 @@ func (r *Room) terminateWith(reasonFor func(role string) string) {
 	}
 }
 
+// ParticipantCount returns the number of connected greenroom participants (host/co-host/guest),
+// EXCLUDING OBS source pages — the signal the idle-session reaper (D-40) uses to tell "the show
+// is over" from "only an OBS source is still polling". It runs synchronously on the room
+// goroutine (the sole owner of the conn table), so the count is race-free. Returns 0 if the room
+// goroutine has already stopped.
+func (r *Room) ParticipantCount() int {
+	res := make(chan int, 1)
+	cmd := func(_ *roomState, conns map[PeerID]*peerConn) {
+		n := 0
+		for _, c := range conns {
+			if isParticipant(c.role) {
+				n++
+			}
+		}
+		res <- n
+	}
+	select {
+	case r.cmds <- cmd:
+		select {
+		case n := <-res:
+			return n
+		case <-r.done:
+			return 0
+		}
+	case <-r.done:
+		return 0
+	}
+}
+
+// TerminateIfIdle ends the session ONLY if no greenroom participant is connected — the reaper's
+// atomic empty-check + teardown (D-40). In ONE command it verifies zero participant conns, marks
+// the room draining (so a racing Join is refused, EN-9), gives any remaining OBS source pages a
+// RECOVERABLE reconnect (they are host-global "wire OBS once" pages that outlive the session and
+// re-attach to the next one — same treatment as TerminateSession), and closes their sockets. It
+// returns false WITHOUT terminating if a participant is connected (the show isn't idle, so a
+// reconnect in the poll→reap race aborts the reap). The caller (Hub.ReapIfIdle) then Closes the
+// room and deregisters it.
+func (r *Room) TerminateIfIdle() bool {
+	res := make(chan bool, 1)
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		for _, c := range conns {
+			if isParticipant(c.role) {
+				res <- false // a participant is connected — not idle, don't reap
+				return
+			}
+		}
+		st.terminating = true // refuse any late Join from here on (EN-9)
+		var wg sync.WaitGroup
+		for id, c := range conns { // only OBS sources can remain; give each a recoverable reconnect
+			wg.Add(1)
+			go func(c *peerConn) {
+				defer wg.Done()
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case c.out <- Frame{T: "terminate", Reason: TerminateReconnect}:
+				case <-t.C:
+				}
+				close(c.out)
+			}(c)
+			delete(conns, id)
+		}
+		wg.Wait()
+		res <- true
+	})
+	select {
+	case ok := <-res:
+		return ok
+	case <-r.done:
+		return false
+	}
+}
+
 // Close stops the room goroutine.
 func (r *Room) Close() { r.closeOnce.Do(func() { close(r.done) }) }

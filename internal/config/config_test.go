@@ -412,6 +412,33 @@ func TestLoad_PurgeDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoad_ReapDefaultsAndOverrides(t *testing.T) {
+	c, err := envLoad(validEnv())
+	if err != nil {
+		t.Fatalf("default load: %v", err)
+	}
+	if c.ReapInterval != defaultReapInterval {
+		t.Errorf("default ReapInterval = %v, want %v", c.ReapInterval, defaultReapInterval)
+	}
+	if c.ReapIdleAfter != defaultReapIdleAfter {
+		t.Errorf("default ReapIdleAfter = %v, want %v", c.ReapIdleAfter, defaultReapIdleAfter)
+	}
+
+	env := validEnv()
+	env["REAP_INTERVAL"] = "2m"
+	env["REAP_IDLE_AFTER"] = "30m"
+	c, err = envLoad(env)
+	if err != nil {
+		t.Fatalf("override load: %v", err)
+	}
+	if c.ReapInterval != 2*time.Minute {
+		t.Errorf("ReapInterval = %v, want 2m", c.ReapInterval)
+	}
+	if c.ReapIdleAfter != 30*time.Minute {
+		t.Errorf("ReapIdleAfter = %v, want 30m", c.ReapIdleAfter)
+	}
+}
+
 func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
 	cases := []struct{ name, key, val string }{
 		{"unparseable interval", "PURGE_INTERVAL", "soon"},
@@ -419,6 +446,9 @@ func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
 		{"negative interval", "PURGE_INTERVAL", "-5m"},
 		{"unparseable retention", "PURGE_RETENTION", "forever"},
 		{"zero retention", "PURGE_RETENTION", "0s"},
+		{"unparseable reap interval", "REAP_INTERVAL", "soon"},
+		{"zero reap interval", "REAP_INTERVAL", "0"},
+		{"negative reap idle", "REAP_IDLE_AFTER", "-1m"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -108,6 +108,8 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `DB_PATH` | optional | — | SQLite file path; defaults to `guestpass.db`. In docker-compose point it at the mounted volume (§6), e.g. `/data/guestpass.db`. |
 | `PURGE_INTERVAL` | optional | — | How often the in-binary guest-PII purge sweeps (§8, D-37). A Go duration (e.g. `1h`, `30m`); **defaults to `1h`**. Must be **positive** — a zero/negative value refuses to boot (it would disable the retention guarantee). |
 | `PURGE_RETENTION` | optional | — | How long guest PII (pass `name` + `email`) is kept **after stream end** before the purge clears it (§8, D-37). A Go duration; **defaults to `24h`**. Must be **positive** — a zero/negative value refuses to boot. Lowering it tightens the window; raising it past 24h weakens the D-37 promise, so the public instance keeps the default. |
+| `REAP_INTERVAL` | optional | — | How often the in-binary idle-session reaper polls active sessions (§8, D-40). A Go duration; **defaults to `1m`**. Must be **positive** — a zero/negative value refuses to boot. |
+| `REAP_IDLE_AFTER` | optional | — | How long a live session may have **zero connected participants** before the reaper auto-ends it (§8, D-40), freeing the one-live-session-per-host slot and making its guest PII purge-eligible. A Go duration; **defaults to `15m`** — generous so a host's transient drop/reconnect is never reaped. Must be **positive**. |
 
 ¹ `TURN_SECRET` is unrequired when STUN-only (no TURN), but **fail-closed-critical
 whenever TURN is enabled**. Together with `JWT_SECRET` it is the fail-closed pair
@@ -304,9 +306,7 @@ or tokens** (EN-16/EN-20) — the purge logs only a count of cleared passes.
 | Job | Trigger | Action |
 |---|---|---|
 | **24h PII purge (D-37)** | sweep every `PURGE_INTERVAL` (default `1h`) | Clear guest PII (pass `name` + `email`) once the pass's stream is **`PURGE_RETENTION` (default 24h) past its end** — an ended session's **most-recent** `ended_at` (a re-run resets the clock), or for a never-run stream its scheduled-end (`scheduled_at + duration_min`) **+ 30m grace** (matching the D-5 pass-expiry grace). To honor the **"deleted within `PURGE_RETENTION`"** guarantee with discrete sweeps, eligibility triggers **one interval early** (`retention − interval`), so the worst case (a stream ending just after a tick) is still cleared by `retention`, not `retention + interval`. Keep `PURGE_INTERVAL` ≪ `PURGE_RETENTION` (the default 1h ≪ 24h). Idempotent (already-cleared PII is never re-matched) and surgical: it touches **only** `passes.name`/`email`, never sessions/peers/streams or any other host's rows. A pure draft (no ended session, no scheduled end) has no stream-end to key off and is left for host account deletion (§11). |
-| **Idle-session reaper (D-40)** | per-session timer | Zero connected peers for **N minutes** → auto-end the session, freeing the one-live-session-per-host slot. |
-
-> OPEN: the idle-reaper threshold `N` minutes is not pinned in the frozen design.
+| **Idle-session reaper (D-40)** | poll every `REAP_INTERVAL` (default `1m`) | A live session whose room has had **zero connected participants** (host/co-host/guest — OBS source pages don't count) for `REAP_IDLE_AFTER` (default `15m`) is auto-ended: `ended_at` stamped, room torn down, freeing the one-live-session-per-host slot. The teardown is **gated atomically** — a participant reconnecting in the poll→reap race aborts the reap — and OBS sources get a recoverable reconnect (they outlive the session). Ending the session makes its guest PII purge-eligible (the purge keys off `ended_at`). |
 
 ### Session lifecycle (D-40)
 

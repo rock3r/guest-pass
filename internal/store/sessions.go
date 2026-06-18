@@ -82,6 +82,31 @@ func (s *Store) ActiveSession(ctx context.Context, hostID string) (*Session, err
 		sessionSelect+" WHERE host_id = ? AND status = ?", hostID, SessionActive))
 }
 
+// ActiveSessionHostIDs lists the host ids with a currently-active session — the input to the
+// idle-session reaper (D-40), which checks each host's live room for connected participants and
+// ends the abandoned ones. Ordered by host id for determinism. (The one-live-session-per-host
+// invariant means each id appears at most once.)
+func (s *Store) ActiveSessionHostIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		"SELECT host_id FROM sessions WHERE status = ? ORDER BY host_id", SessionActive)
+	if err != nil {
+		return nil, fmt.Errorf("listing active session hosts: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning active session host: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating active session hosts: %w", err)
+	}
+	return out, nil
+}
+
 func scanSession(row *sql.Row) (*Session, error) {
 	var sess Session
 	err := row.Scan(&sess.ID, &sess.StreamID, &sess.HostID, &sess.StartedAt, &sess.EndedAt, &sess.Status)

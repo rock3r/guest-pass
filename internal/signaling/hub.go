@@ -111,6 +111,47 @@ func (h *Hub) EvictIfLive(session, reason string, targets []PeerID) {
 	}
 }
 
+// ParticipantCount returns the number of connected greenroom participants in the host's live room
+// (0 if no room is live) — the idle-session reaper's non-destructive idleness probe (D-40). It
+// peeks the registry (never spawns a room) and excludes OBS source pages, so a session held open
+// only by a lingering source still reads as idle.
+func (h *Hub) ParticipantCount(session string) int {
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r == nil {
+		return 0
+	}
+	return r.ParticipantCount()
+}
+
+// ReapIfIdle ends the host's live room IFF no participant is connected — the reaper's atomic
+// reap (D-40). It returns true when it reaped (or there was no room — nothing to tear down,
+// the caller still ends the DB session) and false when a participant is connected (a reconnect
+// won the poll→reap race, so the session is NOT idle and must be left alone). When it reaps, the
+// room is terminated (OBS sources get a recoverable reconnect, TerminateIfIdle) and deregistered
+// WHILE still discoverable, so a racing /ws handshake resolves to the draining room (refused) or
+// its closed done, not a fresh room that would survive the teardown (mirrors EndSession). It
+// never spawns a room.
+func (h *Hub) ReapIfIdle(session string) bool {
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r == nil {
+		return true // no live room → nothing connected; caller ends the DB session
+	}
+	if !r.TerminateIfIdle() {
+		return false // a participant is connected — not idle
+	}
+	r.Close()
+	h.mu.Lock()
+	if h.rooms[session] == r { // don't drop a room a racing start already replaced
+		delete(h.rooms, session)
+	}
+	h.mu.Unlock()
+	return true
+}
+
 // Shutdown gracefully terminates every live room for a server drain (RF-21): each room
 // broadcasts a terminate frame with reason to its peers, then is stopped. The registry
 // is cleared so no new work is routed to a stopping room.
