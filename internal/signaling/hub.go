@@ -95,6 +95,30 @@ func (h *Hub) EndSession(session, reason string) {
 	h.mu.Unlock()
 }
 
+// TerminateHostRoom terminates the host's live room (if any) sending EVERY peer — participants AND
+// OBS source pages — the given TERMINAL reason, then deregisters it. Unlike EndSession (which gives
+// sources a recoverable reconnect so they outlive a normal session end), this is for ACCOUNT
+// ERASURE (DELETE /api/me, D-37/AC-5): the host's slot tokens are about to be deleted, so a source
+// must STOP (a terminal reason → obs.js ends the reconnect loop, EN-9) rather than reconnect-loop
+// against a now-dead token (codex). The room is terminated WHILE still registered (a racing connect
+// resolves the draining room and is refused), THEN closed + removed. No-op when no room is live;
+// never spawns one.
+func (h *Hub) TerminateHostRoom(session, reason string) {
+	h.mu.Lock()
+	r := h.rooms[session]
+	h.mu.Unlock()
+	if r == nil {
+		return
+	}
+	r.Terminate(reason) // EVERY peer (incl. sources) gets the terminal reason; marks draining
+	r.Close()
+	h.mu.Lock()
+	if h.rooms[session] == r {
+		delete(h.rooms, session)
+	}
+	h.mu.Unlock()
+}
+
 // EvictIfLive evicts the named peers from the host's live room (if any) with a terminal reason —
 // a system teardown when their passes are deleted (stream delete), so the deleted stream's guests
 // don't linger in the host-scoped room. No-op when no room is live or no targets are given; it

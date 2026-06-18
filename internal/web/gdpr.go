@@ -134,13 +134,16 @@ func deleteHostAccount(ctx context.Context, st *store.Store, hub *signaling.Hub,
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
+	// Tear down any lingering pre-live room (greenroom open but never went live) FIRST, with a
+	// TERMINAL reason for EVERY peer including OBS sources — BEFORE the cascade erases the slot
+	// tokens. EndSession would give sources a recoverable reconnect, so after the tokens vanish they
+	// would reconnect-loop against a dead token (codex); TerminateHostRoom stops them for good. No-op
+	// when no room is live.
+	if hub != nil {
+		hub.TerminateHostRoom(hostID, signaling.TerminateSessionEnded)
+	}
 	if err := st.DeleteHost(ctx, hostID); err != nil {
 		return err
-	}
-	// Tear down any lingering pre-live room (greenroom open but never went live) so its peers don't
-	// linger after the host's rows are gone. No-op when no room is live; never spawns one.
-	if hub != nil {
-		hub.EndSession(hostID, signaling.TerminateSessionEnded)
 	}
 	return nil
 }
