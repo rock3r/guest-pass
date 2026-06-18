@@ -30,6 +30,11 @@
   margin: 0;
   opacity: 0.85;
 }
+.gs-terminal-privacy {
+  margin: 8px 0 0;
+  font-size: 0.85em;
+  opacity: 0.65;
+}
 
 .gs-stage {
   display: flex;

@@ -368,6 +368,23 @@ func TestAPI_PassLandingIsSideEffectFree(t *testing.T) {
 	}
 }
 
+// AC-6 (D-37 §8): the guest pass / device-check landing carries the "before" 24h-deletion
+// transparency notice, so a guest is told before sharing anything that their PII is short-lived.
+func TestAPI_PassLandingHasPurgeNotice(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Privacy Stream")
+	_, raw := a.mintPass(t, streamID, "Dana")
+
+	rec := a.req(t, http.MethodGet, "/p/"+raw, "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /p/{token} = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "deleted within\n24 hours") && !strings.Contains(rec.Body.String(), "deleted within 24 hours") {
+		t.Fatalf("pass/device-check landing missing the 24h transparency notice (AC-6):\n%s", rec.Body.String())
+	}
+}
+
 // EN-10: the explicit device-check entry (POST /p/{token}/enter) is the ONE place a pass
 // transitions to opened. It stamps opened_at.
 func TestAPI_PassEnterMarksOpened(t *testing.T) {

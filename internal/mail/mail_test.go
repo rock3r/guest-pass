@@ -64,6 +64,36 @@ func TestResendMailer_PostsInvite(t *testing.T) {
 	}
 }
 
+// AC-6 (D-37 §8): every invite email carries the "before" 24h-deletion transparency notice, both
+// in the rendered body and in the Resend payload's html field.
+func TestInviteEmail_CarriesPurgeNotice(t *testing.T) {
+	got := inviteHTML(Invite{GuestName: "Greta", StreamTitle: "Show", MagicLink: "https://gp.example/p/tok"})
+	if !strings.Contains(got, "deleted within 24 hours") {
+		t.Fatalf("invite email body missing the 24h transparency notice (AC-6):\n%s", got)
+	}
+
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"e"}`))
+	}))
+	defer srv.Close()
+	m := NewResendMailer("re_k", "from@gp.example")
+	m.baseURL = srv.URL
+	if err := m.SendInvite(context.Background(), Invite{To: "g@example.com", StreamTitle: "Show", MagicLink: "https://gp.example/p/tok"}); err != nil {
+		t.Fatalf("SendInvite: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if h, _ := payload["html"].(string); !strings.Contains(h, "deleted within 24 hours") {
+		t.Fatalf("Resend payload html missing the 24h notice: %q", h)
+	}
+}
+
 func TestResendMailer_Non2xxIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

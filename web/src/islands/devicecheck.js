@@ -832,6 +832,13 @@ function DeviceCheck() {
       <div class="gs-terminal" data-terminal={terminated}>
         <h2 class="gs-terminal-title">{copy.title}</h2>
         <p class="gs-terminal-body">{copy.body}</p>
+        {/* GDPR "after" transparency notice (D-37 §8 / AC-6): once the guest's session is over,
+            reassure them their PII is short-lived. Accurate for every terminal reason (the purge
+            keys off stream end), and the counterpart to the "before" notice on the invite email +
+            pass page. */}
+        <p class="gs-terminal-privacy" data-privacy="purge">
+          Your name and email will be deleted within 24 hours of the stream ending.
+        </p>
       </div>
     );
   }
