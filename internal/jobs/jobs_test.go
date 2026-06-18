@@ -40,9 +40,12 @@ func (f *fakePurgeStore) callCount() int {
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
 
-// TestPurger_SweepPassesPolicyNumbers asserts one sweep forwards the configured retention +
-// grace (as seconds) and the injected clock to the store.
-func TestPurger_SweepPassesPolicyNumbers(t *testing.T) {
+// TestPurger_SweepTriggersOneIntervalEarly asserts the eligibility age handed to the store is
+// retention MINUS the sweep interval, so the user-facing "deleted within RETENTION of stream
+// end" promise holds (D-37): a pass that becomes eligible right after a tick waits up to one
+// interval for the next sweep, so triggering one interval early bounds the worst case at
+// (retention - interval) + interval = retention. Grace + clock pass through unchanged.
+func TestPurger_SweepTriggersOneIntervalEarly(t *testing.T) {
 	fixed := time.Unix(2_000_000_000, 0)
 	store := &fakePurgeStore{ret: 3}
 	p := NewPurger(store, PurgeConfig{
@@ -63,11 +66,27 @@ func TestPurger_SweepPassesPolicyNumbers(t *testing.T) {
 	if got.now != fixed.Unix() {
 		t.Errorf("now = %d, want %d", got.now, fixed.Unix())
 	}
-	if got.retention != int64((24 * time.Hour).Seconds()) {
-		t.Errorf("retention = %d, want %d", got.retention, int64((24 * time.Hour).Seconds()))
+	wantAge := int64((24*time.Hour - time.Hour).Seconds()) // retention - interval
+	if got.retention != wantAge {
+		t.Errorf("eligibility age = %d, want %d (retention - interval)", got.retention, wantAge)
 	}
 	if got.grace != int64((30 * time.Minute).Seconds()) {
 		t.Errorf("grace = %d, want %d", got.grace, int64((30 * time.Minute).Seconds()))
+	}
+}
+
+// TestPurger_SweepClampsAgeToZero: if the interval is >= retention (a misconfiguration where
+// the cadence alone can't meet the SLA), the eligibility age clamps to 0 — purge anything past
+// stream end on the next sweep — rather than going negative (which would clear PII still inside
+// its window).
+func TestPurger_SweepClampsAgeToZero(t *testing.T) {
+	store := &fakePurgeStore{}
+	p := NewPurger(store, PurgeConfig{Interval: 48 * time.Hour, Retention: 24 * time.Hour, Grace: 0}, discardLogger())
+	if _, err := p.sweep(context.Background()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got := store.calls[0].retention; got != 0 {
+		t.Errorf("eligibility age = %d, want 0 (clamped)", got)
 	}
 }
 

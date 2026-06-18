@@ -68,10 +68,22 @@ func NewPurger(store PurgeStore, cfg PurgeConfig, log *slog.Logger) *Purger {
 }
 
 // sweep runs one purge and returns the number of passes cleared.
+//
+// It triggers eligibility one interval EARLY so the user-facing "deleted within RETENTION of
+// stream end" promise holds (D-37). With discrete sweeps, a pass that crosses the retention
+// cutoff just after a tick would otherwise wait nearly a full interval for the next sweep —
+// up to retention+interval after stream end. Using (retention - interval) as the eligibility
+// age bounds the worst case at (retention - interval) + interval = retention. Clamped to 0
+// when the interval is misconfigured >= retention (the cadence alone then can't meet the SLA;
+// 0 means "purge anything past stream end on the next sweep", the best the cadence allows).
 func (p *Purger) sweep(ctx context.Context) (int64, error) {
+	age := p.cfg.Retention - p.cfg.Interval
+	if age < 0 {
+		age = 0
+	}
 	return p.store.PurgeGuestPII(ctx,
 		p.now().Unix(),
-		int64(p.cfg.Retention.Seconds()),
+		int64(age.Seconds()),
 		int64(p.cfg.Grace.Seconds()))
 }
 
