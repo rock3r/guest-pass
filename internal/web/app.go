@@ -26,12 +26,13 @@ import (
 type appServer struct {
 	store   *store.Store
 	rd      *renderer
-	hasher  *token.Hasher  // magic-link + slot token hashing (EN-5)
-	mailer  mail.Mailer    // invite delivery
-	baseURL string         // absolute origin for building magic links + OBS source URLs
-	reveals *revealStore   // one-time post-redirect reveal of a just-minted secret
-	hub     *signaling.Hub // to tear down a live OBS source on slot-token rotation (D-22); may be nil
-	binds   *bindingLocks  // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
+	hasher  *token.Hasher       // magic-link + slot token hashing (EN-5)
+	mailer  mail.Mailer         // invite delivery
+	baseURL string              // absolute origin for building magic links + OBS source URLs
+	reveals *revealStore        // one-time post-redirect reveal of a just-minted secret
+	hub     *signaling.Hub      // to tear down a live OBS source on slot-token rotation (D-22); may be nil
+	binds   *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
+	auth    *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
@@ -47,27 +48,38 @@ type dashboardData struct {
 	Streams []dashStream
 }
 
-// settingsData backs the host's account settings page (AC-10): the read-only Google identity for
-// the account card. The GDPR stub copy lives in the template (non-functional in M4, D-37).
+// settingsData backs the host's account settings page (AC-3..5): the host's own Google identity
+// (Email is read-only; Name is editable via the amend form) plus PRG flash flags from the GDPR
+// forms. Email is the host's OWN account email on their own page (not a cross-host leak, EN-8).
 type settingsData struct {
-	Name  string
-	Email string
+	Name      string
+	Email     string
+	Saved     bool // ?saved=1 after a successful amend
+	NameError bool // ?error=name — the amend name was empty
+	LiveError bool // ?error=live — delete refused while a live session exists (D-M5-3)
 }
 
-// settings renders the host's account settings page (AC-10): a READ-ONLY account card (the host's
-// Google identity), a pointer to the per-stream quality ceiling (set in the greenroom, D-19), and
-// GDPR stub entry points (export / amend / delete) whose copy states self-service lands in a later
-// release — there is no functional purge in M4 (D-37). Host-only (RequireHost); the email shown is
-// the host's OWN account email on their own page (not a leak), never logged (EN-16).
+// settings renders the host's account settings page (AC-3..5): a READ-ONLY account card (the host's
+// Google identity), the FUNCTIONAL GDPR self-service controls — export download link, amend-name
+// form, delete-account form (D-37) — and a pointer to the per-stream quality ceiling (greenroom,
+// D-19). Host-only (RequireHost); the email shown is the host's OWN account email, never logged
+// (EN-16). Flash flags come from the amend/delete forms' PRG redirect query.
 func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
 	host, ok := auth.HostFromContext(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	q := r.URL.Query()
 	s.rd.render(w, r, "settings.html", pageData{
 		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name},
-		Data: settingsData{Name: host.Name, Email: host.Email},
+		Data: settingsData{
+			Name:      host.Name,
+			Email:     host.Email,
+			Saved:     q.Get("saved") == "1",
+			NameError: q.Get("error") == "name",
+			LiveError: q.Get("error") == "live",
+		},
 	})
 }
 

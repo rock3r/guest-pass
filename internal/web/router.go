@@ -118,8 +118,8 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// Host JSON API + guest magic-link page. Registered only when persistence and the
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
-		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds}
-		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds}
+		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth}
+		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth}
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
@@ -148,13 +148,24 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// ceiling control (404 until Go live). Host-only.
 			hr.Get("/api/session/ceiling", api.getSessionCeiling)
 
+			// GDPR host self-service (D-37 / §8 / AC-3..5), host-only. Export is a single JSON
+			// download; amend rectifies the display name; delete erases the account + all the host's
+			// data and is refused while a live session exists (D-M5-3). The no-JS settings page drives
+			// the same ops via the POST forms below (HTML forms can't PATCH/DELETE).
+			hr.Get("/api/me/export", api.exportMe)
+			hr.Patch("/api/me", api.amendMe)
+			hr.Delete("/api/me", api.deleteMe)
+
 			// Host-app shell (D-32): server-rendered dashboard + stream CRUD via POST-redirect-GET.
 			// Same RequireHost gate as the JSON API (EN-6); no JS (CONVENTIONS §3.1).
 			hr.Get("/app", app.dashboard)
 			hr.Get("/app/calendar", app.calendar)
-			// Account settings + GDPR stubs (AC-10/D-37): read-only account card + non-functional
-			// export/amend/delete entry points. Host-only.
+			// Account settings + GDPR self-service (D-37 / AC-3..5): account card, an export
+			// download link (→ GET /api/me/export), and amend/delete POST-redirect-GET forms.
+			// Host-only; CSRF-safe via the SameSite=Lax session cookie.
 			hr.Get("/app/settings", app.settings)
+			hr.Post("/app/settings/amend", app.amendSettings)
+			hr.Post("/app/settings/delete", app.deleteSettings)
 			hr.Post("/app/streams", app.createStream)
 			hr.Get("/app/streams/{id}", app.streamDetail)
 			hr.Get("/app/streams/{id}/sources", app.sourcesTab) // read-only Sources tab (EN-26)

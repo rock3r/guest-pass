@@ -70,6 +70,27 @@ func (s *Store) SetHostAdmin(ctx context.Context, id string, admin bool) error {
 	return s.updateHostColumn(ctx, id, "is_admin", boolToInt(admin))
 }
 
+// SetHostName updates a host's display name — the GDPR rectification surface (PATCH /api/me,
+// AC-4/D-37). Only the name is host-editable in-app; email + google_sub are the Google identity
+// and change only by re-authenticating. The caller validates/caps the value.
+func (s *Store) SetHostName(ctx context.Context, id, name string) error {
+	return s.updateHostColumn(ctx, id, "name", name)
+}
+
+// DeleteHost erases a host and, via ON DELETE CASCADE, ALL of the host's data — streams (→ their
+// passes, sessions, host_source_tokens, and transitively peers + pass_locks) and slots. This is
+// the GDPR erasure path (DELETE /api/me, AC-5/D-37/D-M5-3): a clean host-scoped wipe. No anonymous
+// counters exist yet to step around (DEF-COUNTERS); when they land, this path must be revised to
+// preserve them. Returns ErrNotFound if no such host. (foreign_keys=ON is set per-conn, EN-11, so
+// the cascade fires.)
+func (s *Store) DeleteHost(ctx context.Context, id string) error {
+	res, err := s.writer.ExecContext(ctx, "DELETE FROM hosts WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("deleting host: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
 func (s *Store) updateHostColumn(ctx context.Context, id, column string, value any) error {
 	// column is a fixed internal literal (never user input), so interpolation is safe.
 	res, err := s.writer.ExecContext(ctx, "UPDATE hosts SET "+column+" = ? WHERE id = ?", value, id)

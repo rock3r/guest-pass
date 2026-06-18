@@ -1258,14 +1258,20 @@ any live `/s/{slot}` subscription with a terminal `token-rotated` terminate
 reconnects, and the host re-pastes the fresh URL), and reveals the new URL once via the
 same PRG reveal nonce. Binding, nameplate, and the quality ceiling still live only in the
 host-only greenroom People controls, which each card links to (EN-23/EN-26). `GET
-/app/settings` is the account settings page (AC-10): a read-only account card (the host's
-own Google identity — name/email, never logged, EN-16), a pointer to the per-stream quality
-ceiling (greenroom-managed, D-19), and **GDPR stub** entry points (export/amend/delete) that
-are non-functional in M4 — disabled, with copy stating self-service lands in a later release
-(no functional purge yet; the 24h guest auto-purge is D-37/DEPLOYMENT).
-No JS rides these pages (D-32); state-changing POSTs are CSRF-safe via the
-`SameSite=Lax` session cookie (a cross-site form submission never carries it), so no
-separate CSRF token is needed. After Google sign-in the host lands on `/app`.
+/app/settings` is the account settings page: a read-only account card (the host's own Google
+email/sign-in, never logged, EN-16), a pointer to the per-stream quality ceiling
+(greenroom-managed, D-19), and the **functional GDPR self-service** controls (M5 PR-3, D-37 §8 /
+AC-3..5): an **export** download link (→ `GET /api/me/export`, a single JSON takeout of the host
+PII surface — account + their streams + the invited-guest PII they hold, never any token hash),
+an **amend** form that rectifies the display name (→ the same write as `PATCH /api/me`), and a
+**delete-account** form (confirm-gated) that erases the account + all the host's data (→ the same
+as `DELETE /api/me`: `store.DeleteHost` cascade, **refused while a live session exists** — D-M5-3
+"end your live stream first" — then the session cookie is cleared). The JSON routes
+(`GET /api/me/export`, `PATCH /api/me`, `DELETE /api/me`) are the canonical API (DESIGN §5); the
+no-JS settings page drives the same operations via POST-redirect-GET forms + the download link
+since HTML forms can't issue PATCH/DELETE. No JS rides these pages (D-32); state-changing POSTs
+are CSRF-safe via the `SameSite=Lax` session cookie (a cross-site form submission never carries
+it), so no separate CSRF token is needed. After Google sign-in the host lands on `/app`.
 
 ### Islands — plain JS + JSDoc (D-32)
 
