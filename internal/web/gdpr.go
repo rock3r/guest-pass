@@ -45,12 +45,15 @@ type exportAccount struct {
 }
 
 type exportStream struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	ScheduledAt *int64 `json:"scheduled_at,omitempty"`
-	DurationMin *int64 `json:"duration_min,omitempty"`
-	CreatedAt   int64  `json:"created_at"`
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	ScheduledAt    *int64 `json:"scheduled_at,omitempty"`
+	DurationMin    *int64 `json:"duration_min,omitempty"`
+	MaxRes         *int64 `json:"max_res,omitempty"`          // host-set program quality ceiling (D-19)
+	MaxFPS         *int64 `json:"max_fps,omitempty"`          // …included so the takeout is complete
+	MaxBitrateKbps *int64 `json:"max_bitrate_kbps,omitempty"` // …per "everything we hold about you"
+	CreatedAt      int64  `json:"created_at"`
 }
 
 type exportGuest struct {
@@ -83,7 +86,9 @@ func gatherExport(ctx context.Context, st *store.Store, host *store.Host) (expor
 	for _, s := range streams {
 		out.Streams = append(out.Streams, exportStream{
 			ID: s.ID, Title: s.Title, Status: s.Status,
-			ScheduledAt: s.ScheduledAt, DurationMin: s.DurationMin, CreatedAt: s.CreatedAt,
+			ScheduledAt: s.ScheduledAt, DurationMin: s.DurationMin,
+			MaxRes: s.MaxRes, MaxFPS: s.MaxFPS, MaxBitrateKbps: s.MaxBitrateKbps,
+			CreatedAt: s.CreatedAt,
 		})
 	}
 	passes, err := st.ListPassesByHost(ctx, host.ID)
