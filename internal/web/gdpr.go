@@ -134,16 +134,25 @@ func deleteHostAccount(ctx context.Context, st *store.Store, hub *signaling.Hub,
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
-	// Tear down any lingering pre-live room (greenroom open but never went live) FIRST, with a
-	// TERMINAL reason for EVERY peer including OBS sources — BEFORE the cascade erases the slot
-	// tokens. EndSession would give sources a recoverable reconnect, so after the tokens vanish they
-	// would reconnect-loop against a dead token (codex); TerminateHostRoom stops them for good. No-op
-	// when no room is live.
+	// Tear down any pre-live room (greenroom open but never went live) with a TERMINAL reason for
+	// EVERY peer including OBS sources — bracketing the wipe on BOTH sides (codex):
+	//   • BEFORE DeleteHost: a source connected NOW gets the terminal frame over its existing socket
+	//     and stops, before the cascade erases its slot token — so it never reconnect-loops against a
+	//     dead token (EndSession's source→reconnect would; TerminateHostRoom is terminal).
+	//   • AFTER DeleteHost: sweeps a room that a host/OBS-source WS — authenticated just before the
+	//     delete — spawned via hub.Room mid-erase, so account erasure doesn't leave a ghost in-memory
+	//     room for the now-deleted host.
+	// Both are no-ops when no room is live. (A WS whose handshake completed pre-delete but whose
+	// hub.Room lands after this second sweep is a negligible residual: a transient room with no DB
+	// backing and no data, cleared on disconnect/restart — RF-27-class boundary edge.)
 	if hub != nil {
 		hub.TerminateHostRoom(hostID, signaling.TerminateSessionEnded)
 	}
 	if err := st.DeleteHost(ctx, hostID); err != nil {
 		return err
+	}
+	if hub != nil {
+		hub.TerminateHostRoom(hostID, signaling.TerminateSessionEnded)
 	}
 	return nil
 }
