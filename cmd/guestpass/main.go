@@ -77,7 +77,8 @@ func serve(addr string) error {
 	stop := make(chan struct{})
 
 	// Background jobs (DESIGN §9.7) run on their own goroutines under jobsCtx, cancelled at
-	// drain so they stop before the store closes. v1: the 24h guest-PII purge (D-37).
+	// drain so they stop before the store closes: the 24h guest-PII purge (D-37) and the
+	// idle-session reaper (D-40).
 	jobsCtx, jobsCancel := context.WithCancel(context.Background())
 	jobsLog := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	var jobsWG sync.WaitGroup // background jobs, joined at drain before the store closes
@@ -85,6 +86,24 @@ func serve(addr string) error {
 	go func() {
 		defer jobsWG.Done()
 		jobs.NewPurger(st, jobs.PurgeConfig{Interval: cfg.PurgeInterval, Retention: cfg.PurgeRetention}, jobsLog).Run(jobsCtx)
+	}()
+	// The reaper ends sessions whose room has had no connected participants for ReapIdleAfter
+	// (D-40), freeing the one-live-session-per-host slot and making the guests' PII purge-eligible
+	// (the purge keys off ended_at). ReapIfIdle is the atomic gate — it refuses to reap while a
+	// participant is connected, and it runs the ended_at write WHILE the room is still registered +
+	// terminating so a reconnect in the gap is refused, not spawned into a fresh room for the
+	// ending session.
+	reaper := jobs.NewReaper(jobs.ReaperDeps{
+		ActiveHosts:  st.ActiveSessionHostIDs,
+		Participants: hub.ParticipantCount,
+		Reap: func(ctx context.Context, hostID string) (bool, error) {
+			return hub.ReapIfIdle(hostID, func() error { return st.EndActiveSession(ctx, hostID) })
+		},
+	}, jobs.ReaperConfig{Interval: cfg.ReapInterval, IdleAfter: cfg.ReapIdleAfter}, jobsLog)
+	jobsWG.Add(1)
+	go func() {
+		defer jobsWG.Done()
+		reaper.Run(jobsCtx)
 	}()
 
 	go func() {
