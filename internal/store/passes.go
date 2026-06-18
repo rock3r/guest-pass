@@ -105,6 +105,34 @@ func (s *Store) ListPassesByStream(ctx context.Context, streamID string) ([]*Pas
 	return out, nil
 }
 
+// ListPassesByHost returns every pass across all of the host's streams, ordered (by stream then
+// pass id) for a stable export — the invited-guest PII the host holds, for GET /api/me/export
+// (AC-3/D-37). Scoped to the host via the streams join, so it never returns another host's passes
+// (EN-8). The handler strips token_hash before serializing (only the PII surface is exported).
+func (s *Store) ListPassesByHost(ctx context.Context, hostID string) ([]*Pass, error) {
+	rows, err := s.reader.QueryContext(ctx, `
+		SELECT p.id, p.stream_id, p.slot_id, p.name, p.email, p.role, p.token_hash, p.can_screen,
+		       p.status, p.sent_at, p.expires_at, p.opened_at, p.accepted_at, p.revoked_at
+		FROM passes p JOIN streams st ON p.stream_id = st.id
+		WHERE st.host_id = ? ORDER BY p.stream_id, p.id`, hostID)
+	if err != nil {
+		return nil, fmt.Errorf("listing host passes: %w", err)
+	}
+	defer rows.Close()
+	var out []*Pass
+	for rows.Next() {
+		p, err := scanPassRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating host passes: %w", err)
+	}
+	return out, nil
+}
+
 // AssignPassSlot binds a pass to a cam slot (D-20), enforcing the RF-2 same-host invariant
 // (the slot must belong to the pass's stream's host) and cam-only. Binding onto a slot another
 // active guest holds DISPLACES them — the prior occupant's binding is cleared and the new one

@@ -93,6 +93,30 @@ func TestHubParticipantCount(t *testing.T) {
 	}
 }
 
+// TerminateHostRoom (account erasure, AC-5) sends EVERY peer — participants AND OBS sources — the
+// TERMINAL reason, so a source STOPS rather than reconnect-looping against the about-to-be-deleted
+// slot token (codex). Contrast EndSession, which gives sources a recoverable reconnect.
+func TestHubTerminateHostRoom_SourcesGetTerminalReason(t *testing.T) {
+	h := NewHub(nil, nil)
+	r := h.Room("s1")
+	guestOut := make(chan Frame, 8)
+	srcOut := make(chan Frame, 8)
+	r.Join(PeerID("g"), "guest", "", "", guestOut)
+	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", srcOut)
+
+	h.TerminateHostRoom("s1", TerminateSessionEnded)
+
+	if got := lastTerminateReason(guestOut); got != TerminateSessionEnded {
+		t.Fatalf("participant terminate = %q, want %q", got, TerminateSessionEnded)
+	}
+	if got := lastTerminateReason(srcOut); got != TerminateSessionEnded {
+		t.Fatalf("OBS source terminate = %q, want the TERMINAL %q (not a recoverable reconnect)", got, TerminateSessionEnded)
+	}
+	if h.RoomIfLive("s1") != nil {
+		t.Fatal("terminated room must be deregistered")
+	}
+}
+
 // Hub.ReapIfIdle reaps and runs onReaped when no room is live — the post-restart orphan case (a
 // session active since before a restart, with no rebuilt room). It spawns a transient gate room so
 // the DB end is still serialized against reconnects.
