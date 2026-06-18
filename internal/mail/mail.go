@@ -99,6 +99,12 @@ func inviteHTML(inv Invite) string {
 	if name == "" {
 		name = "there"
 	}
-	return fmt.Sprintf("<p>Hi %s,</p><p>You're invited to join the live stream %q. Open this link when the stream is about to start:</p><p><a href=\"%s\">%s</a></p>",
-		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink))
+	return fmt.Sprintf("<p>Hi %s,</p><p>You're invited to join the live stream %q. Open this link when the stream is about to start:</p><p><a href=\"%s\">%s</a></p>%s",
+		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink), invitePrivacyNotice)
 }
+
+// invitePrivacyNotice is the GDPR "before" transparency notice carried on every invite email
+// (D-37 §8 / AC-6): the guest is told, before sharing anything, that their PII is short-lived. It
+// matches the wording on the guest pass page (pass.html) so the message is consistent across the
+// invite surfaces. Static copy — no interpolation, so it is injection-safe.
+const invitePrivacyNotice = `<p>Your name and email are used only for this stream and are deleted within 24 hours of it ending.</p>`

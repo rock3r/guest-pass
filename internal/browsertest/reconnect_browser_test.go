@@ -4,6 +4,7 @@ package browsertest
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,14 @@ func TestTerminate_GuestKickedRoutesToErrorScreen(t *testing.T) {
 		chromedp.WaitVisible(`[data-terminal="kicked"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("a kicked guest did not route to the terminal error screen: %v", err)
+	}
+	// AC-6 (D-37 §8): the terminal "session over" screen carries the "after" 24h-deletion notice.
+	var purgeNotice string
+	if err := chromedp.Run(ctx, chromedp.Text(`[data-privacy="purge"]`, &purgeNotice, chromedp.ByQuery)); err != nil {
+		t.Fatalf("terminal screen missing the 24h-deletion 'after' notice (AC-6): %v", err)
+	}
+	if !strings.Contains(purgeNotice, "deleted within 24 hours") {
+		t.Fatalf("terminal privacy notice = %q, want the 24h-deletion notice", purgeNotice)
 	}
 	// A terminal terminate must NOT reconnect: the in-session view is gone and stays gone.
 	if err := chromedp.Run(ctx, chromedp.WaitNotPresent(`[data-entered]`, chromedp.ByQuery)); err != nil {
