@@ -5,6 +5,7 @@
 {{if .Data.Saved}}<p class="settings-flash settings-flash-ok" data-flash="saved">Your name was updated.</p>{{end}}
 {{if .Data.NameError}}<p class="settings-flash settings-flash-error" data-flash="name-error">Your name can't be empty.</p>{{end}}
 {{if .Data.LiveError}}<p class="settings-flash settings-flash-error" data-flash="live-error">End your live stream before deleting your account.</p>{{end}}
+{{if .Data.ConfirmError}}<p class="settings-flash settings-flash-error" data-flash="confirm-error">Please confirm by checking the box before deleting your account.</p>{{end}}
 
 <div class="settings-card settings-account">
 <h2>Account</h2>

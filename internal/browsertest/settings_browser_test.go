@@ -133,7 +133,10 @@ func TestHostApp_SettingsGDPR_DeleteBlockedWhileLiveThenErases(t *testing.T) {
 			chromedp.WaitVisible(`.settings-delete`, chromedp.ByQuery),
 			chromedp.Click(`.settings-delete input[type="checkbox"]`, chromedp.ByQuery),
 			chromedp.Click(`.settings-delete button[type="submit"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`body`, chromedp.ByQuery),
+			// Wait until the settings delete form is GONE — i.e. the success redirect off the
+			// settings page has actually landed (a plain WaitVisible(body) matches the pre-redirect
+			// settings page and races the navigation). The landing page has no .settings-delete.
+			chromedp.WaitNotPresent(`.settings-delete`, chromedp.ByQuery),
 			chromedp.Location(&loc),
 		); err != nil {
 			t.Fatalf("delete erase: %v", err)

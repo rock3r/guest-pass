@@ -246,6 +246,12 @@ func (s *appServer) deleteSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	// Require the confirmation field SERVER-SIDE (codex): the form's `required` checkbox is only a
+	// browser affordance; a scripted or malformed POST must not erase the account without it.
+	if r.FormValue("confirm") != "1" {
+		http.Redirect(w, r, "/app/settings?error=confirm", http.StatusSeeOther)
+		return
+	}
 	switch err := deleteHostAccount(r.Context(), s.store, s.hub, s.binds, host.ID); {
 	case errors.Is(err, errAccountLive):
 		http.Redirect(w, r, "/app/settings?error=live", http.StatusSeeOther)

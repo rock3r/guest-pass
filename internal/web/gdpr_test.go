@@ -4,12 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/store"
 )
+
+// formPost issues a urlencoded form POST with the host cookie (the no-JS settings forms).
+func (a *apiHarness) formPost(t *testing.T, target, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	a.h.ServeHTTP(rec, req)
+	return rec
+}
 
 // seedGuestPass creates a guest pass with PII on a stream (for export/cascade tests).
 func (a *apiHarness) seedGuestPass(t *testing.T, streamID, name, email, tokenHash string) {
@@ -148,6 +162,30 @@ func TestGDPR_DeleteErasesAccount(t *testing.T) {
 	}
 	if !cleared {
 		t.Fatal("delete must clear the session cookie")
+	}
+}
+
+// The settings delete form enforces the confirmation field SERVER-SIDE (codex): a POST missing
+// confirm=1 must NOT erase the account (the `required` checkbox is only a browser affordance).
+func TestGDPR_SettingsDeleteRequiresConfirmServerSide(t *testing.T) {
+	a := newAPIHarness(t)
+	host, cookie := a.host(t, "noconfirm")
+
+	rec := a.formPost(t, "/app/settings/delete", "", cookie) // no confirm field
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "error=confirm") {
+		t.Fatalf("unconfirmed delete = %d loc=%q, want 303 → ?error=confirm", rec.Code, rec.Header().Get("Location"))
+	}
+	if _, err := a.store.GetHost(context.Background(), host.ID); err != nil {
+		t.Fatalf("host must survive a delete POST missing confirmation: %v", err)
+	}
+
+	// With confirm=1 it proceeds and erases.
+	rec = a.formPost(t, "/app/settings/delete", "confirm=1", cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed delete = %d, want 303", rec.Code)
+	}
+	if _, err := a.store.GetHost(context.Background(), host.ID); err == nil {
+		t.Fatal("confirmed delete should erase the host")
 	}
 }
 

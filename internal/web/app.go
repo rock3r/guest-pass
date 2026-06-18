@@ -52,11 +52,12 @@ type dashboardData struct {
 // (Email is read-only; Name is editable via the amend form) plus PRG flash flags from the GDPR
 // forms. Email is the host's OWN account email on their own page (not a cross-host leak, EN-8).
 type settingsData struct {
-	Name      string
-	Email     string
-	Saved     bool // ?saved=1 after a successful amend
-	NameError bool // ?error=name — the amend name was empty
-	LiveError bool // ?error=live — delete refused while a live session exists (D-M5-3)
+	Name         string
+	Email        string
+	Saved        bool // ?saved=1 after a successful amend
+	NameError    bool // ?error=name — the amend name was empty
+	LiveError    bool // ?error=live — delete refused while a live session exists (D-M5-3)
+	ConfirmError bool // ?error=confirm — delete POST arrived without the confirmation field
 }
 
 // settings renders the host's account settings page (AC-3..5): a READ-ONLY account card (the host's
@@ -74,11 +75,12 @@ func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
 	s.rd.render(w, r, "settings.html", pageData{
 		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name},
 		Data: settingsData{
-			Name:      host.Name,
-			Email:     host.Email,
-			Saved:     q.Get("saved") == "1",
-			NameError: q.Get("error") == "name",
-			LiveError: q.Get("error") == "live",
+			Name:         host.Name,
+			Email:        host.Email,
+			Saved:        q.Get("saved") == "1",
+			NameError:    q.Get("error") == "name",
+			LiveError:    q.Get("error") == "live",
+			ConfirmError: q.Get("error") == "confirm",
 		},
 	})
 }
