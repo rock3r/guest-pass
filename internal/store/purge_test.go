@@ -102,6 +102,33 @@ func TestPurgeGuestPII_EligibilityWindows(t *testing.T) {
 			},
 		},
 		{
+			name:        "ran twice, latest end within retention",
+			wantCleared: false, // a re-run: the most-recent end is recent, so PII is still in its window
+			build: func(t *testing.T, st *Store, streamID, hostID string) {
+				old := cutoff - 5000
+				recent := cutoff + 5000 // ended after the cutoff → still within retention
+				insertSession(t, st, "sess-old-"+streamID, streamID, hostID, SessionEnded, &old)
+				insertSession(t, st, "sess-recent-"+streamID, streamID, hostID, SessionEnded, &recent)
+			},
+		},
+		{
+			name:        "ran twice, both ends past retention",
+			wantCleared: true,
+			build: func(t *testing.T, st *Store, streamID, hostID string) {
+				e1 := cutoff - 5000
+				e2 := cutoff - 2000 // both ended at or before the cutoff → eligible
+				insertSession(t, st, "sess-a-"+streamID, streamID, hostID, SessionEnded, &e1)
+				insertSession(t, st, "sess-b-"+streamID, streamID, hostID, SessionEnded, &e2)
+			},
+		},
+		{
+			name:        "ended session with unknown end time",
+			wantCleared: false, // status=ended but ended_at NULL → can't confirm the window, so retain
+			build: func(t *testing.T, st *Store, streamID, hostID string) {
+				insertSession(t, st, "sess-"+streamID, streamID, hostID, SessionEnded, nil)
+			},
+		},
+		{
 			name:        "never ran, scheduled-end+grace >24h ago",
 			wantCleared: true,
 			build: func(t *testing.T, st *Store, streamID, hostID string) {

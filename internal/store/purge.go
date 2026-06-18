@@ -14,7 +14,9 @@ import (
 // re-matched — the job is idempotent) AND its stream has NO currently-active session AND
 // either:
 //
-//   - the stream has an ended session whose ended_at is at or before now-retentionSecs, OR
+//   - the stream ran at least once and its MOST RECENT end is at or before now-retentionSecs
+//     — i.e. it has an ended session and NONE ended after the cutoff (a re-run resets the
+//     clock; a session marked ended with an unknown ended_at also blocks the purge), OR
 //   - the stream never ran (no session row at all) and its scheduled end
 //     (scheduled_at + duration_min*60) plus graceSecs is at or before now-retentionSecs.
 //
@@ -35,10 +37,19 @@ WHERE (name IS NOT NULL OR email IS NOT NULL)
         SELECT 1 FROM sessions sa
         WHERE sa.stream_id = passes.stream_id AND sa.status = 'active')
   AND (
-        EXISTS (
-          SELECT 1 FROM sessions se
-          WHERE se.stream_id = passes.stream_id
-            AND se.status = 'ended' AND se.ended_at IS NOT NULL AND se.ended_at <= ?)
+        (
+          -- Ran at least once AND the most recent end is past the retention window: there is an
+          -- ended session, and NONE ended after the cutoff (a recent end, or an unknown end_at,
+          -- blocks the purge so a re-run resets the clock). MAX(ended_at) <= cutoff, expressed as
+          -- EXISTS(ended) AND NOT EXISTS(ended after cutoff or with no recorded end).
+          EXISTS (
+            SELECT 1 FROM sessions se
+            WHERE se.stream_id = passes.stream_id AND se.status = 'ended')
+          AND NOT EXISTS (
+            SELECT 1 FROM sessions sr
+            WHERE sr.stream_id = passes.stream_id AND sr.status = 'ended'
+              AND (sr.ended_at IS NULL OR sr.ended_at > ?))
+        )
         OR (
           NOT EXISTS (SELECT 1 FROM sessions sn WHERE sn.stream_id = passes.stream_id)
           AND EXISTS (
