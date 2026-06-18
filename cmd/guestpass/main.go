@@ -22,6 +22,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/buildinfo"
 	"github.com/rock3r/guest-pass/internal/config"
+	"github.com/rock3r/guest-pass/internal/jobs"
 	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
@@ -75,11 +76,23 @@ func serve(addr string) error {
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	stop := make(chan struct{})
 
+	// Background jobs (DESIGN §9.7) run on their own goroutines under jobsCtx, cancelled at
+	// drain so they stop before the store closes. v1: the 24h guest-PII purge (D-37).
+	jobsCtx, jobsCancel := context.WithCancel(context.Background())
+	jobsLog := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	var jobsWG sync.WaitGroup // background jobs, joined at drain before the store closes
+	jobsWG.Add(1)
+	go func() {
+		defer jobsWG.Done()
+		jobs.NewPurger(st, jobs.PurgeConfig{Interval: cfg.PurgeInterval, Retention: cfg.PurgeRetention}, jobsLog).Run(jobsCtx)
+	}()
+
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		log.Println("draining: terminating WS peers and finishing in-flight writes…")
+		jobsCancel() // stop background jobs before the store closes
 		sctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 		// Close the listener and terminate WS rooms CONCURRENTLY: srv.Shutdown closes the
@@ -96,7 +109,8 @@ func serve(addr string) error {
 		// began earlier remain, finishing as they flush terminate. Waiting on them here
 		// can't race a fresh Add-from-zero.
 		waitTimeout(&wsInflight, 10*time.Second)
-		_ = st.Close() // flush in-flight DB writes (writer pool drains on Close)
+		waitTimeout(&jobsWG, 5*time.Second) // let background jobs observe cancel before the store closes
+		_ = st.Close()                      // flush in-flight DB writes (writer pool drains on Close)
 		close(stop)
 	}()
 
@@ -121,7 +135,9 @@ func serve(addr string) error {
 		<-stop // let the drain finish (hub terminated, store closed)
 		return nil
 	}
-	_ = st.Close() // serve failed before a signal-drain ran; release the store
+	jobsCancel()                        // serve failed before a signal-drain ran; stop jobs…
+	waitTimeout(&jobsWG, 5*time.Second) // …and let them finish before releasing the store
+	_ = st.Close()
 	return err
 }
 
