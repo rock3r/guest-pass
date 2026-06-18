@@ -1,6 +1,9 @@
 package signaling
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // ParticipantCount counts greenroom participants (host/co-host/guest) and EXCLUDES OBS source
 // pages, so the reaper reads a session held open only by a lingering source as idle (D-40).
@@ -90,44 +93,103 @@ func TestHubParticipantCount(t *testing.T) {
 	}
 }
 
-// Hub.ReapIfIdle returns true (nothing to tear down) when no room is live — the caller still
-// ends the DB session (e.g. a session active since before a restart, with no rebuilt room).
+// Hub.ReapIfIdle reaps and runs onReaped when no room is live — the post-restart orphan case (a
+// session active since before a restart, with no rebuilt room). It spawns a transient gate room so
+// the DB end is still serialized against reconnects.
 func TestHubReapIfIdle_NoRoom(t *testing.T) {
 	h := NewHub(nil, nil)
-	if !h.ReapIfIdle("nobody") {
-		t.Fatal("ReapIfIdle with no room should return true (nothing to tear down)")
+	ran := false
+	reaped, err := h.ReapIfIdle("nobody", func() error { ran = true; return nil })
+	if !reaped || err != nil {
+		t.Fatalf("ReapIfIdle with no room = (%v, %v), want (true, nil)", reaped, err)
+	}
+	if !ran {
+		t.Fatal("onReaped (the DB session-end) must run even when no room was live")
+	}
+	if h.RoomIfLive("nobody") != nil {
+		t.Fatal("the transient gate room must be deregistered after the reap")
 	}
 }
 
-// Hub.ReapIfIdle aborts (false) and keeps the room when a participant is connected.
+// Hub.ReapIfIdle aborts (false) and keeps the room when a participant is connected; onReaped must
+// NOT run (the session must not be ended).
 func TestHubReapIfIdle_AbortsWithParticipant(t *testing.T) {
 	h := NewHub(nil, nil)
 	r := h.Room("s1")
 	r.Join(PeerID("g"), "guest", "", "", make(chan Frame, 8))
 
-	if h.ReapIfIdle("s1") {
+	ran := false
+	reaped, _ := h.ReapIfIdle("s1", func() error { ran = true; return nil })
+	if reaped {
 		t.Fatal("ReapIfIdle should return false while a participant is connected")
+	}
+	if ran {
+		t.Fatal("onReaped must not run on an aborted reap")
 	}
 	if h.RoomIfLive("s1") != r {
 		t.Fatal("an aborted reap must leave the room in the registry")
 	}
 }
 
-// Hub.ReapIfIdle reaps an idle room (only an OBS source) — returns true, deregisters the room,
-// and the source gets a recoverable reconnect so it re-attaches to the next session.
+// Hub.ReapIfIdle reaps an idle room (only an OBS source): returns true, runs onReaped, deregisters
+// the room, and the source gets a recoverable reconnect so it re-attaches to the next session.
 func TestHubReapIfIdle_ReapsIdleRoom(t *testing.T) {
 	h := NewHub(nil, nil)
 	r := h.Room("s1")
 	srcOut := make(chan Frame, 8)
 	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", srcOut)
 
-	if !h.ReapIfIdle("s1") {
-		t.Fatal("ReapIfIdle should reap a room with no participants")
+	ran := false
+	reaped, err := h.ReapIfIdle("s1", func() error { ran = true; return nil })
+	if !reaped || err != nil || !ran {
+		t.Fatalf("ReapIfIdle = (%v, %v) ran=%v, want reaped+onReaped", reaped, err, ran)
 	}
 	if h.RoomIfLive("s1") != nil {
 		t.Fatal("reaped room must be removed from the registry")
 	}
 	if got := lastTerminateReason(srcOut); got != TerminateReconnect {
 		t.Fatalf("source terminate reason = %q, want recoverable %q", got, TerminateReconnect)
+	}
+}
+
+// Hub.ReapIfIdle surfaces the onReaped error (the DB session-end failure) while still tearing down
+// the room — so the reaper logs it and retries next sweep.
+func TestHubReapIfIdle_OnReapedErrorSurfaced(t *testing.T) {
+	h := NewHub(nil, nil)
+	r := h.Room("s1")
+	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", make(chan Frame, 8))
+	boom := errors.New("db down")
+	reaped, err := h.ReapIfIdle("s1", func() error { return boom })
+	if !reaped || !errors.Is(err, boom) {
+		t.Fatalf("ReapIfIdle = (%v, %v), want (true, boom)", reaped, err)
+	}
+}
+
+// The race fix (codex/bugbot): while onReaped (the DB session-end) runs, the room is STILL
+// registered and terminating, so a reconnecting participant resolving it via hub.Room is refused —
+// it can't spawn/join a fresh room for the session being ended.
+func TestHubReapIfIdle_RefusesReconnectDuringDBEnd(t *testing.T) {
+	h := NewHub(nil, nil)
+	r := h.Room("s1")
+	r.Join(PeerID("src-cam-1"), "obs", "", "cam-1", make(chan Frame, 8)) // source-only → idle
+
+	var stillRegistered bool
+	var joinedDuring bool
+	reaped, _ := h.ReapIfIdle("s1", func() error {
+		room := h.RoomIfLive("s1") // a reconnect resolves the room the same way
+		stillRegistered = room == r
+		if room != nil {
+			joinedDuring = room.Join(PeerID("host"), "host", "", "", make(chan Frame, 8))
+		}
+		return nil
+	})
+	if !reaped {
+		t.Fatal("should reap an idle source-only room")
+	}
+	if !stillRegistered {
+		t.Fatal("the room must stay registered during the DB end (so reconnects resolve to it)")
+	}
+	if joinedDuring {
+		t.Fatal("a participant Join during the DB end must be refused (room terminating)")
 	}
 }

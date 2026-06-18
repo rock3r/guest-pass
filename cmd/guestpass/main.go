@@ -89,16 +89,15 @@ func serve(addr string) error {
 	}()
 	// The reaper ends sessions whose room has had no connected participants for ReapIdleAfter
 	// (D-40), freeing the one-live-session-per-host slot and making the guests' PII purge-eligible
-	// (the purge keys off ended_at). ReapIfIdle is the atomic gate (it refuses to reap while a
-	// participant is connected); only when it reaps do we stamp ended_at.
+	// (the purge keys off ended_at). ReapIfIdle is the atomic gate — it refuses to reap while a
+	// participant is connected, and it runs the ended_at write WHILE the room is still registered +
+	// terminating so a reconnect in the gap is refused, not spawned into a fresh room for the
+	// ending session.
 	reaper := jobs.NewReaper(jobs.ReaperDeps{
 		ActiveHosts:  st.ActiveSessionHostIDs,
 		Participants: hub.ParticipantCount,
 		Reap: func(ctx context.Context, hostID string) (bool, error) {
-			if !hub.ReapIfIdle(hostID) {
-				return false, nil // a participant reconnected in the poll→reap race
-			}
-			return true, st.EndActiveSession(ctx, hostID)
+			return hub.ReapIfIdle(hostID, func() error { return st.EndActiveSession(ctx, hostID) })
 		},
 	}, jobs.ReaperConfig{Interval: cfg.ReapInterval, IdleAfter: cfg.ReapIdleAfter}, jobsLog)
 	jobsWG.Add(1)

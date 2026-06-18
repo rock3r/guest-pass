@@ -125,23 +125,29 @@ func (h *Hub) ParticipantCount(session string) int {
 	return r.ParticipantCount()
 }
 
-// ReapIfIdle ends the host's live room IFF no participant is connected — the reaper's atomic
-// reap (D-40). It returns true when it reaped (or there was no room — nothing to tear down,
-// the caller still ends the DB session) and false when a participant is connected (a reconnect
-// won the poll→reap race, so the session is NOT idle and must be left alone). When it reaps, the
-// room is terminated (OBS sources get a recoverable reconnect, TerminateIfIdle) and deregistered
-// WHILE still discoverable, so a racing /ws handshake resolves to the draining room (refused) or
-// its closed done, not a fresh room that would survive the teardown (mirrors EndSession). It
-// never spawns a room.
-func (h *Hub) ReapIfIdle(session string) bool {
-	h.mu.Lock()
-	r := h.rooms[session]
-	h.mu.Unlock()
+// ReapIfIdle ends the host's live session IFF no participant is connected — the reaper's atomic
+// reap (D-40). It returns reaped=true when it ended the session (running onReaped, the caller's DB
+// session-end) and reaped=false when a participant is connected (a reconnect won the poll→reap
+// race, so the session is NOT idle and is left alone). The error is whatever onReaped returned.
+//
+// Race-safety (codex/bugbot): the reap and a reconnect must serialize so a reconnect can't spawn or
+// join a fresh room for the session while it is being ended. So this routes through the SAME entry
+// reconnects use — hub.Room (spawn-if-absent), giving even the "no live room" case (a session
+// active since before a restart) a registered room to act as the gate. TerminateIfIdle then does
+// the participant check + draining mark atomically on the room goroutine (FIFO-ordered with any
+// concurrent Join), and onReaped runs WHILE the room is still registered + terminating — so a
+// reconnect resolves to it via hub.Room and its Join is refused (EN-9). Only after onReaped does it
+// Close + deregister. Returns reaped=false if the hub is draining (Shutdown owns that teardown).
+func (h *Hub) ReapIfIdle(session string, onReaped func() error) (reaped bool, err error) {
+	r := h.Room(session) // spawn-if-absent: a registered room to gate reconnects during the DB end
 	if r == nil {
-		return true // no live room → nothing connected; caller ends the DB session
+		return false, nil // hub draining; Shutdown handles teardown, don't reap underneath it
 	}
 	if !r.TerminateIfIdle() {
-		return false // a participant is connected — not idle
+		return false, nil // a participant is connected (or reconnected in the race) — not idle
+	}
+	if onReaped != nil {
+		err = onReaped() // room still registered + terminating → a reconnecting peer's Join is refused
 	}
 	r.Close()
 	h.mu.Lock()
@@ -149,7 +155,7 @@ func (h *Hub) ReapIfIdle(session string) bool {
 		delete(h.rooms, session)
 	}
 	h.mu.Unlock()
-	return true
+	return true, err
 }
 
 // Shutdown gracefully terminates every live room for a server drain (RF-21): each room
