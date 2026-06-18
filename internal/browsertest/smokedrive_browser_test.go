@@ -178,6 +178,118 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 	}
 }
 
+// TestSmokeDrive_Screenshare is a HEADFUL driver for the M4 screenshare media path (D-21/AC-11/12) —
+// so the owner doesn't hand-juggle a sharer + host + viewer. It auto-drives: guest 1 shares its
+// screen (a stubbed, animated getDisplayMedia canvas — no real picker), the host greenroom shows it
+// in the preview rail and the driver clicks "Put live", and guest 2 renders the live share — all on
+// screen, with a screenshot at each step. It then PRINTS the /s/screen?token=… URL and holds the
+// windows open so the owner pastes it into a real OBS Browser Source and confirms OBS-CEF renders the
+// moving test pattern (the one genuinely-manual gate; everything else here is what the chromedp T-12
+// proves headless in CI).
+//
+// SKIPPED unless SMOKE_DRIVE=1; HEADFUL by default (SMOKE_HEADLESS=1 for screenshots only); normally
+// run via scripts/smoke-drive.sh --screenshare. Knobs: SMOKE_WATCH_SEC (headful hold, default 180 —
+// long enough to set up OBS), SMOKE_SHOTS (screenshot dir).
+func TestSmokeDrive_Screenshare(t *testing.T) {
+	if os.Getenv("SMOKE_DRIVE") == "" {
+		t.Skip("headful smoke driver — set SMOKE_DRIVE=1 (or run scripts/smoke-drive.sh --screenshare)")
+	}
+	headful := os.Getenv("SMOKE_HEADLESS") == ""
+	watch := envInt("SMOKE_WATCH_SEC", 180)
+	browserTTL := 300 * time.Second
+	if headful {
+		browserTTL += time.Duration(watch) * time.Second
+	}
+	shotsDir := os.Getenv("SMOKE_SHOTS")
+	if shotsDir == "" {
+		shotsDir = filepath.Join(repoRoot(t), ".smoke", "drive-shots")
+	}
+	if err := os.MkdirAll(shotsDir, 0o755); err != nil {
+		t.Fatalf("screenshot dir: %v", err)
+	}
+	s := seedDrive(t, 2) // guest 1 = sharer, guest 2 = viewer (both screenshare-eligible)
+
+	enter := func(raw string) []chromedp.Action {
+		return []chromedp.Action{
+			chromedp.Navigate(s.base + "/p/" + raw),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+			chromedp.Poll(`document.querySelector('.dc-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+		}
+	}
+
+	// 1) Guest 1 enters and shares its screen (getDisplayMedia stubbed → animated canvas, injected
+	//    before any page script, so there's no real OS screen-picker to click).
+	sharer := driveBrowser(t, headful, browserTTL)
+	if err := chromedp.Run(sharer, append([]chromedp.Action{injectScript(getDisplayMediaStubJS)},
+		append(enter(s.rawTokens[0]),
+			chromedp.WaitVisible(`.gs-screen[data-screen-state="idle"]`, chromedp.ByQuery),
+			chromedp.Click(`.gs-screen-toggle`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.gs-screen[data-screen-state="backstage"]`, chromedp.ByQuery),
+		)...)...); err != nil {
+		t.Fatalf("guest 1 share: %v", err)
+	}
+	t.Logf("  guest 1 sharing (backstage)")
+
+	// 2) Guest 2 enters (it will render the live share once the host selects it).
+	viewer := driveBrowser(t, headful, browserTTL)
+	if err := chromedp.Run(viewer, enter(s.rawTokens[1])...); err != nil {
+		t.Fatalf("guest 2 enter: %v", err)
+	}
+
+	// 3) Host greenroom: the preview rail shows guest 1's screen over P2P.
+	host := driveBrowser(t, headful, browserTTL)
+	setCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	railA := `.gr-screen-tile[data-sharer="` + s.passIDs[0] + `"]`
+	if err := chromedp.Run(host,
+		network.Enable(), setCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(railA, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('`+railA+` .gr-screen-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("host rail did not render guest 1's screen: %v", err)
+	}
+	t.Logf("  host preview rail renders the share")
+	shot(t, host, shotsDir, "screen-01-rail")
+	beat(headful)
+
+	// 4) Host puts it live → the tile is badged live, and guest 2 renders the live share for everyone.
+	if err := chromedp.Run(host,
+		chromedp.Click(railA+` .gr-screen-select`, chromedp.ByQuery),
+		chromedp.WaitVisible(railA+`[data-live="1"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("select-live: %v", err)
+	}
+	if err := chromedp.Run(viewer,
+		chromedp.Poll(`!!document.querySelector('.gs-livescreen[data-sharer="`+s.passIDs[0]+`"] .gs-livescreen-video') && document.querySelector('.gs-livescreen[data-sharer="`+s.passIDs[0]+`"] .gs-livescreen-video').videoWidth > 0`,
+			nil, chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("guest 2 did not render the live share (AC-11 everyone): %v", err)
+	}
+	t.Logf("  host selected it live; guest 2 renders the live share")
+	shot(t, host, shotsDir, "screen-02-host-live")
+	shot(t, viewer, shotsDir, "screen-03-viewer-live")
+
+	// 5) The one MANUAL gate: a real OBS Browser Source on /s/screen renders the live share (CEF over
+	//    the screen channel). Print the URL and hold the windows open while the owner connects OBS.
+	screenURL := s.base + "/s/screen?token=" + s.srcTokenScreen
+	t.Logf("✅ automated screenshare flow passed (rail → live → everyone). Screenshots in %s", shotsDir)
+	t.Logf("──────────────────────────────────────────────────────────────────────")
+	t.Logf(" OBS STEP — add an OBS Browser Source with this URL; it should render a moving test pattern:")
+	t.Logf("   %s", screenURL)
+	t.Logf("   (append &name=1 to also show the sharer's nameplate.)")
+	t.Logf("   Holding the windows + server open for %ds so you can set up OBS …", watch)
+	t.Logf("──────────────────────────────────────────────────────────────────────")
+	if headful {
+		time.Sleep(time.Duration(watch) * time.Second)
+	}
+}
+
 // beat pauses briefly between visible transitions so a human watching headful can follow along.
 func beat(headful bool) {
 	if headful {
@@ -260,16 +372,18 @@ func shot(t *testing.T, ctx context.Context, dir, name string) {
 
 // driveSeed is a host + N guest passes + a cam-1 slot + a host session, for the headful driver.
 type driveSeed struct {
-	base       string
-	hostCookie string
-	rawTokens  []string
-	passIDs    []string
-	srcToken   string
-	slotLabel  string
+	base           string
+	hostCookie     string
+	rawTokens      []string
+	passIDs        []string
+	srcToken       string
+	slotLabel      string
+	srcTokenScreen string // the screenshare slot's source token (/s/screen?token=…) for the screenshare driver
 }
 
-// seedDrive creates the fixtures for the headful driver: one live stream, n guest passes, and a
-// cam-1 slot with its own source token (mirrors seedGrid + the cam slot from seedDeviceCheck).
+// seedDrive creates the fixtures for the headful driver: one live stream, n guest passes (each
+// screenshare-eligible), a cam-1 slot, and the shared screenshare slot — each slot with its own
+// source token (mirrors seedGrid + the slots from seedDeviceCheck).
 func seedDrive(t *testing.T, n int) *driveSeed {
 	t.Helper()
 	ctx := context.Background()
@@ -308,6 +422,11 @@ func seedDrive(t *testing.T, n int) *driveSeed {
 		if err != nil {
 			t.Fatalf("CreatePass %d: %v", i, err)
 		}
+		// Screenshare-eligible (can_screen) so the screenshare driver can have a guest share (EN-23);
+		// harmless to the multi-guest/RF-8 driver, which never opens the share affordance.
+		if err := st.SetPassCanScreen(ctx, pass.ID, true); err != nil {
+			t.Fatalf("SetPassCanScreen %d: %v", i, err)
+		}
 		raws = append(raws, raw)
 		passIDs = append(passIDs, pass.ID)
 	}
@@ -320,6 +439,17 @@ func seedDrive(t *testing.T, n int) *driveSeed {
 		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw),
 	}); err != nil {
 		t.Fatalf("CreateSlot: %v", err)
+	}
+	// The shared screenshare slot (signaling label "screen") with its own source token, so the
+	// screenshare driver can hand the owner a /s/screen?token=… URL for a real OBS Browser Source.
+	srcScreenRaw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint screen src: %v", err)
+	}
+	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
+		HostID: host.ID, Kind: store.SlotScreenshare, SourceTokenHash: hasher.Hash(srcScreenRaw),
+	}); err != nil {
+		t.Fatalf("CreateSlot screenshare: %v", err)
 	}
 
 	ring, err := auth.NewKeyRing("smokedrive-browser-session-secret-eeeeeeee")
@@ -346,5 +476,6 @@ func seedDrive(t *testing.T, n int) *driveSeed {
 	return &driveSeed{
 		base: Serve(t, handler).URL, hostCookie: sess,
 		rawTokens: raws, passIDs: passIDs, srcToken: srcRaw, slotLabel: "cam-1",
+		srcTokenScreen: srcScreenRaw,
 	}
 }

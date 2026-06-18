@@ -40,6 +40,30 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 > cross-network **NAT** (STUN-only). (Mobile/non-Chrome is deferred from v1; ~6-guest capacity is
 > already proven by SPIKE-0 — neither is tested here.)
 
+> ### Shortcut: the M4 screenshare check (real OBS on `/s/screen`)
+>
+> To confirm a guest's **screen share** reaches a real OBS source without juggling a sharer + host +
+> viewer, run the **screenshare driver**. It auto-drives the whole preview-switcher flow on screen —
+> guest 1 shares its screen (a **stubbed, animated** `getDisplayMedia` capture, so there's no real
+> OS screen-picker), the host greenroom shows it in the **preview rail**, the driver clicks **Put
+> live**, and guest 2 **renders the live share** (D-21/AC-11) — then it **prints a `/s/screen?token=…`
+> URL** and holds the windows open so you point a real OBS Browser Source at it:
+>
+> ```sh
+> scripts/smoke-drive.sh --screenshare         # headful; --watch N for a longer OBS-setup hold (default 180s)
+> ```
+>
+> **Confirm in OBS:** add a **Browser Source** with the printed URL (1280×720) → it renders the
+> moving colour-cycling test pattern (CEF consuming the live share over the **screen channel**). Then,
+> in the host greenroom window, click **Take screen off air** → the OBS source goes **black**
+> (slot-unbound → the source clears). Append `&name=1` to the URL to also confirm the nameplate.
+>
+> What the driver does **not** need to cover: the in-browser render + select-live + everyone-renders +
+> re-select-swap are all proven headless in CI by `screenshare_media_browser_test.go` (T-12) — the
+> only **physical** residue is the real **OBS-CEF** render of `/s/screen`, which is the manual step
+> above (the same CEF path as the cam `/s/{slot}` check below, just on the screen channel). The screen
+> capture here is a synthetic pattern; a real desktop/window share is the same media path (D-41).
+
 > ### ⚠ Security: dev instance over a tunnel
 >
 > The harness exposes a **dev instance** over a public HTTPS tunnel. The dev sign-in `/auth/dev`
