@@ -133,17 +133,27 @@ func TestChecker_DoesNotCacheCancelledContext(t *testing.T) {
 }
 
 func TestParseTwitchLive(t *testing.T) {
-	if parseTwitchLive([]byte(`...,"isLiveBroadcast":true,...`)) != StatusLive {
-		t.Error("isLiveBroadcast:true should be live")
+	// Live across arbitrary JSON whitespace around the colon (codex): no space, one space, spaces,
+	// a newline/tab after the colon.
+	for _, live := range []string{
+		`...,"isLiveBroadcast":true,...`,
+		`...,"isLiveBroadcast": true,...`,
+		`..."isLiveBroadcast"  :  true...`,
+		"...\"isLiveBroadcast\":\n  true...",
+		"...\"isLiveBroadcast\" :\ttrue...",
+	} {
+		if parseTwitchLive([]byte(live)) != StatusLive {
+			t.Errorf("should be live: %q", live)
+		}
 	}
-	if parseTwitchLive([]byte(`...,"isLiveBroadcast": true,...`)) != StatusLive {
-		t.Error("isLiveBroadcast: true (spaced) should be live")
-	}
-	if parseTwitchLive([]byte(`...,"isLiveBroadcast":false,...`)) != StatusOffline {
-		t.Error("isLiveBroadcast:false should be offline")
-	}
-	if parseTwitchLive([]byte(`no signal here`)) != StatusOffline {
-		t.Error("no signal should be offline")
+	for _, off := range []string{
+		`...,"isLiveBroadcast":false,...`,
+		`no signal here`,
+		`"isLiveBroadcast":truething`, // word-boundary: not the boolean true
+	} {
+		if parseTwitchLive([]byte(off)) != StatusOffline {
+			t.Errorf("should be offline: %q", off)
+		}
 	}
 }
 

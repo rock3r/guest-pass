@@ -1,10 +1,10 @@
 package livecheck
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -99,17 +99,18 @@ func (v *twitchVerifier) verify(ctx context.Context, channel string) Status {
 	return parseTwitchLive(body)
 }
 
+// liveSignalRe matches the schema.org live flag tolerating arbitrary JSON whitespace around the
+// colon (and around the boolean), so a harmless formatting change — `"isLiveBroadcast" : true`, a
+// newline after the colon — doesn't make a live channel read as offline (codex). JSON permits any
+// whitespace at separators.
+var liveSignalRe = regexp.MustCompile(`"isLiveBroadcast"\s*:\s*true\b`)
+
 // parseTwitchLive is the best-effort live-signal parse (D-29 — fragile/ToS-grey, fixed via PR): a
 // live Twitch channel page embeds schema.org markup whose isLiveBroadcast flag is true. Absence is
-// read as offline. Tolerant of whitespace variants around the JSON.
+// read as offline.
 func parseTwitchLive(body []byte) Status {
-	for _, sig := range [][]byte{
-		[]byte(`"isLiveBroadcast":true`),
-		[]byte(`"isLiveBroadcast": true`),
-	} {
-		if bytes.Contains(body, sig) {
-			return StatusLive
-		}
+	if liveSignalRe.Match(body) {
+		return StatusLive
 	}
 	return StatusOffline
 }
