@@ -117,6 +117,19 @@ type Session struct {
 	Status    string // active | ended
 }
 
+// Report is one abuse report against a host (D-42/EN-24). StreamID/ReporterEmail/Message are
+// nullable: the stream may be deleted (ON DELETE SET NULL), and reporter_email + message are nulled
+// once the review-window retention passes (anonymized, D-37). The reported host never sees any of it.
+type Report struct {
+	ID            string
+	HostID        string
+	StreamID      *string
+	ReporterEmail *string
+	Category      string
+	Message       *string
+	CreatedAt     int64
+}
+
 // PassLock is a persisted suppression lock (AD-22/D-13): one row per (pass, modality) that
 // re-applies on room (re)spawn, so a force-muted guest stays muted across a restart. The
 // applier_pass_id is NULL when the host applied it (the host has no pass); the rank floor

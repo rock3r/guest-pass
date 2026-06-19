@@ -7,6 +7,7 @@ No account or install needed — run a quick camera check, then enter the greenr
 24 hours of it ending.</p>
 {{if .WatchURL}}<p class="watch-live-note">Want to watch the broadcast? <a class="watch-live" href="{{.WatchURL}}" target="_blank" rel="noopener noreferrer">Watch live ↗</a></p>{{end}}
 <div id="device-check"></div>
+{{if .ReportToken}}<p class="report-link"><a href="/p/{{.ReportToken}}/report">Didn't expect this invite? Report it.</a></p>{{end}}
 </section>
 <script type="module" src="/static/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}" crossorigin="anonymous"{{end}}></script>
 {{end}}

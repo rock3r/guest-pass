@@ -99,8 +99,11 @@ func inviteHTML(inv Invite) string {
 	if name == "" {
 		name = "there"
 	}
-	return fmt.Sprintf("<p>Hi %s,</p><p>You're invited to join the live stream %q. Open this link when the stream is about to start:</p><p><a href=\"%s\">%s</a></p>%s",
-		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink), invitePrivacyNotice)
+	// "Didn't expect this? report it" link (D-42): the abuse-report form for this invite, derived
+	// from the magic link (BASE_URL/p/{token}/report). The host never learns who reported them.
+	reportLink := html.EscapeString(inv.MagicLink + "/report")
+	return fmt.Sprintf("<p>Hi %s,</p><p>You're invited to join the live stream %q. Open this link when the stream is about to start:</p><p><a href=\"%s\">%s</a></p>%s<p>Didn't expect this invite? <a href=\"%s\">Report it</a>.</p>",
+		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink), invitePrivacyNotice, reportLink)
 }
 
 // invitePrivacyNotice is the GDPR "before" transparency notice carried on every invite email

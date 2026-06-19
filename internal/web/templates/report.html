@@ -1,0 +1,25 @@
+{{define "content"}}
+<section class="report">
+{{if .Data.Sent}}
+<h1>Thanks — your report was sent</h1>
+<p>The GuestPass team will review it. You can close this page now.</p>
+{{else}}
+<h1>Report this invite</h1>
+<p>Didn't expect this invite, or does something seem wrong? Tell us. Your report goes to the GuestPass
+team — the person who invited you will never see that you reported them, or what you said.</p>
+{{if .Data.Error}}<p class="report-error" role="alert">Please choose a reason and add a short message — both are required.</p>{{end}}
+<form method="post" action="/p/{{.Data.Token}}/report" class="report-form">
+<label>Reason
+<select name="category" required>
+<option value="" disabled selected>Choose a reason…</option>
+{{range .Data.Categories}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+</select>
+</label>
+<label>What happened?
+<textarea name="message" required maxlength="2000" rows="5" placeholder="Tell us what seems wrong"></textarea>
+</label>
+<button type="submit" class="btn btn-primary">Send report</button>
+</form>
+{{end}}
+</section>
+{{end}}

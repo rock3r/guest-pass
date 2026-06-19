@@ -75,10 +75,11 @@ type Config struct {
 	DBPath             string // SQLite file path (DB_PATH); defaults to guestpass.db
 
 	// Background-job dials (DESIGN §9.7 / D-37 / D-40), config-backed with safe defaults.
-	PurgeInterval  time.Duration // PURGE_INTERVAL: how often the guest-PII purge sweeps
-	PurgeRetention time.Duration // PURGE_RETENTION: how long guest PII is kept after stream end
-	ReapInterval   time.Duration // REAP_INTERVAL: how often the idle-session reaper polls
-	ReapIdleAfter  time.Duration // REAP_IDLE_AFTER: end a session idle (no participants) this long
+	PurgeInterval   time.Duration // PURGE_INTERVAL: how often the guest-PII purge sweeps
+	PurgeRetention  time.Duration // PURGE_RETENTION: how long guest PII is kept after stream end
+	ReportRetention time.Duration // REPORT_RETENTION: how long an abuse report's reporter/message is kept before anonymizing (D-42)
+	ReapInterval    time.Duration // REAP_INTERVAL: how often the idle-session reaper polls
+	ReapIdleAfter   time.Duration // REAP_IDLE_AFTER: end a session idle (no participants) this long
 }
 
 // defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
@@ -88,10 +89,11 @@ const defaultDBPath = "guestpass.db"
 // Default background-job dials (DESIGN §9.7). DEPLOYMENT §8 documents PURGE_INTERVAL /
 // PURGE_RETENTION as the overrides.
 const (
-	defaultPurgeInterval  = time.Hour        // "hourly sweep"
-	defaultPurgeRetention = 24 * time.Hour   // 24h guest-PII retention (D-37)
-	defaultReapInterval   = time.Minute      // idle-session reaper poll cadence (D-40)
-	defaultReapIdleAfter  = 15 * time.Minute // auto-end a session idle this long (frees the slot)
+	defaultPurgeInterval   = time.Hour           // "hourly sweep"
+	defaultPurgeRetention  = 24 * time.Hour      // 24h guest-PII retention (D-37)
+	defaultReportRetention = 30 * 24 * time.Hour // abuse-report review window before anonymizing (D-42)
+	defaultReapInterval    = time.Minute         // idle-session reaper poll cadence (D-40)
+	defaultReapIdleAfter   = 15 * time.Minute    // auto-end a session idle this long (frees the slot)
 )
 
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
@@ -141,6 +143,9 @@ func load(getenv func(string) string) (*Config, error) {
 		return nil, err
 	}
 	if c.PurgeRetention, err = parsePositiveDuration("PURGE_RETENTION", getenv("PURGE_RETENTION"), defaultPurgeRetention); err != nil {
+		return nil, err
+	}
+	if c.ReportRetention, err = parsePositiveDuration("REPORT_RETENTION", getenv("REPORT_RETENTION"), defaultReportRetention); err != nil {
 		return nil, err
 	}
 	if c.ReapInterval, err = parsePositiveDuration("REAP_INTERVAL", getenv("REAP_INTERVAL"), defaultReapInterval); err != nil {

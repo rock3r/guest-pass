@@ -706,6 +706,9 @@ peers     id, session_id, pass_id?,                          -- stable pass_id k
           used_turn                                           -- NO on_stage (D-11); written once at disconnect
 
 pass_locks pass_id, modality, applier_rank_floor, applier_pass_id?, created_at  -- locks survive restart (AD-22)
+
+reports   id, host_id, stream_id?, reporter_email?,            -- abuse report (D-42/EN-24); reporter admin-only,
+          category, message?, created_at                       --   email+message anonymized after the review window (D-37)
 ```
 
 ### Concrete first-migration DDL (AD-17)
@@ -844,6 +847,20 @@ CREATE TABLE pass_locks (
     applier_pass_id    TEXT    REFERENCES passes(id) ON DELETE SET NULL,  -- NULL = applied by host (no pass)
     created_at         INTEGER NOT NULL,
     PRIMARY KEY (pass_id, modality)
+);
+
+-- Abuse reports (D-42/EN-24): a public "report this invite" submission against a host. The
+-- reporter (reporter_email) is resolved from the magic-link token server-side, never form input,
+-- and is ADMIN-ONLY; the reported host never sees it. reporter_email + message are anonymized to
+-- NULL after the review window (D-37). category is CHECK-constrained.
+CREATE TABLE reports (
+    id             TEXT    PRIMARY KEY,
+    host_id        TEXT    NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    stream_id      TEXT    REFERENCES streams(id) ON DELETE SET NULL,
+    reporter_email TEXT,
+    category       TEXT    NOT NULL CHECK (category IN ('spam','dont-know','phishing','harassment','other')),
+    message        TEXT,
+    created_at     INTEGER NOT NULL
 );
 ```
 
@@ -1423,6 +1440,19 @@ per-host binding lock so an in-flight go-live can't outlive the suspend. Authori
 live `is_admin` gate; the only extra guard is **no self-suspend / self-demote** (no admin
 lockout). This stays within the §7.7 boundary — a force-end is a cooperative teardown +
 reconnect block (D-25), never a media/chat read.
+
+**Abuse reports (M5 PR-9, D-42/EN-24).** Every invite email and the guest pass page carry a
+"didn't expect this? report it" link to a **public, no-auth** form at `/p/{token}/report`
+(category + message, both required; same per-IP rate limiter as the pass page). The reported
+host, the stream, and the reporter's email are all resolved from the token **server-side** — only
+category + message come from the form, so a reporter can't forge whom they are or report. Each
+submission is one row in `reports`. The admin console renders them **grouped per host** with full
+detail (reporter, category, message, stream, time) and offers **Dismiss all**
+(`POST /api/admin/abuse-reports/{hostId}/dismiss`) or **Suspend** (the PR-8 action). **Reporter
+identity is admin-only** — it renders only on `/admin` (RequireAdmin); no host surface shows a
+report or its complaint text, so a host can never learn which invitee reported them (retaliation
+guard, EN-24). After the review window (`REPORT_RETENTION`, default 30d) the retention sweep nulls
+`reporter_email` + `message`, keeping only the anonymous `host_id`/`category`/`time` signal (D-37).
 
 ### 24h purge (D-37)
 

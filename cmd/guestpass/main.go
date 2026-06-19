@@ -86,7 +86,7 @@ func serve(addr string) error {
 	jobsWG.Add(1)
 	go func() {
 		defer jobsWG.Done()
-		jobs.NewPurger(st, jobs.PurgeConfig{Interval: cfg.PurgeInterval, Retention: cfg.PurgeRetention}, jobsLog).Run(jobsCtx)
+		jobs.NewPurger(st, jobs.PurgeConfig{Interval: cfg.PurgeInterval, Retention: cfg.PurgeRetention, ReportRetention: cfg.ReportRetention}, jobsLog).Run(jobsCtx)
 	}()
 	// The reaper ends sessions whose room has had no connected participants for ReapIdleAfter
 	// (D-40), freeing the one-live-session-per-host slot and making the guests' PII purge-eligible

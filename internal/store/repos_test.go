@@ -1059,3 +1059,107 @@ func TestAdminRepo_TurnRelayStats_EmptyIsZero(t *testing.T) {
 		t.Fatalf("TurnRelayStats on empty = (%d,%d), want (0,0)", total, relayed)
 	}
 }
+
+// CreateReport + ListReports: an individual report joins to its host (name) and stream (title), with
+// the reporter identity preserved (admin-only) (D-42).
+func TestReportRepo_CreateAndList(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "reported-host")
+	stream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Sketchy Show"})
+	email := "reporter@example.com"
+	r, err := st.CreateReport(ctx, CreateReportParams{
+		HostID: h.ID, StreamID: &stream.ID, ReporterEmail: &email, Category: ReportPhishing, Message: "looks like phishing",
+	})
+	if err != nil {
+		t.Fatalf("CreateReport: %v", err)
+	}
+	if r.ID == "" || r.CreatedAt == 0 {
+		t.Fatalf("CreateReport returned incomplete report: %+v", r)
+	}
+	rows, err := st.ListReports(ctx)
+	if err != nil {
+		t.Fatalf("ListReports: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ListReports len = %d, want 1", len(rows))
+	}
+	got := rows[0]
+	if got.HostID != h.ID || got.HostName != h.Name || got.StreamTitle == nil || *got.StreamTitle != "Sketchy Show" {
+		t.Fatalf("report join = %+v, want host/stream metadata", got)
+	}
+	if got.ReporterEmail == nil || *got.ReporterEmail != email || got.Category != ReportPhishing || got.Message == nil || *got.Message != "looks like phishing" {
+		t.Fatalf("report detail = %+v, want reporter+category+message", got)
+	}
+}
+
+// DeleteReportsByHost clears one host's reports (Dismiss all) and leaves another host's reports intact.
+func TestReportRepo_DeleteByHost(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	a := seedHost(t, st, "host-a-rep")
+	b := seedHost(t, st, "host-b-rep")
+	mkReport(t, st, a.ID)
+	mkReport(t, st, a.ID)
+	mkReport(t, st, b.ID)
+
+	n, err := st.DeleteReportsByHost(ctx, a.ID)
+	if err != nil || n != 2 {
+		t.Fatalf("DeleteReportsByHost(a) = (%d,%v), want (2,nil)", n, err)
+	}
+	rows, _ := st.ListReports(ctx)
+	if len(rows) != 1 || rows[0].HostID != b.ID {
+		t.Fatalf("after dismiss, remaining = %+v, want only host B's report", rows)
+	}
+}
+
+// AnonymizeExpiredReports nulls reporter_email + message past the retention window, keeps the
+// anonymous row (host/category/time), and leaves fresh reports untouched (D-37).
+func TestReportRepo_AnonymizeExpired(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "anon-host")
+	old := mkReport(t, st, h.ID)
+	fresh := mkReport(t, st, h.ID)
+	// Backdate `old` well past the retention window.
+	retention := int64(30 * 24 * 3600)
+	now := time.Now().Unix()
+	if _, err := st.writer.ExecContext(ctx, "UPDATE reports SET created_at = ? WHERE id = ?", now-retention-10, old.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	n, err := st.AnonymizeExpiredReports(ctx, now, retention)
+	if err != nil || n != 1 {
+		t.Fatalf("AnonymizeExpiredReports = (%d,%v), want (1,nil)", n, err)
+	}
+	rows, _ := st.ListReports(ctx)
+	byID := map[string]ReportRow{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	if o := byID[old.ID]; o.ReporterEmail != nil || o.Message != nil {
+		t.Fatalf("expired report not anonymized: %+v", o)
+	}
+	if o := byID[old.ID]; o.Category == "" || o.HostID != h.ID {
+		t.Fatalf("anonymized report lost its anonymous signal: %+v", o)
+	}
+	if f := byID[fresh.ID]; f.ReporterEmail == nil || f.Message == nil {
+		t.Fatalf("fresh report wrongly anonymized: %+v", f)
+	}
+	// Idempotent: a second pass anonymizes nothing.
+	if n2, _ := st.AnonymizeExpiredReports(ctx, now, retention); n2 != 0 {
+		t.Fatalf("second anonymize pass = %d, want 0 (idempotent)", n2)
+	}
+}
+
+func mkReport(t *testing.T, st *Store, hostID string) *Report {
+	t.Helper()
+	email := "r@example.com"
+	r, err := st.CreateReport(context.Background(), CreateReportParams{
+		HostID: hostID, ReporterEmail: &email, Category: ReportSpam, Message: "spammy",
+	})
+	if err != nil {
+		t.Fatalf("mkReport: %v", err)
+	}
+	return r
+}

@@ -214,6 +214,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			adr.Post("/api/admin/hosts/{id}/suspend", admin.suspendHost)
 			adr.Post("/api/admin/hosts/{id}/promote", admin.promoteHost)
 			adr.Post("/api/admin/hosts/{id}/demote", admin.demoteHost)
+			// Abuse reports (D-42/EN-24): "Dismiss all" clears a host's reports; review + suspend reuse
+			// the hosts actions above. Reporter identity is admin-only (rendered on /admin only).
+			adr.Post("/api/admin/abuse-reports/{hostId}/dismiss", admin.dismissReports)
 		})
 
 		// Public guest landing + device-check entry. Rate-limited (when configured) to blunt
@@ -224,6 +227,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			}
 			pr.Get("/p/{token}", api.passLanding)
 			pr.Post("/p/{token}/enter", api.passEnter)
+			// Public abuse-report form (D-42/EN-24): the reporter is the invited guest, resolved from
+			// the token server-side; only category + message come from the form. Same rate limiter.
+			pr.Get("/p/{token}/report", api.reportForm)
+			pr.Post("/p/{token}/report", api.reportSubmit)
 		})
 	}
 

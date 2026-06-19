@@ -142,3 +142,13 @@ func (s *adminServer) demoteHost(w http.ResponseWriter, r *http.Request) {
 	}
 	s.redirectAdmin(w, r, "msg", "demoted")
 }
+
+// dismissReports clears all of a host's abuse reports — the D-42 "Dismiss all" action (no other
+// effect on the host). A delete on an unknown host id removes nothing and still redirects cleanly.
+func (s *adminServer) dismissReports(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.store.DeleteReportsByHost(r.Context(), chi.URLParam(r, "hostId")); err != nil {
+		http.Error(w, "could not dismiss reports", http.StatusInternalServerError)
+		return
+	}
+	s.redirectAdmin(w, r, "msg", "dismissed")
+}
