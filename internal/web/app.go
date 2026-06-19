@@ -24,15 +24,16 @@ import (
 // carries it (auth/session.go), so no separate CSRF token is needed. Every route is
 // mounted behind RequireHost, which gates pending/suspended hosts (EN-6).
 type appServer struct {
-	store   *store.Store
-	rd      *renderer
-	hasher  *token.Hasher       // magic-link + slot token hashing (EN-5)
-	mailer  mail.Mailer         // invite delivery
-	baseURL string              // absolute origin for building magic links + OBS source URLs
-	reveals *revealStore        // one-time post-redirect reveal of a just-minted secret
-	hub     *signaling.Hub      // to tear down a live OBS source on slot-token rotation (D-22); may be nil
-	binds   *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
-	auth    *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
+	store     *store.Store
+	rd        *renderer
+	hasher    *token.Hasher       // magic-link + slot token hashing (EN-5)
+	mailer    mail.Mailer         // invite delivery
+	baseURL   string              // absolute origin for building magic links + OBS source URLs
+	reveals   *revealStore        // one-time post-redirect reveal of a just-minted secret
+	hub       *signaling.Hub      // to tear down a live OBS source on slot-token rotation (D-22); may be nil
+	binds     *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
+	auth      *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
+	liveCheck LiveChecker         // D-29 live-verify (validate + persist a linked channel); may be nil
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).

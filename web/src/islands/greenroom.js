@@ -133,6 +133,11 @@ function Greenroom() {
   /** @type {[Array<{id:string,name:string,stream:MediaStream|null,live:boolean}>, Function]} */
   const [screenTiles, setScreenTiles] = useState([]);
   const [screenLive, setScreenLive] = useState("");
+  // verifiedLive folds the D-29 live-verify result into the D-24 broadcast layer (AC-8): {status,
+  // platform, watchURL} for the linked channel, polled from /api/streams/{id}/livecheck while a
+  // session is live, or null when no channel is linked. Lets the host confirm "live (verified on
+  // Twitch)" even when OBS gives status-unavailable.
+  const [verifiedLive, setVerifiedLive] = useState(null);
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -558,6 +563,32 @@ function Greenroom() {
       });
   }
 
+  // Poll the verified-live status (D-29/AC-8) while a session is live (the ceiling carries the live
+  // stream id). Re-polls every 30s — matching the server-side cache TTL — and clears on
+  // unmount/stream change. Best-effort: a failed fetch just leaves the badge as-is.
+  useEffect(() => {
+    const streamId = ceiling && ceiling.streamId;
+    if (!streamId) {
+      setVerifiedLive(null);
+      return undefined;
+    }
+    let alive = true;
+    const poll = () => {
+      fetch(`/api/streams/${encodeURIComponent(streamId)}/livecheck`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => {
+          if (alive) setVerifiedLive(v && v.linked ? v : null);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const t = setInterval(poll, 30000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [ceiling && ceiling.streamId]);
+
   // applyCeiling PUTs a ceiling adjustment; the server clamps + persists + re-broadcasts {t:ceiling}
   // to live publishers, and echoes the clamped values so the control reflects the server's clamp.
   function applyCeiling(streamId, maxRes, maxFps, maxBitrateKbps) {
@@ -589,6 +620,27 @@ function Greenroom() {
           Bump quality now
         </button>
         {ceiling ? <CeilingControl ceiling={ceiling} onApply={applyCeiling} /> : null}
+        {/* Verified-live signal (D-29/AC-8): folds the linked channel's live status into the D-24
+            broadcast surface, alongside the OBS-reflected on-air. Shown only when a channel is linked. */}
+        {verifiedLive ? (
+          <span
+            class="gr-verified"
+            data-verified-status={verifiedLive.status}
+            data-verified-platform={verifiedLive.platform}
+          >
+            {verifiedLive.status === "live"
+              ? `● Live (verified on ${verifiedLive.platform})`
+              : verifiedLive.status === "offline"
+                ? `Not live on ${verifiedLive.platform}`
+                : `${verifiedLive.platform}: live status unavailable`}
+            {verifiedLive.watch_url ? (
+              <a class="gr-verified-watch" href={verifiedLive.watch_url} target="_blank" rel="noopener noreferrer">
+                {" "}
+                watch ↗
+              </a>
+            ) : null}
+          </span>
+        ) : null}
         {bindError ? (
           <p class="gr-binderr" role="alert">
             {bindError}

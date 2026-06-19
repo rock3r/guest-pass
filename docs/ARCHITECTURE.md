@@ -485,12 +485,21 @@ events fire at the default level.
 - **Never assert "backstage" as truth when the real state is unknown** — degrade to
   `status-unavailable`.
 
-**Live verification (D-29).** The host optionally links a Twitch/YouTube channel;
-GuestPass best-effort scrapes public web endpoints server-side, zero-config, to feed
+**Live verification (D-29).** The host optionally links a Twitch channel (v1; YouTube → M5.5)
+to a stream; GuestPass best-effort scrapes public web endpoints server-side, zero-config, to feed
 the broadcast layer with a `live (verified on <platform>)` signal. SSRF-closed
 (channel identifier + platform, never a raw URL; fixed template; block
 private/loopback/link-local/metadata IPs; off-domain redirects refused). Degrades to
 `status-unavailable` on failure. Optional API-key verification → v1.1.
+
+Wiring (M5 PR-5/PR-6): the SSRF-closed verifier core lives in **`internal/livecheck`** (a
+platform-pluggable `Checker` with the validating dialer, a polite per-channel TTL cache, and
+pure `WatchURL`/`Normalize` helpers). The host links a channel from the **stream-detail** page
+(`POST /app/streams/{id}/channel`, validated via the checker's `Normalize`, stored in
+`streams.twitch_yt_*`); the guest **pass page** surfaces the public **"watch live"** link
+(`Checker.WatchURL`, pure — works regardless of live status); and the greenroom **polls**
+`GET /api/streams/{id}/livecheck` (host-only) for the verified-live status, folding a
+"live (verified on Twitch)" badge into the D-24 on-air surface alongside the OBS reflection.
 
 ### Nameplate (D-16)
 

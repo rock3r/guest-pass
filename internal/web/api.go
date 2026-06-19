@@ -19,14 +19,15 @@ import (
 
 // apiServer holds the dependencies of the host JSON API and the guest magic-link page.
 type apiServer struct {
-	store   *store.Store
-	hasher  *token.Hasher
-	mailer  mail.Mailer
-	baseURL string
-	rd      *renderer
-	hub     *signaling.Hub      // live slot (re)bind re-route (D-20); may be nil (minimal config)
-	binds   *bindingLocks       // serialize a host's slot-binding ops with the /ws join-replay (D-20)
-	auth    *auth.Authenticator // clears the session cookie on account erasure (DELETE /api/me, AC-5)
+	store     *store.Store
+	hasher    *token.Hasher
+	mailer    mail.Mailer
+	baseURL   string
+	rd        *renderer
+	hub       *signaling.Hub      // live slot (re)bind re-route (D-20); may be nil (minimal config)
+	binds     *bindingLocks       // serialize a host's slot-binding ops with the /ws join-replay (D-20)
+	auth      *auth.Authenticator // clears the session cookie on account erasure (DELETE /api/me, AC-5)
+	liveCheck LiveChecker         // D-29 live-verify (watch link + verified status); may be nil
 }
 
 // --- response DTOs (never expose token hashes or raw tokens) ---
@@ -274,15 +275,20 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stream, err := a.store.GetStream(r.Context(), pass.StreamID)
-	title := ""
+	title, watchURL := "", ""
 	if err == nil {
 		title = stream.Title
+		// Guest "watch live" link (D-29/AC-8): the public link for the stream's linked channel, if
+		// any. Pure (no live check) — the link works regardless of current live status.
+		if a.liveCheck != nil {
+			watchURL = a.streamWatchURL(stream.TwitchYTPlatform, stream.TwitchYTChannel)
+		}
 	}
 	guest := ""
 	if pass.Name != nil {
 		guest = *pass.Name
 	}
-	a.rd.passLandingPage(w, r, title, guest)
+	a.rd.passLandingPage(w, r, title, guest, watchURL)
 }
 
 // passEnter handles POST /p/{token}/enter — the explicit device-check entry. It is the ONE

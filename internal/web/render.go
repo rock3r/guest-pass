@@ -22,6 +22,7 @@ type pageData struct {
 	Nonce           string
 	StreamTitle     string   // pass landing page only
 	GuestName       string   // pass landing page only
+	WatchURL        string   // pass landing page only — public "watch live" link if the stream linked a channel (D-29)
 	Slot            string   // OBS source page only — the opaque slot label (EN-15)
 	Host            *navHost // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
 	Nav             string   // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
@@ -126,8 +127,8 @@ func (rd *renderer) greenroom(w http.ResponseWriter, r *http.Request) {
 // passLandingPage renders the guest's magic-link landing (side-effect-free, EN-10): it
 // shows who invited them and to which stream, with an entry action that marks the pass
 // opened only on an explicit client action (the device-check, in M2).
-func (rd *renderer) passLandingPage(w http.ResponseWriter, r *http.Request, streamTitle, guestName string) {
-	rd.render(w, r, "pass.html", pageData{Title: "Your guest pass", StreamTitle: streamTitle, GuestName: guestName})
+func (rd *renderer) passLandingPage(w http.ResponseWriter, r *http.Request, streamTitle, guestName, watchURL string) {
+	rd.render(w, r, "pass.html", pageData{Title: "Your guest pass", StreamTitle: streamTitle, GuestName: guestName, WatchURL: watchURL})
 }
 
 // sourcePage renders the chromeless OBS cam source page (EN-13): a standalone, font-free,

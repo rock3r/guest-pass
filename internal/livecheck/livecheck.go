@@ -77,6 +77,28 @@ func NewChecker() *Checker {
 	}
 }
 
+// WatchURL returns the public "watch live" link for (platform, channel), or "" if the platform is
+// unknown or the channel id is invalid. Pure (no network) — used to build the guest watch link and
+// the host's linked-channel display without a live check.
+func (c *Checker) WatchURL(platform, channel string) string {
+	v, ok := c.verifiers[platform]
+	if !ok {
+		return ""
+	}
+	return v.watchURL(channel)
+}
+
+// Normalize validates + canonicalizes a (platform, channel) pair, returning ("", false) if the
+// platform is unknown or the channel id is invalid. Pure (no network) — used to validate the host's
+// channel-link input before persisting it.
+func (c *Checker) Normalize(platform, channel string) (string, bool) {
+	v, ok := c.verifiers[platform]
+	if !ok {
+		return "", false
+	}
+	return v.normalize(channel)
+}
+
 // Check returns the live status + watch link for (platform, channel). It serves a cached result
 // within the TTL and otherwise fetches fresh. An unknown platform or an invalid channel id returns
 // StatusUnavailable with no watch link and performs NO network fetch. It never returns an error —

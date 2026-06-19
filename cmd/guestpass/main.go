@@ -23,6 +23,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/buildinfo"
 	"github.com/rock3r/guest-pass/internal/config"
 	"github.com/rock3r/guest-pass/internal/jobs"
+	"github.com/rock3r/guest-pass/internal/livecheck"
 	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
@@ -215,11 +216,12 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		WSInflight:    wsInflight,
 		// STUN always (D-38); a TURN entry with a fresh ephemeral HMAC cred (EN-4) is added
 		// per peer when TURN_URL/TURN_SECRET are set.
-		ICE:     turn.NewProvider(cfg.STUNURL, cfg.TURNURL, cfg.TURNSecret),
-		Store:   st,
-		Hasher:  hasher,
-		Mailer:  mailer,
-		BaseURL: cfg.BaseURL,
-		Logger:  slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		ICE:       turn.NewProvider(cfg.STUNURL, cfg.TURNURL, cfg.TURNSecret),
+		Store:     st,
+		Hasher:    hasher,
+		Mailer:    mailer,
+		BaseURL:   cfg.BaseURL,
+		LiveCheck: livecheck.NewChecker(), // D-29 SSRF-closed live-verify (watch link + verified status)
+		Logger:    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
 }

@@ -35,10 +35,11 @@ type RouterConfig struct {
 
 	// Host API + guest magic-link page. All four must be set together to enable the
 	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
-	Store   *store.Store  // persistence for streams/passes
-	Hasher  *token.Hasher // magic-link token hashing (EN-5)
-	Mailer  mail.Mailer   // invite delivery (LogMailer in MAIL_MODE=log)
-	BaseURL string        // absolute origin used to build magic links
+	Store     *store.Store  // persistence for streams/passes
+	Hasher    *token.Hasher // magic-link token hashing (EN-5)
+	Mailer    mail.Mailer   // invite delivery (LogMailer in MAIL_MODE=log)
+	BaseURL   string        // absolute origin used to build magic links
+	LiveCheck LiveChecker   // D-29 live-verify (watch link + verified status); nil disables the channel routes
 }
 
 // NewRouter builds the GuestPass HTTP handler: strict security headers globally, the
@@ -118,8 +119,8 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// Host JSON API + guest magic-link page. Registered only when persistence and the
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
-		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth}
-		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth}
+		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck}
+		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck}
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
@@ -147,6 +148,14 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Active session's stream id + current ceiling, so the greenroom populates + targets its
 			// ceiling control (404 until Go live). Host-only.
 			hr.Get("/api/session/ceiling", api.getSessionCeiling)
+
+			// Live-verify (D-29/AC-8): the host links a Twitch channel to a stream (stream-detail
+			// form), and the greenroom polls the verified-live status (the D-24 broadcast-layer fold).
+			// Registered only when a checker is wired.
+			if cfg.LiveCheck != nil {
+				hr.Post("/app/streams/{id}/channel", app.setStreamChannel)
+				hr.Get("/api/streams/{id}/livecheck", api.livecheckStatus)
+			}
 
 			// GDPR host self-service (D-37 / §8 / AC-3..5), host-only. Export is a single JSON
 			// download; amend rectifies the display name; delete erases the account + all the host's
