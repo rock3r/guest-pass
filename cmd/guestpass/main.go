@@ -65,10 +65,11 @@ func serve(addr string) error {
 	// The hub persists suppression locks through the store (AD-22), so a force-muted guest stays
 	// muted across a restart; rooms default a nil logger to slog.Default().
 	hub := signaling.NewHub(web.NewLockPersistence(st), nil)
-	limiter := web.NewRateLimiter(5, 20)    // ~5 req/s/IP sustained, burst 20, on /auth routes
-	wsLimiter := web.NewRateLimiter(10, 40) // /ws reconnect throttle: lenient so OBS sources + tabs reattach
-	var wsInflight sync.WaitGroup           // live /ws handlers, so the drain can wait for terminate flush
-	handler, err := buildHandler(cfg, st, hub, limiter, wsLimiter, &wsInflight)
+	limiter := web.NewRateLimiter(5, 20)         // ~5 req/s/IP sustained, burst 20, on /auth routes
+	wsLimiter := web.NewRateLimiter(10, 40)      // /ws reconnect throttle: lenient so OBS sources + tabs reattach
+	inviteLimiter := web.NewRateLimiter(0.1, 30) // per-host email-send throttle (D-36): burst 30 (a full panel), ~6/min sustained
+	var wsInflight sync.WaitGroup                // live /ws handlers, so the drain can wait for terminate flush
+	handler, err := buildHandler(cfg, st, hub, limiter, wsLimiter, inviteLimiter, &wsInflight)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("building handler: %w", err)
@@ -143,6 +144,7 @@ func serve(addr string) error {
 			case <-t.C:
 				limiter.Cleanup(10 * time.Minute)
 				wsLimiter.Cleanup(10 * time.Minute)
+				inviteLimiter.Cleanup(30 * time.Minute)
 			case <-stop:
 				return
 			}
@@ -175,7 +177,7 @@ func waitTimeout(wg *sync.WaitGroup, d time.Duration) {
 // buildHandler assembles the HTTP handler from config, the store, and the hub: the JWT
 // key ring + live-DB authenticator (EN-6), the Google OAuth flow, the dev-login seam
 // (nil unless this is a dev build with AUTH_MODE=dev), and the route table.
-func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limiter, wsLimiter *web.RateLimiter, wsInflight *sync.WaitGroup) (http.Handler, error) {
+func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limiter, wsLimiter, inviteLimiter *web.RateLimiter, wsInflight *sync.WaitGroup) (http.Handler, error) {
 	ring, err := auth.NewKeyRing(cfg.JWTSecret, cfg.JWTSecretPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("building key ring: %w", err)
@@ -213,6 +215,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		StaticDir:     "web/dist",
 		RateLimiter:   limiter,
 		WSRateLimiter: wsLimiter,
+		InviteLimiter: inviteLimiter,
 		WSInflight:    wsInflight,
 		// STUN always (D-38); a TURN entry with a fresh ephemeral HMAC cred (EN-4) is added
 		// per peer when TURN_URL/TURN_SECRET are set.
@@ -222,6 +225,14 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		Mailer:    mailer,
 		BaseURL:   cfg.BaseURL,
 		LiveCheck: livecheck.NewChecker(), // D-29 SSRF-closed live-verify (watch link + verified status)
-		Logger:    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		// D-36 progressive-trust per-host invite/stream quotas (tightest for new accounts).
+		Trust: auth.TrustPolicy{
+			TrustAfter:     cfg.RateTrustAfter,
+			NewInvites:     cfg.RateNewInvites,
+			TrustedInvites: cfg.RateTrustedInvites,
+			NewStreams:     cfg.RateNewStreams,
+			TrustedStreams: cfg.RateTrustedStreams,
+		},
+		Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
 }

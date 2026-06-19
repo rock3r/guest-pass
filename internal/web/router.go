@@ -29,17 +29,19 @@ type RouterConfig struct {
 	StaticDir     string              // built frontend assets (web/dist), served at /static
 	RateLimiter   *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
 	WSRateLimiter *RateLimiter        // per-IP limiter applied to /ws (reconnect throttle); nil disables
+	InviteLimiter *RateLimiter        // per-HOST send-rate limiter on the email-sending routes (D-36); nil disables
 	WSInflight    *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
 	ICE           ICEConfigurer       // per-peer ICE join-ack provider (AD-14); nil = no ICE servers offered
 	Logger        *slog.Logger        // structured logger for the WS path; nil uses slog.Default()
 
 	// Host API + guest magic-link page. All four must be set together to enable the
 	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
-	Store     *store.Store  // persistence for streams/passes
-	Hasher    *token.Hasher // magic-link token hashing (EN-5)
-	Mailer    mail.Mailer   // invite delivery (LogMailer in MAIL_MODE=log)
-	BaseURL   string        // absolute origin used to build magic links
-	LiveCheck LiveChecker   // D-29 live-verify (watch link + verified status); nil disables the channel routes
+	Store     *store.Store     // persistence for streams/passes
+	Hasher    *token.Hasher    // magic-link token hashing (EN-5)
+	Mailer    mail.Mailer      // invite delivery (LogMailer in MAIL_MODE=log)
+	BaseURL   string           // absolute origin used to build magic links
+	LiveCheck LiveChecker      // D-29 live-verify (watch link + verified status); nil disables the channel routes
+	Trust     auth.TrustPolicy // D-36 progressive-trust per-host invite/stream quotas; zero value disables them
 }
 
 // NewRouter builds the GuestPass HTTP handler: strict security headers globally, the
@@ -119,8 +121,21 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// Host JSON API + guest magic-link page. Registered only when persistence and the
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
-		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck}
-		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck}
+		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck, trust: cfg.Trust}
+		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck, trust: cfg.Trust}
+
+		// inviteThrottle bounds the RATE of the email-sending host actions per HOST (D-36 §7.9): the
+		// per-window quota caps distinct invites, but re-issue re-sends to an existing address without
+		// growing that count, so a send-rate limit is what bounds re-send volume. No-op when unset.
+		inviteThrottle := func(next http.Handler) http.Handler { return next }
+		if cfg.InviteLimiter != nil {
+			inviteThrottle = cfg.InviteLimiter.Middleware(func(r *http.Request) string {
+				if h, ok := auth.HostFromContext(r.Context()); ok {
+					return "invite:" + h.ID
+				}
+				return "invite:anon"
+			})
+		}
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
@@ -129,7 +144,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Get("/api/streams/{id}", api.getStream)
 			hr.Delete("/api/streams/{id}", api.deleteStream)
 			hr.Get("/api/streams/{id}/passes", api.listPasses)
-			hr.Post("/api/streams/{id}/passes", api.createPass)
+			hr.With(inviteThrottle).Post("/api/streams/{id}/passes", api.createPass)
 			// Live slot↔guest (re)bind from the greenroom People controls (D-20): persist +
 			// re-route /s/{slot} with no OBS edit (EN-3). Host-only (RequireHost), RF-2.
 			hr.Put("/api/passes/{id}/slot", api.putPassSlot)
@@ -191,9 +206,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Post("/app/streams/{id}/session/end", app.endSession)
 			// Invites tab (EN-23): guest list + invite form (name/email/role only) +
 			// inline role edit + re-issue + revoke. No live production controls here.
-			hr.Post("/app/streams/{id}/passes", app.createInvite)
+			hr.With(inviteThrottle).Post("/app/streams/{id}/passes", app.createInvite)
 			hr.Post("/app/streams/{id}/passes/{pid}/role", app.setInviteRole)
-			hr.Post("/app/streams/{id}/passes/{pid}/reissue", app.reissueInvite)
+			hr.With(inviteThrottle).Post("/app/streams/{id}/passes/{pid}/reissue", app.reissueInvite)
 			hr.Post("/app/streams/{id}/passes/{pid}/revoke", app.revokeInvite)
 		})
 

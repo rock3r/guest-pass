@@ -65,6 +65,25 @@ type apiHarness struct {
 }
 
 func newAPIHarness(t *testing.T) *apiHarness {
+	return buildAPIHarness(t, auth.TrustPolicy{}, NewRateLimiter(1000, 1000), nil)
+}
+
+// newAPIHarnessTrust builds a harness with the progressive-trust quotas enabled (D-36).
+func newAPIHarnessTrust(t *testing.T, trust auth.TrustPolicy) *apiHarness {
+	return buildAPIHarness(t, trust, NewRateLimiter(1000, 1000), nil)
+}
+
+// newAPIHarnessRL builds a harness with a specific per-IP rate limiter (token-scanning throttle).
+func newAPIHarnessRL(t *testing.T, rl *RateLimiter) *apiHarness {
+	return buildAPIHarness(t, auth.TrustPolicy{}, rl, nil)
+}
+
+// newAPIHarnessInviteLimiter builds a harness with a per-host invite send-rate limiter (D-36).
+func newAPIHarnessInviteLimiter(t *testing.T, invite *RateLimiter) *apiHarness {
+	return buildAPIHarness(t, auth.TrustPolicy{}, NewRateLimiter(1000, 1000), invite)
+}
+
+func buildAPIHarness(t *testing.T, trust auth.TrustPolicy, rl, invite *RateLimiter) *apiHarness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "api.db")
 	st, err := store.Open(context.Background(), path)
@@ -87,15 +106,17 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	hub := signaling.NewHub(nil, nil)
 
 	h, err := NewRouter(RouterConfig{
-		SourceURL:   testSourceURL,
-		Hub:         hub,
-		Auth:        authn,
-		Store:       st,
-		Hasher:      hasher,
-		Mailer:      mailer,
-		BaseURL:     apiTestBaseURL,
-		LiveCheck:   live,
-		RateLimiter: NewRateLimiter(1000, 1000),
+		SourceURL:     testSourceURL,
+		Hub:           hub,
+		Auth:          authn,
+		Store:         st,
+		Hasher:        hasher,
+		Mailer:        mailer,
+		BaseURL:       apiTestBaseURL,
+		LiveCheck:     live,
+		Trust:         trust,
+		RateLimiter:   rl,
+		InviteLimiter: invite,
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

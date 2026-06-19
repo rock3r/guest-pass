@@ -1163,3 +1163,77 @@ func mkReport(t *testing.T, st *Store, hostID string) *Report {
 	}
 	return r
 }
+
+// CountInvitesSentByHost counts only sent invites within the window, across the host's streams.
+func TestQuotaRepo_CountInvitesSentByHost(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "quota-host")
+	other := seedHost(t, st, "quota-other")
+	s1, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S1"})
+	s2, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "S2"})
+	oStream, _ := st.CreateStream(ctx, CreateStreamParams{HostID: other.ID, Title: "O"})
+
+	now := int64(2_000_000_000)
+	// Two sent invites in-window across the host's two streams, one old (out of window), one never-sent,
+	// and one belonging to another host.
+	mkSentPass(t, st, s1.ID, now-100)
+	mkSentPass(t, st, s2.ID, now-200)
+	mkSentPass(t, st, s1.ID, now-100000) // old
+	mkPass(t, st, s1.ID)                 // created, never sent
+	mkSentPass(t, st, oStream.ID, now-50)
+
+	n, err := st.CountInvitesSentByHost(ctx, h.ID, now-1000)
+	if err != nil {
+		t.Fatalf("CountInvitesSentByHost: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("in-window sent invites = %d, want 2 (old/never-sent/other-host excluded)", n)
+	}
+}
+
+func TestQuotaRepo_CountStreamsByHost(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "count-host")
+	other := seedHost(t, st, "count-other")
+	st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "A"})
+	st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "B"})
+	st.CreateStream(ctx, CreateStreamParams{HostID: other.ID, Title: "C"})
+	n, err := st.CountStreamsByHost(ctx, h.ID)
+	if err != nil || n != 2 {
+		t.Fatalf("CountStreamsByHost = (%d,%v), want (2,nil)", n, err)
+	}
+}
+
+func mkPass(t *testing.T, st *Store, streamID string) *Pass {
+	t.Helper()
+	email := "g@example.com"
+	raw := "rawtok-" + streamID + "-" + randSuffix(t)
+	p, err := st.CreatePass(context.Background(), CreatePassParams{
+		StreamID: streamID, Email: &email, Role: RoleGuest, TokenHash: "hash-" + raw,
+	})
+	if err != nil {
+		t.Fatalf("mkPass: %v", err)
+	}
+	return p
+}
+
+func mkSentPass(t *testing.T, st *Store, streamID string, sentAt int64) *Pass {
+	t.Helper()
+	p := mkPass(t, st, streamID)
+	if _, err := st.writer.ExecContext(context.Background(),
+		"UPDATE passes SET status = 'sent', sent_at = ? WHERE id = ?", sentAt, p.ID); err != nil {
+		t.Fatalf("mark sent: %v", err)
+	}
+	return p
+}
+
+func randSuffix(t *testing.T) string {
+	t.Helper()
+	id, err := newID()
+	if err != nil {
+		t.Fatalf("newID: %v", err)
+	}
+	return id
+}

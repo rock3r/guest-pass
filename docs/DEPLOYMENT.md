@@ -111,6 +111,11 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `REPORT_RETENTION` | optional | — | How long an abuse report's identifying content (reporter email + message) is kept before the retention sweep anonymizes it to NULL — the D-42 review window (§8, D-37). A Go duration; **defaults to `720h` (30d)**. Must be **positive** — a zero/negative value refuses to boot. The anonymous `host_id`/`category`/`time` signal is kept. |
 | `REAP_INTERVAL` | optional | — | How often the in-binary idle-session reaper polls active sessions (§8, D-40). A Go duration; **defaults to `1m`**. Must be **positive** — a zero/negative value refuses to boot. |
 | `REAP_IDLE_AFTER` | optional | — | How long a live session may have **zero connected participants** before the reaper auto-ends it (§8, D-40), freeing the one-live-session-per-host slot and making its guest PII purge-eligible. A Go duration; **defaults to `15m`** — generous so a host's transient drop/reconnect is never reaped. Must be **positive**. |
+| `RATE_TRUST_AFTER` | optional | — | Account age at which a host graduates from the new tier to the looser trusted tier for the progressive-trust quotas (§5, D-36). A Go duration; **defaults to `168h` (7d)**. Must be **positive**. |
+| `RATE_NEW_INVITES` | optional | — | Max invite emails a **new** host may send per rolling 24h (§5, D-36). A positive integer; **defaults to `10`**. A non-positive value refuses to boot — to disable the cap effectively, set a very high number. |
+| `RATE_TRUSTED_INVITES` | optional | — | Same cap for a **trusted** (aged past `RATE_TRUST_AFTER`) host. A positive integer; **defaults to `100`**. Must be **positive**. |
+| `RATE_NEW_STREAMS` | optional | — | Max existing streams a **new** host may have at once (§5, D-36). A positive integer; **defaults to `3`**. Must be **positive**. |
+| `RATE_TRUSTED_STREAMS` | optional | — | Same cap for a **trusted** host. A positive integer; **defaults to `50`**. Must be **positive**. |
 
 ¹ `TURN_SECRET` is unrequired when STUN-only (no TURN), but **fail-closed-critical
 whenever TURN is enabled**. Together with `JWT_SECRET` it is the fail-closed pair
@@ -151,12 +156,16 @@ spam and deliverability-reputation risk. These guards are **mandatory** on a
 public instance; self-hosters inherit the same machinery but run it slack
 (`allowlist` / `approval`).
 
-- **Progressive trust:** new hosts get small invite / email / concurrent-stream
-  quotas that grow with account age + good standing; tightest for new accounts;
-  templated/limited email content. (TURN quota is moot on the public instance —
-  STUN-only, no operator relay, D-38.)
-  > OPEN: the exact starting quota numbers and growth curve are "tuned at
-  > launch" (D-42) — not fixed in the frozen design.
+- **Progressive trust (M5):** per-host invite (= email) and concurrent-stream
+  quotas, tightest for new accounts and looser once the account ages past
+  `RATE_TRUST_AFTER`. Enforced server-side at invite + stream creation; a host over
+  quota is refused (the per-IP limiter, abuse reporting, and suspend remain as
+  backstops). Config-backed with safe defaults (see §8 `RATE_*`); a non-positive
+  value refuses to boot, so the limit can't be silently disabled — to loosen, raise
+  the number. (TURN quota is moot on the public instance — STUN-only, D-38.)
+  > The starting numbers (10/100 invites per 24h, 3/50 streams, 7-day trust age)
+  > are defaults "tuned at launch" (D-42); the two-tier (new vs trusted) curve is
+  > deliberately simple for v1.
 - **Email hardening (mandatory):** **SPF / DKIM / DMARC** on `guest-pass.link`,
   a `List-Unsubscribe` header on invites, and tight per-host invite rate limits.
 - **Abuse reporting (D-42, EN-24):** every invite email **and** the guest pass

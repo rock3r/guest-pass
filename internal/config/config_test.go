@@ -439,6 +439,36 @@ func TestLoad_ReapDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoad_TrustDefaultsAndOverrides(t *testing.T) {
+	c, err := envLoad(validEnv())
+	if err != nil {
+		t.Fatalf("default load: %v", err)
+	}
+	if c.RateTrustAfter != defaultRateTrustAfter {
+		t.Errorf("default RateTrustAfter = %v, want %v", c.RateTrustAfter, defaultRateTrustAfter)
+	}
+	if c.RateNewInvites != defaultRateNewInvites || c.RateTrustedInvites != defaultRateTrustedInvites {
+		t.Errorf("default invite quotas = (%d,%d), want (%d,%d)", c.RateNewInvites, c.RateTrustedInvites, defaultRateNewInvites, defaultRateTrustedInvites)
+	}
+	if c.RateNewStreams != defaultRateNewStreams || c.RateTrustedStreams != defaultRateTrustedStreams {
+		t.Errorf("default stream quotas = (%d,%d), want (%d,%d)", c.RateNewStreams, c.RateTrustedStreams, defaultRateNewStreams, defaultRateTrustedStreams)
+	}
+
+	env := validEnv()
+	env["RATE_TRUST_AFTER"] = "72h"
+	env["RATE_NEW_INVITES"] = "5"
+	env["RATE_TRUSTED_INVITES"] = "200"
+	env["RATE_NEW_STREAMS"] = "2"
+	env["RATE_TRUSTED_STREAMS"] = "99"
+	c, err = envLoad(env)
+	if err != nil {
+		t.Fatalf("override load: %v", err)
+	}
+	if c.RateTrustAfter != 72*time.Hour || c.RateNewInvites != 5 || c.RateTrustedInvites != 200 || c.RateNewStreams != 2 || c.RateTrustedStreams != 99 {
+		t.Fatalf("trust overrides not applied: %+v", c)
+	}
+}
+
 func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
 	cases := []struct{ name, key, val string }{
 		{"unparseable interval", "PURGE_INTERVAL", "soon"},
@@ -449,6 +479,15 @@ func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
 		{"unparseable reap interval", "REAP_INTERVAL", "soon"},
 		{"zero reap interval", "REAP_INTERVAL", "0"},
 		{"negative reap idle", "REAP_IDLE_AFTER", "-1m"},
+		// Progressive-trust quotas (D-36) fail safe: a non-positive / unparseable value refuses to boot
+		// rather than silently disabling the limit.
+		{"unparseable trust age", "RATE_TRUST_AFTER", "soon"},
+		{"zero trust age", "RATE_TRUST_AFTER", "0"},
+		{"zero new invites", "RATE_NEW_INVITES", "0"},
+		{"negative new invites", "RATE_NEW_INVITES", "-1"},
+		{"unparseable trusted invites", "RATE_TRUSTED_INVITES", "lots"},
+		{"zero new streams", "RATE_NEW_STREAMS", "0"},
+		{"negative trusted streams", "RATE_TRUSTED_STREAMS", "-5"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
