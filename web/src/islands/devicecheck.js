@@ -141,6 +141,10 @@ function DeviceCheck() {
   // can't go live mid-switch, which makes the device they just chose the one actually published
   // (and is the user-facing half of the switch-vs-enter guard; enteringRef is the code backstop).
   const [switching, setSwitching] = useState(false);
+  // Set when a device switch fails (the chosen device was unplugged/busy) but a working preview is
+  // still live: we keep that preview and show an inline notice rather than dropping to the error
+  // screen with the old camera/mic running behind it. Cleared on the next switch attempt.
+  const [switchError, setSwitchError] = useState(false);
   const camIdRef = useRef("");
   const micIdRef = useRef("");
   // Set the instant entry begins, so a device switch still acquiring when the guest hits Enter does
@@ -338,6 +342,7 @@ function DeviceCheck() {
       setMicId(id);
       storeDevice(MIC_KEY, id);
     }
+    setSwitchError(false); // clear any prior failed-switch notice on a fresh attempt
     requestingRef.current = true;
     setSwitching(true); // hold Enter + the dropdowns until the new device is live (honour the pick)
     try {
@@ -357,8 +362,18 @@ function DeviceCheck() {
       syncSelectedFromTracks(stream);
       await refreshDevices();
     } catch (e) {
-      setError((e && /** @type {Error} */ (e).name) || String(e));
-      setPhase("error");
+      // The chosen device couldn't be acquired (unplugged/busy). If a working preview is still live,
+      // STAY on it: roll the picker + storage back to the device that stream uses and show an inline
+      // notice — never drop to the error screen with the old camera/mic still running behind it. Only
+      // fall back to the full error screen when there is no live stream to keep (defensive; switchDevice
+      // runs from preview, so there normally is one).
+      if (!cancelledRef.current && streamRef.current) {
+        syncSelectedFromTracks(streamRef.current);
+        setSwitchError(true);
+      } else {
+        setError((e && /** @type {Error} */ (e).name) || String(e));
+        setPhase("error");
+      }
     } finally {
       requestingRef.current = false;
       setSwitching(false);
@@ -1160,6 +1175,11 @@ function DeviceCheck() {
             </select>
           </label>
         </div>
+        {switchError ? (
+          <p class="dc-switch-error" role="status">
+            Couldn't switch to that device — staying on your current one.
+          </p>
+        ) : null}
         <p>This is your camera preview. Only you can see it until you enter.</p>
         <button type="button" class="dc-enter" disabled={phase === "entering" || switching} onClick={enter}>
           {switching ? "Switching device…" : phase === "entering" ? "Entering…" : "Enter the greenroom"}

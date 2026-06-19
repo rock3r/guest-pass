@@ -547,6 +547,85 @@ func TestDeviceCheck_EnterHeldDuringSwitchPublishesChosenDevice(t *testing.T) {
 	})
 }
 
+// A device switch whose getUserMedia fails (unplugged / busy device) must not strand the guest on
+// the error screen with the prior camera/mic still running behind it. The working preview stays
+// live, the picker rolls back to the device actually in use, and a notice explains the no-op.
+func TestDeviceCheck_SwitchFailureKeepsPreviewAndRollsBack(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview did not render: %v", err)
+		}
+
+		// Remember the live mic + hold a ref to the working audio track, then make the NEXT acquire
+		// (the switch) fail with a non-overconstrained error so getStream rethrows.
+		var origMic, targetMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`document.querySelector('.dc-mic-select').value`, &origMic),
+			chromedp.Evaluate(`(() => { window.__a = document.querySelector('.dc-video').srcObject.getAudioTracks()[0]; return true; })()`, nil),
+			chromedp.Evaluate(`(() => {
+				const md = navigator.mediaDevices;
+				const orig = md.getUserMedia.bind(md);
+				md.getUserMedia = (c) => { md.getUserMedia = orig; return Promise.reject(new DOMException("busy", "NotReadableError")); };
+				return true;
+			})()`, nil),
+			chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('.dc-mic-select');
+				const cur = sel.value;
+				return [...sel.options].map((o) => o.value).find((v) => v && v !== cur) || "";
+			})()`, &targetMic),
+		); err != nil {
+			t.Fatalf("setup failing switch: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone")
+		}
+
+		// Pick the (doomed) device; the switch fails.
+		pick := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(pick, nil),
+			// The failure surfaces a notice and KEEPS the preview — it must not drop to the error screen.
+			chromedp.WaitVisible(`.dc-switch-error`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("a failed switch must keep the preview and show a notice, not the error screen: %v", err)
+		}
+
+		var hasError, hasVideo bool
+		var micNow, trackState string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`!!document.querySelector('.dc-error')`, &hasError),
+			chromedp.Evaluate(`!!document.querySelector('.dc-video')`, &hasVideo),
+			chromedp.Evaluate(`document.querySelector('.dc-mic-select').value`, &micNow),
+			chromedp.Evaluate(`window.__a.readyState`, &trackState),
+		); err != nil {
+			t.Fatalf("read post-failure state: %v", err)
+		}
+		if hasError || !hasVideo {
+			t.Fatalf("a failed switch must stay in preview: errorScreen=%v videoPresent=%v", hasError, hasVideo)
+		}
+		if trackState != "live" {
+			t.Fatalf("the working preview stream must stay live after a failed switch, got %q", trackState)
+		}
+		if micNow != origMic || micNow == targetMic {
+			t.Fatalf("the failed pick must roll back to the working device: now=%q orig=%q failed=%q", micNow, origMic, targetMic)
+		}
+	})
+}
+
 // A failed entry must not leave the camera running behind the error UI: the preview track is
 // released even when the entry POST fails (here forced by retiring the pass server-side).
 func TestDeviceCheck_EntryFailureReleasesCamera(t *testing.T) {
