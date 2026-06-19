@@ -137,6 +137,10 @@ function DeviceCheck() {
   );
   const [camId, setCamId] = useState("");
   const [micId, setMicId] = useState("");
+  // True while a device switch is re-acquiring: it holds Enter + the dropdowns disabled so the guest
+  // can't go live mid-switch, which makes the device they just chose the one actually published
+  // (and is the user-facing half of the switch-vs-enter guard; enteringRef is the code backstop).
+  const [switching, setSwitching] = useState(false);
   const camIdRef = useRef("");
   const micIdRef = useRef("");
   // Set the instant entry begins, so a device switch still acquiring when the guest hits Enter does
@@ -335,14 +339,18 @@ function DeviceCheck() {
       storeDevice(MIC_KEY, id);
     }
     requestingRef.current = true;
+    setSwitching(true); // hold Enter + the dropdowns until the new device is live (honour the pick)
     try {
       const stream = await getStream();
       // The guest hit Enter (or the island unmounted) while we were acquiring: the publisher has
       // already taken the prior stream live, so installing this one would stop the published tracks
-      // (dead air). Release the just-captured stream and leave the live one untouched. The pick is
-      // still saved (storeDevice above), so the next session honours it.
+      // (dead air). Release the just-captured stream and leave the live one untouched. We optimistically
+      // moved the picker + storage to the new device at the top, so resync them back to the device the
+      // KEPT stream actually uses — otherwise the persisted pick (and the dropdown after a network retry)
+      // would name a device the live stream isn't using. Skip on unmount (no state to touch).
       if (cancelledRef.current || enteringRef.current) {
         stream.getTracks().forEach((t) => t.stop());
+        if (!cancelledRef.current && streamRef.current) syncSelectedFromTracks(streamRef.current);
         return;
       }
       installStream(stream); // stops the prior capture once the new device is live (no black flash)
@@ -353,6 +361,7 @@ function DeviceCheck() {
       setPhase("error");
     } finally {
       requestingRef.current = false;
+      setSwitching(false);
     }
   }
 
@@ -1123,7 +1132,7 @@ function DeviceCheck() {
             <select
               class="dc-device-select dc-cam-select"
               value={camId}
-              disabled={phase === "entering"}
+              disabled={phase === "entering" || switching}
               onChange={(e) => switchDevice("cam", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
             >
               {devices.cams.length === 0 ? <option value="">Default camera</option> : null}
@@ -1139,7 +1148,7 @@ function DeviceCheck() {
             <select
               class="dc-device-select dc-mic-select"
               value={micId}
-              disabled={phase === "entering"}
+              disabled={phase === "entering" || switching}
               onChange={(e) => switchDevice("mic", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
             >
               {devices.mics.length === 0 ? <option value="">Default microphone</option> : null}
@@ -1152,8 +1161,8 @@ function DeviceCheck() {
           </label>
         </div>
         <p>This is your camera preview. Only you can see it until you enter.</p>
-        <button type="button" class="dc-enter" disabled={phase === "entering"} onClick={enter}>
-          {phase === "entering" ? "Entering…" : "Enter the greenroom"}
+        <button type="button" class="dc-enter" disabled={phase === "entering" || switching} onClick={enter}>
+          {switching ? "Switching device…" : phase === "entering" ? "Entering…" : "Enter the greenroom"}
         </button>
       </div>
     );
