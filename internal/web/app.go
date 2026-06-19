@@ -74,7 +74,7 @@ func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	s.rd.render(w, r, "settings.html", pageData{
-		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name},
+		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: settingsData{
 			Name:         host.Name,
 			Email:        host.Email,
@@ -120,7 +120,7 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	s.rd.render(w, r, "dashboard.html", pageData{
-		Title: "Your streams", Nav: "dashboard", Host: &navHost{Name: host.Name},
+		Title: "Your streams", Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: dashboardData{Streams: rows},
 	})
 }
@@ -154,7 +154,7 @@ func (s *appServer) editStreamForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.rd.render(w, r, "streamedit.html", pageData{
-		Title: "Edit stream", Nav: "dashboard", Host: &navHost{Name: host.Name},
+		Title: "Edit stream", Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: streamFormData{
 			ID:          st.ID,
 			Title:       st.Title,

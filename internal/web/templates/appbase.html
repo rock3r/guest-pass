@@ -13,6 +13,7 @@
 <a href="/app"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
 <a href="/app/calendar"{{if eq .Nav "calendar"}} aria-current="page"{{end}}>Calendar</a>
 <a href="/app/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}>Settings</a>
+{{if and .Host .Host.IsAdmin}}<a href="/admin"{{if eq .Nav "admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
 </nav>
 <div class="app-account">
 {{if .Host}}<span class="app-host">{{.Host.Name}}</span>{{end}}

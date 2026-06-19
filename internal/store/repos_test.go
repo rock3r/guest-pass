@@ -987,3 +987,75 @@ func TestStreamRepo_SetStreamChannel(t *testing.T) {
 		t.Fatalf("SetStreamChannel(missing) = %v, want ErrNotFound", err)
 	}
 }
+
+// ListHosts returns every host newest-first (admin hosts list, AC-9).
+func TestAdminRepo_ListHosts(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	a := seedHost(t, st, "admin-sub")
+	b := seedHost(t, st, "host-b-sub")
+	hosts, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListHosts: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("ListHosts len = %d, want 2", len(hosts))
+	}
+	got := map[string]bool{hosts[0].ID: true, hosts[1].ID: true}
+	if !got[a.ID] || !got[b.ID] {
+		t.Fatalf("ListHosts missing a seeded host: %+v", hosts)
+	}
+}
+
+// ListActiveSessions returns only live sessions, cross-host, with identifying metadata — and never
+// touches passes/peers (no guest PII path, §7.7 / AC-9).
+func TestAdminRepo_ListActiveSessions(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	hostA := seedHost(t, st, "sess-a")
+	hostB := seedHost(t, st, "sess-b")
+	sA, _ := st.CreateStream(ctx, CreateStreamParams{HostID: hostA.ID, Title: "Show A"})
+	sB, _ := st.CreateStream(ctx, CreateStreamParams{HostID: hostB.ID, Title: "Show B"})
+
+	if _, err := st.StartSession(ctx, sA.ID, hostA.ID); err != nil {
+		t.Fatalf("StartSession A: %v", err)
+	}
+	sessB, err := st.StartSession(ctx, sB.ID, hostB.ID)
+	if err != nil {
+		t.Fatalf("StartSession B: %v", err)
+	}
+	// End B's session — it must drop out of the active list.
+	if err := st.EndActiveSession(ctx, hostB.ID); err != nil {
+		t.Fatalf("EndActiveSession B: %v", err)
+	}
+	_ = sessB
+
+	active, err := st.ListActiveSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveSessions: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active sessions = %d, want 1 (only A live)", len(active))
+	}
+	got := active[0]
+	if got.HostID != hostA.ID || got.StreamID != sA.ID || got.StreamTitle != "Show A" || got.HostName != hostA.Name {
+		t.Fatalf("active session metadata = %+v, want host A / Show A", got)
+	}
+	if got.StartedAt == 0 {
+		t.Fatalf("active session missing started_at: %+v", got)
+	}
+}
+
+// TurnRelayStats returns the anonymous (total, relayed) peer aggregate; with no recorded peers it is
+// (0, 0) so the caller renders the percentage as unavailable rather than dividing by zero (AC-9).
+func TestAdminRepo_TurnRelayStats_EmptyIsZero(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	total, relayed, err := st.TurnRelayStats(ctx)
+	if err != nil {
+		t.Fatalf("TurnRelayStats: %v", err)
+	}
+	if total != 0 || relayed != 0 {
+		t.Fatalf("TurnRelayStats on empty = (%d,%d), want (0,0)", total, relayed)
+	}
+}

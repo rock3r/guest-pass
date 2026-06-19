@@ -98,7 +98,7 @@ func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
 	}
 	live, otherLive := s.sessionState(r.Context(), host.ID, st.ID)
 	s.rd.render(w, r, "streamdetail.html", pageData{
-		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name},
+		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: detailData{
 			StreamID: st.ID, StreamTitle: st.Title, Tab: "sources",
 			Slots: cards, RevealAll: strings.Join(revealLines, "\n"), HasReveal: len(revealLines) > 0,

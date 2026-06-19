@@ -197,6 +197,19 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			hr.Post("/app/streams/{id}/passes/{pid}/revoke", app.revokeInvite)
 		})
 
+		// Admin console (AC-9 / D-14): read-only, metadata-only cross-host visibility. Mounted behind
+		// RequireAdmin (RequireHost + live is_admin, EN-6). The §7.7 privacy boundary is structural —
+		// these handlers read only host/session/stream metadata + in-memory participant counts, never
+		// passes (guest PII) and never a foreign room's media/chat. Mutating actions land in PR-8.
+		admin := &adminServer{store: cfg.Store, hub: cfg.Hub, rd: rd}
+		r.Group(func(adr chi.Router) {
+			adr.Use(cfg.Auth.RequireAdmin)
+			adr.Get("/admin", admin.adminConsole)
+			adr.Get("/api/admin/stats", admin.statsJSON)
+			adr.Get("/api/admin/sessions", admin.sessionsJSON)
+			adr.Get("/api/admin/hosts", admin.hostsJSON)
+		})
+
 		// Public guest landing + device-check entry. Rate-limited (when configured) to blunt
 		// token scanning; GET is side-effect-free, the explicit POST /enter marks opened (EN-10).
 		r.Group(func(pr chi.Router) {
