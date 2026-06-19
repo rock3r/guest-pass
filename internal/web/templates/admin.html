@@ -1,0 +1,54 @@
+{{define "content"}}
+<section class="admin">
+<h1>Admin console</h1>
+<p class="admin-intro">Read-only, metadata only. This console shows who is live and the hosts on this
+instance — never any guest's name, email, video, audio, or backstage chat.</p>
+
+{{/* Stats: live sessions + connected participants + the anonymous TURN-relay aggregate (AC-9). */}}
+<section class="admin-stats" aria-label="Live metrics">
+<div class="admin-stat"><span class="admin-stat-num" data-stat="live-sessions">{{.Data.LiveSessions}}</span><span class="admin-stat-label">Live sessions</span></div>
+<div class="admin-stat"><span class="admin-stat-num" data-stat="live-peers">{{.Data.LivePeers}}</span><span class="admin-stat-label">Connected participants</span></div>
+<div class="admin-stat"><span class="admin-stat-num" data-stat="relay">{{.Data.RelayLabel}}</span><span class="admin-stat-label">TURN-relay share</span></div>
+</section>
+
+<section class="admin-sessions">
+<h2>Live sessions</h2>
+{{if .Data.Sessions}}
+<table class="admin-table">
+<thead><tr><th>Host</th><th>Email</th><th>Stream</th><th>Started</th><th>Participants</th></tr></thead>
+<tbody>
+{{range .Data.Sessions}}
+<tr>
+<td>{{.HostName}}</td>
+<td>{{.HostEmail}}</td>
+<td>{{.StreamTitle}}</td>
+<td>{{.Started}}</td>
+<td>{{.Participants}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="admin-empty">No live sessions right now.</p>
+{{end}}
+</section>
+
+<section class="admin-hosts">
+<h2>Hosts</h2>
+<table class="admin-table">
+<thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Role</th><th>Joined</th></tr></thead>
+<tbody>
+{{range .Data.Hosts}}
+<tr>
+<td>{{.Name}}</td>
+<td>{{.Email}}</td>
+<td><span class="admin-status status-{{.Status}}">{{.Status}}</span></td>
+<td>{{if .IsAdmin}}admin{{else}}host{{end}}</td>
+<td>{{.Created}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</section>
+</section>
+{{end}}

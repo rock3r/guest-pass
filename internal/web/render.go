@@ -33,7 +33,8 @@ type pageData struct {
 // carries only the display name the host chose at Google sign-in — never the email or any
 // token (EN-16/D-37).
 type navHost struct {
-	Name string
+	Name    string
+	IsAdmin bool // shows the admin-console nav link (D-14); admin is a host flag, not a separate identity
 }
 
 // renderer holds the parsed page templates and the per-build constants injected into
@@ -57,7 +58,7 @@ var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.
 // public pages do not carry. Each also defines a "content" template; parsed in their own
 // template.Template instances so "base" can mean appbase.html here and base.html there
 // with no name clash.
-var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html", "streamdetail.html", "settings.html"}
+var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html", "streamdetail.html", "settings.html", "admin.html"}
 
 // newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
 // manifest carries the SRI hashes (nil/empty in tests); devLogin toggles dev sign-in.

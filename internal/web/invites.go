@@ -124,7 +124,7 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 	d.ChannelCleared = q.Get("channel") == "cleared"
 	d.ChannelError = q.Get("error") == "channel"
 	s.rd.render(w, r, "streamdetail.html", pageData{
-		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name},
+		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: d,
 	})
 }

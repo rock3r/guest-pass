@@ -102,16 +102,31 @@ func (s *Store) updateHostColumn(ctx context.Context, id, column string, value a
 
 const hostSelect = `SELECT id, google_sub, email, name, picture, is_admin, status, created_at FROM hosts`
 
-func scanHost(row *sql.Row) (*Host, error) {
+func scanHostFrom(sc interface{ Scan(...any) error }) (*Host, error) {
 	var h Host
 	var isAdmin int64
-	err := row.Scan(&h.ID, &h.GoogleSub, &h.Email, &h.Name, &h.Picture, &isAdmin, &h.Status, &h.CreatedAt)
+	if err := sc.Scan(&h.ID, &h.GoogleSub, &h.Email, &h.Name, &h.Picture, &isAdmin, &h.Status, &h.CreatedAt); err != nil {
+		return nil, err
+	}
+	h.IsAdmin = isAdmin != 0
+	return &h, nil
+}
+
+func scanHost(row *sql.Row) (*Host, error) {
+	h, err := scanHostFrom(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scanning host: %w", err)
 	}
-	h.IsAdmin = isAdmin != 0
-	return &h, nil
+	return h, nil
+}
+
+func scanHostRows(rows *sql.Rows) (*Host, error) {
+	h, err := scanHostFrom(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scanning host: %w", err)
+	}
+	return h, nil
 }

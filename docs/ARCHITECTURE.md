@@ -1398,6 +1398,19 @@ backstage media or chat**. Enforced as tests:
 - **The chat relay path has no DB or file writer in scope** — backstage chat is
   relay-only, structurally unpersistable (EN-20).
 
+**Console wiring (M5 PR-7, read-only).** The console is a host-app page at `/admin`
+plus three JSON endpoints (`GET /api/admin/stats|sessions|hosts`), all mounted behind
+`RequireAdmin` (RequireHost + live `is_admin`, EN-6). It surfaces, **metadata only**:
+cross-host live sessions (owning host + stream title + start time + the in-memory
+participant count from the signaling hub), the anonymous TURN-relay aggregate
+(`peers.used_turn`; rendered `n/a` until per-connection recording lands), and the hosts
+list (identity + status + role — never `google_sub`). The handlers read only
+host/session/stream rows — never `passes` (guest PII) and never a room's media/chat — so
+the privacy boundary above holds by construction; a `web` test seeds a foreign live
+session with a PII-bearing guest and asserts no admin surface leaks that guest's name,
+email, or pass token. The mutating actions (approve / suspend + cascade / promote) land
+in PR-8.
+
 ### 24h purge (D-37)
 
 Guest PII (`passes.name` / `passes.email`) is **deleted within 24h of stream end** by
