@@ -1,8 +1,11 @@
 {{define "content"}}
 <section class="admin">
 <h1>Admin console</h1>
-<p class="admin-intro">Read-only, metadata only. This console shows who is live and the hosts on this
-instance — never any guest's name, email, video, audio, or backstage chat.</p>
+<p class="admin-intro">Manage hosts and see who is live — metadata only. This console never shows any
+guest's name, email, video, audio, or backstage chat.</p>
+
+{{if .Data.Flash}}<p class="admin-flash admin-flash-ok" role="status">{{.Data.Flash}}</p>{{end}}
+{{if .Data.FlashError}}<p class="admin-flash admin-flash-error" role="alert">{{.Data.FlashError}}</p>{{end}}
 
 {{/* Stats: live sessions + connected participants + the anonymous TURN-relay aggregate (AC-9). */}}
 <section class="admin-stats" aria-label="Live metrics">
@@ -36,15 +39,38 @@ instance — never any guest's name, email, video, audio, or backstage chat.</p>
 <section class="admin-hosts">
 <h2>Hosts</h2>
 <table class="admin-table">
-<thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Role</th><th>Joined</th></tr></thead>
+<thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
 <tbody>
 {{range .Data.Hosts}}
-<tr>
-<td>{{.Name}}</td>
+<tr data-host-status="{{.Status}}"{{if .Live}} data-live="1"{{end}}>
+<td>{{.Name}}{{if .Self}} <span class="admin-you">(you)</span>{{end}}</td>
 <td>{{.Email}}</td>
 <td><span class="admin-status status-{{.Status}}">{{.Status}}</span></td>
 <td>{{if .IsAdmin}}admin{{else}}host{{end}}</td>
 <td>{{.Created}}</td>
+<td class="admin-actions">
+{{if .Self}}
+<span class="muted">—</span>
+{{else}}
+{{/* Approve activates a pending host or reinstates a suspended one (D-28). */}}
+{{if ne .Status "active"}}
+<form method="post" action="/api/admin/hosts/{{.ID}}/approve" class="inline-form"><button type="submit" class="btn btn-quiet">{{if eq .Status "suspended"}}Reinstate{{else}}Approve{{end}}</button></form>
+{{end}}
+{{/* Suspend blocks future streams; the D-27 cascade option appears only when the host is live now. */}}
+{{if ne .Status "suspended"}}
+<form method="post" action="/api/admin/hosts/{{.ID}}/suspend" class="inline-form admin-suspend">
+{{if .Live}}<label class="admin-cascade"><input type="checkbox" name="end_live" value="1"> end live session now</label>{{end}}
+<button type="submit" class="btn btn-danger">Suspend</button>
+</form>
+{{end}}
+{{/* Promote / demote the is_admin flag (D-14). */}}
+{{if .IsAdmin}}
+<form method="post" action="/api/admin/hosts/{{.ID}}/demote" class="inline-form"><button type="submit" class="btn btn-quiet">Demote</button></form>
+{{else}}
+<form method="post" action="/api/admin/hosts/{{.ID}}/promote" class="inline-form"><button type="submit" class="btn btn-quiet">Make admin</button></form>
+{{end}}
+{{end}}
+</td>
 </tr>
 {{end}}
 </tbody>

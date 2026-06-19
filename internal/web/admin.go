@@ -24,7 +24,8 @@ func formatInstant(ts int64) string {
 // as a media/chat peer. PR-8 adds the mutating actions (approve/suspend/promote) on top.
 type adminServer struct {
 	store *store.Store
-	hub   *signaling.Hub // in-memory live participant counts (nil in minimal config → counts read 0)
+	hub   *signaling.Hub // in-memory live participant counts + suspend-cascade force-end (nil in minimal config)
+	binds *bindingLocks  // serialize an admin's suspend-cascade force-end with the target's go-live/join (D-27)
 	rd    *renderer
 }
 
@@ -157,11 +158,14 @@ type adminSessionRow struct {
 }
 
 type adminHostRow struct {
+	ID      string
 	Email   string
 	Name    string
 	Status  string
 	IsAdmin bool
 	Created string
+	Live    bool // currently has a live session — drives the suspend "+ end live now" cascade option (D-27)
+	Self    bool // this is the acting admin's own row — self-suspend/self-demote are blocked (no lockout)
 }
 
 type adminData struct {
@@ -170,6 +174,8 @@ type adminData struct {
 	RelayLabel   string // "12.5%" or "n/a" when no connection data has been recorded yet
 	Sessions     []adminSessionRow
 	Hosts        []adminHostRow
+	Flash        string // PRG result banner (e.g. "Host suspended.")
+	FlashError   string // PRG error banner (e.g. "You can't suspend your own account.")
 }
 
 // adminConsole renders the read-only admin console (AC-9): a metadata-only snapshot of cross-host
@@ -201,7 +207,9 @@ func (s *adminServer) adminConsole(w http.ResponseWriter, r *http.Request) {
 	if stats.TurnRelay.Available {
 		d.RelayLabel = strconv.FormatFloat(stats.TurnRelay.Percent, 'f', 1, 64) + "%"
 	}
+	live := map[string]bool{} // host ids with a live session, for the suspend cascade option
 	for _, se := range sessions {
+		live[se.HostID] = true
 		d.Sessions = append(d.Sessions, adminSessionRow{
 			HostName: se.HostName, HostEmail: se.HostEmail, StreamTitle: se.StreamTitle,
 			Started: formatInstant(se.StartedAt), Participants: se.Participants,
@@ -209,11 +217,37 @@ func (s *adminServer) adminConsole(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, h := range hosts {
 		d.Hosts = append(d.Hosts, adminHostRow{
-			Email: h.Email, Name: h.Name, Status: h.Status, IsAdmin: h.IsAdmin, Created: formatInstant(h.CreatedAt),
+			ID: h.ID, Email: h.Email, Name: h.Name, Status: h.Status, IsAdmin: h.IsAdmin,
+			Created: formatInstant(h.CreatedAt), Live: live[h.ID], Self: h.ID == host.ID,
 		})
 	}
+	d.Flash, d.FlashError = adminFlash(r.URL.Query().Get("msg")), adminFlash(r.URL.Query().Get("error"))
 	s.rd.render(w, r, "admin.html", pageData{
 		Title: "Admin", Nav: "admin", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: d,
 	})
+}
+
+// adminFlash maps a PRG flash code to human copy (whitelist; an unknown/empty code → "").
+func adminFlash(code string) string {
+	switch code {
+	case "approved":
+		return "Host approved — they can host again."
+	case "suspended":
+		return "Host suspended — they can't start new streams."
+	case "suspended-ended":
+		return "Host suspended and their live session was ended."
+	case "suspend-end-failed":
+		return "Host suspended, but ending their live session failed — try again."
+	case "promoted":
+		return "Host promoted to admin."
+	case "demoted":
+		return "Admin demoted to host."
+	case "self":
+		return "You can't suspend or demote your own account."
+	case "notfound":
+		return "That host no longer exists."
+	default:
+		return ""
+	}
 }
