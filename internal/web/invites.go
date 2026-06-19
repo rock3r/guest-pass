@@ -31,6 +31,14 @@ type detailData struct {
 	// Invites tab
 	Passes []passRow
 	Issued *issuedLink // set after create/reissue to reveal the fresh link once
+	// Live verification (D-29/AC-8): the optional linked channel + its public watch link, plus the
+	// PRG flash flags from the link/unlink form.
+	LinkedPlatform string // "twitch" when a channel is linked, else ""
+	LinkedChannel  string // the linked channel id, else ""
+	WatchURL       string // public watch-live link for the linked channel, else ""
+	ChannelLinked  bool   // ?channel=linked
+	ChannelCleared bool   // ?channel=cleared
+	ChannelError   bool   // ?error=channel — the submitted channel was invalid
 	// Sources tab (read-only, EN-26)
 	Slots     []slotCard
 	RevealAll string // newline-joined freshly-minted OBS URLs for the copy-all block ("" if none)
@@ -100,12 +108,24 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 		rows = append(rows, toPassRow(p, now))
 	}
 	live, otherLive := s.sessionState(r.Context(), host.ID, st.ID)
+	d := detailData{
+		StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued,
+		SessionLive: live, OtherStreamLive: otherLive,
+	}
+	// Live verification (D-29/AC-8): surface the linked channel + watch link + the form's PRG flash.
+	if st.TwitchYTPlatform != nil && st.TwitchYTChannel != nil {
+		d.LinkedPlatform, d.LinkedChannel = *st.TwitchYTPlatform, *st.TwitchYTChannel
+		if s.liveCheck != nil {
+			d.WatchURL = s.liveCheck.WatchURL(*st.TwitchYTPlatform, *st.TwitchYTChannel)
+		}
+	}
+	q := r.URL.Query()
+	d.ChannelLinked = q.Get("channel") == "linked"
+	d.ChannelCleared = q.Get("channel") == "cleared"
+	d.ChannelError = q.Get("error") == "channel"
 	s.rd.render(w, r, "streamdetail.html", pageData{
 		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name},
-		Data: detailData{
-			StreamID: st.ID, StreamTitle: st.Title, Tab: "invites", Passes: rows, Issued: issued,
-			SessionLive: live, OtherStreamLive: otherLive,
-		},
+		Data: d,
 	})
 }
 

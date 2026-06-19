@@ -14,6 +14,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/livecheck"
 	"github.com/rock3r/guest-pass/internal/mail"
 	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
@@ -63,6 +64,7 @@ func seedHostApp(t *testing.T) *appSeed {
 		Hasher:    hasher,
 		Mailer:    mail.NewLogMailer(io.Discard),
 		BaseURL:   "https://gp.example",
+		LiveCheck: livecheck.NewChecker(), // D-29: WatchURL/Normalize are pure (no network) on this path
 		StaticDir: BuildDist(t),
 	})
 	if err != nil {

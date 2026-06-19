@@ -952,3 +952,38 @@ func TestSessionRepo_ActiveSessionHostIDs(t *testing.T) {
 		t.Fatalf("after ending a: active hosts = %v, want [%s]", got, b.ID)
 	}
 }
+
+// SetStreamChannel links / unlinks a stream's live-verify channel (D-29): both fields set together,
+// both cleared together (nil), and a targeted write that doesn't touch other columns.
+func TestStreamRepo_SetStreamChannel(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	h := seedHost(t, st, "host-chan")
+	dur := int64(60)
+	s1, _ := st.CreateStream(ctx, CreateStreamParams{HostID: h.ID, Title: "Show", DurationMin: &dur})
+
+	plat, chan1 := "twitch", "ninja"
+	if err := st.SetStreamChannel(ctx, s1.ID, &plat, &chan1); err != nil {
+		t.Fatalf("SetStreamChannel link: %v", err)
+	}
+	got, _ := st.GetStream(ctx, s1.ID)
+	if got.TwitchYTPlatform == nil || *got.TwitchYTPlatform != "twitch" || got.TwitchYTChannel == nil || *got.TwitchYTChannel != "ninja" {
+		t.Fatalf("after link: platform=%v channel=%v", got.TwitchYTPlatform, got.TwitchYTChannel)
+	}
+	// Other columns untouched (targeted write).
+	if got.Title != "Show" || got.DurationMin == nil || *got.DurationMin != 60 {
+		t.Fatalf("SetStreamChannel clobbered other columns: %+v", got)
+	}
+
+	// Unlink (nil, nil) clears both.
+	if err := st.SetStreamChannel(ctx, s1.ID, nil, nil); err != nil {
+		t.Fatalf("SetStreamChannel unlink: %v", err)
+	}
+	got, _ = st.GetStream(ctx, s1.ID)
+	if got.TwitchYTPlatform != nil || got.TwitchYTChannel != nil {
+		t.Fatalf("after unlink: platform=%v channel=%v, want both nil", got.TwitchYTPlatform, got.TwitchYTChannel)
+	}
+	if err := st.SetStreamChannel(ctx, "nope", &plat, &chan1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetStreamChannel(missing) = %v, want ErrNotFound", err)
+	}
+}

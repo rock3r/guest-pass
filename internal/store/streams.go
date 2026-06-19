@@ -113,6 +113,21 @@ func (s *Store) UpdateStream(ctx context.Context, st *Stream) error {
 	return errIfNoRows(res)
 }
 
+// SetStreamChannel links (or, with nil args, unlinks) a stream's optional live-verify channel
+// (D-29): the platform + channel id used by internal/livecheck to verify live status and build the
+// guest watch-live link. Both must be set together or both nil; the caller validates them against
+// the livecheck platform/channel rules first. A targeted UPDATE (not a read-modify-write of the
+// whole row) so it can't clobber a concurrent edit of other columns.
+func (s *Store) SetStreamChannel(ctx context.Context, id string, platform, channel *string) error {
+	res, err := s.writer.ExecContext(ctx,
+		"UPDATE streams SET twitch_yt_platform = ?, twitch_yt_channel = ? WHERE id = ?",
+		platform, channel, id)
+	if err != nil {
+		return fmt.Errorf("setting stream channel: %w", err)
+	}
+	return errIfNoRows(res)
+}
+
 // DeleteStream removes a stream (cascading to its passes/sessions via FK).
 func (s *Store) DeleteStream(ctx context.Context, id string) error {
 	res, err := s.writer.ExecContext(ctx, "DELETE FROM streams WHERE id = ?", id)

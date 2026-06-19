@@ -122,6 +122,29 @@ Copy the link now; it won't be shown again:</p>
 <button type="submit" class="btn btn-primary">Send invite</button>
 </form>
 </section>
+
+{{/* Live verification (D-29/AC-8): link a Twitch channel so guests get a watch-live link and the
+     greenroom shows a verified-live signal. Zero-config — public live status only, no API key. */}}
+<section class="live-verify" data-livecheck>
+<h2>Live verification <span class="muted">(optional)</span></h2>
+<p>Link your Twitch channel so guests get a “Watch live” link and the greenroom can show a
+verified-live signal. We only check public live status — no account or API key needed.</p>
+{{if .Data.ChannelLinked}}<p class="settings-flash settings-flash-ok" data-flash="channel-linked">Channel linked.</p>{{end}}
+{{if .Data.ChannelCleared}}<p class="settings-flash settings-flash-ok" data-flash="channel-cleared">Channel unlinked.</p>{{end}}
+{{if .Data.ChannelError}}<p class="settings-flash settings-flash-error" data-flash="channel-error">That doesn't look like a valid Twitch channel name.</p>{{end}}
+{{if .Data.LinkedChannel}}
+<p class="live-verify-current">Linked: <strong>{{.Data.LinkedPlatform}}/{{.Data.LinkedChannel}}</strong>{{if .Data.WatchURL}}
+— <a class="watch-live" href="{{.Data.WatchURL}}" target="_blank" rel="noopener noreferrer">Watch live ↗</a>{{end}}</p>
+{{end}}
+<form method="post" action="/app/streams/{{.Data.StreamID}}/channel" class="live-verify-form">
+<label>Platform<select name="platform"><option value="twitch"{{if eq .Data.LinkedPlatform "twitch"}} selected{{end}}>Twitch</option></select></label>
+<label>Channel<input type="text" name="channel" value="{{.Data.LinkedChannel}}" maxlength="25" autocomplete="off" placeholder="twitch_username"></label>
+<button type="submit" class="btn">{{if .Data.LinkedChannel}}Update{{else}}Link channel{{end}}</button>
+</form>
+{{if .Data.LinkedChannel}}
+<form method="post" action="/app/streams/{{.Data.StreamID}}/channel" class="inline-form"><input type="hidden" name="channel" value=""><button type="submit" class="btn btn-quiet">Unlink channel</button></form>
+{{end}}
+</section>
 </section>
 
 {{end}}
