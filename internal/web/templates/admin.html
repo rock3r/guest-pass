@@ -36,6 +36,42 @@ guest's name, email, video, audio, or backstage chat.</p>
 {{end}}
 </section>
 
+{{/* Abuse reports (D-42/EN-24): grouped per reported host, full detail (reporter, category,
+     message, stream, time) — admin-only, never shown to the reported host. Dismiss all / Suspend. */}}
+<section class="admin-reports">
+<h2>Abuse reports</h2>
+{{if .Data.Reports}}
+{{range .Data.Reports}}
+<article class="admin-report-group" data-report-host="{{.HostID}}">
+<header class="admin-report-head">
+<span class="admin-report-host">{{.HostName}}</span>
+<span class="admin-report-count">{{.Count}} report{{if ne .Count 1}}s{{end}}</span>
+<span class="admin-report-actions">
+<form method="post" action="/api/admin/abuse-reports/{{.HostID}}/dismiss" class="inline-form"><button type="submit" class="btn btn-quiet">Dismiss all</button></form>
+<form method="post" action="/api/admin/hosts/{{.HostID}}/suspend" class="inline-form"><button type="submit" class="btn btn-danger">Suspend</button></form>
+</span>
+</header>
+<table class="admin-table admin-report-table">
+<thead><tr><th>Reporter</th><th>Reason</th><th>Message</th><th>Stream</th><th>When</th></tr></thead>
+<tbody>
+{{range .Reports}}
+<tr>
+<td>{{.Reporter}}</td>
+<td>{{.Category}}</td>
+<td class="admin-report-msg">{{.Message}}</td>
+<td>{{.Stream}}</td>
+<td>{{.When}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</article>
+{{end}}
+{{else}}
+<p class="admin-empty">No abuse reports.</p>
+{{end}}
+</section>
+
 <section class="admin-hosts">
 <h2>Hosts</h2>
 <table class="admin-table">

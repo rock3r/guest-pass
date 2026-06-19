@@ -22,20 +22,28 @@ const (
 	// DefaultPurgeGrace extends the never-run-stream window past its scheduled end before
 	// the retention clock starts — matches the D-5 pass-expiry grace (scheduled end + 30m).
 	DefaultPurgeGrace = 30 * time.Minute
+	// DefaultReportRetention is how long an abuse report's identifying content (reporter email +
+	// message) is kept before it is anonymized to NULL — the D-42 "review window" (D-37).
+	DefaultReportRetention = 30 * 24 * time.Hour
 )
 
-// PurgeStore is the store subset the purge job needs (*store.Store satisfies it). Narrowing
-// it to one method keeps the job unit-testable with a fake and off the rest of the store.
+// PurgeStore is the store subset the purge job needs (*store.Store satisfies it). Narrowing it to
+// these methods keeps the job unit-testable with a fake and off the rest of the store.
 type PurgeStore interface {
 	PurgeGuestPII(ctx context.Context, now, retentionSecs, graceSecs int64) (int64, error)
+	// AnonymizeExpiredReports nulls reporter email + message on reports past the review window
+	// (D-42/D-37), returning the count anonymized.
+	AnonymizeExpiredReports(ctx context.Context, now, retentionSecs int64) (int64, error)
 }
 
-// PurgeConfig configures the 24h guest-PII purge (D-37). Zero fields fall back to the
-// Default* values, so a caller can pass only what it overrides.
+// PurgeConfig configures the periodic retention sweeps (D-37): the 24h guest-PII purge and the
+// abuse-report anonymization. Zero fields fall back to the Default* values, so a caller can pass
+// only what it overrides.
 type PurgeConfig struct {
-	Interval  time.Duration // how often to sweep
-	Retention time.Duration // keep guest PII this long after stream end
-	Grace     time.Duration // extra window after a never-run stream's scheduled end
+	Interval        time.Duration // how often to sweep
+	Retention       time.Duration // keep guest PII this long after stream end
+	Grace           time.Duration // extra window after a never-run stream's scheduled end
+	ReportRetention time.Duration // keep an abuse report's identifying content this long (D-42)
 }
 
 func (c PurgeConfig) withDefaults() PurgeConfig {
@@ -47,6 +55,9 @@ func (c PurgeConfig) withDefaults() PurgeConfig {
 	}
 	if c.Grace <= 0 {
 		c.Grace = DefaultPurgeGrace
+	}
+	if c.ReportRetention <= 0 {
+		c.ReportRetention = DefaultReportRetention
 	}
 	return c
 }
@@ -104,14 +115,24 @@ func (p *Purger) Run(ctx context.Context) {
 	}
 }
 
-// runOnce performs a single sweep and logs the outcome (count only, never PII).
+// anonymizeReports nulls the identifying content of abuse reports past the review window (D-42).
+// Unlike the guest-PII purge it has no sub-interval SLA, so it uses the full retention age.
+func (p *Purger) anonymizeReports(ctx context.Context) (int64, error) {
+	return p.store.AnonymizeExpiredReports(ctx, p.now().Unix(), int64(p.cfg.ReportRetention.Seconds()))
+}
+
+// runOnce performs a single retention sweep — the guest-PII purge plus the abuse-report
+// anonymization — and logs each outcome (count only, never PII; EN-16/EN-20). The two are
+// independent: one failing does not skip the other.
 func (p *Purger) runOnce(ctx context.Context) {
-	n, err := p.sweep(ctx)
-	if err != nil {
+	if n, err := p.sweep(ctx); err != nil {
 		p.log.WarnContext(ctx, "guest-PII purge sweep failed", "error", err)
-		return
-	}
-	if n > 0 {
+	} else if n > 0 {
 		p.log.InfoContext(ctx, "guest-PII purge cleared expired passes", "count", n)
+	}
+	if n, err := p.anonymizeReports(ctx); err != nil {
+		p.log.WarnContext(ctx, "abuse-report anonymize sweep failed", "error", err)
+	} else if n > 0 {
+		p.log.InfoContext(ctx, "anonymized expired abuse reports", "count", n)
 	}
 }

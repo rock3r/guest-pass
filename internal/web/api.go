@@ -288,7 +288,7 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 	if pass.Name != nil {
 		guest = *pass.Name
 	}
-	a.rd.passLandingPage(w, r, title, guest, watchURL)
+	a.rd.passLandingPage(w, r, title, guest, watchURL, raw)
 }
 
 // passEnter handles POST /p/{token}/enter — the explicit device-check entry. It is the ONE

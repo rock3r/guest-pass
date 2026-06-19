@@ -71,6 +71,10 @@ func TestInviteEmail_CarriesPurgeNotice(t *testing.T) {
 	if !strings.Contains(got, "deleted within 24 hours") {
 		t.Fatalf("invite email body missing the 24h transparency notice (AC-6):\n%s", got)
 	}
+	// The invite email also carries the "report it" link (D-42), pointing at this invite's report form.
+	if !strings.Contains(got, `href="https://gp.example/p/tok/report"`) || !strings.Contains(got, "Report it") {
+		t.Fatalf("invite email body missing the D-42 report link:\n%s", got)
+	}
 
 	var gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

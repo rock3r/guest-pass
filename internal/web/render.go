@@ -5,6 +5,8 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+
+	"github.com/rock3r/guest-pass/internal/store"
 )
 
 //go:embed templates/*.html
@@ -23,6 +25,7 @@ type pageData struct {
 	StreamTitle     string   // pass landing page only
 	GuestName       string   // pass landing page only
 	WatchURL        string   // pass landing page only — public "watch live" link if the stream linked a channel (D-29)
+	ReportToken     string   // pass landing page only — raw magic-link token, for the "report this invite" link (D-42)
 	Slot            string   // OBS source page only — the opaque slot label (EN-15)
 	Host            *navHost // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
 	Nav             string   // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
@@ -51,7 +54,7 @@ type renderer struct {
 // pageFiles are the public/guest server-rendered pages composed into base.html (each
 // defines a "content" template). The OBS source page is NOT one of these — it is a
 // standalone, chromeless, font-free page (EN-13) with its own template.
-var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html"}
+var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html", "report.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
 // appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the
@@ -128,8 +131,41 @@ func (rd *renderer) greenroom(w http.ResponseWriter, r *http.Request) {
 // passLandingPage renders the guest's magic-link landing (side-effect-free, EN-10): it
 // shows who invited them and to which stream, with an entry action that marks the pass
 // opened only on an explicit client action (the device-check, in M2).
-func (rd *renderer) passLandingPage(w http.ResponseWriter, r *http.Request, streamTitle, guestName, watchURL string) {
-	rd.render(w, r, "pass.html", pageData{Title: "Your guest pass", StreamTitle: streamTitle, GuestName: guestName, WatchURL: watchURL})
+func (rd *renderer) passLandingPage(w http.ResponseWriter, r *http.Request, streamTitle, guestName, watchURL, reportToken string) {
+	rd.render(w, r, "pass.html", pageData{
+		Title: "Your guest pass", StreamTitle: streamTitle, GuestName: guestName,
+		WatchURL: watchURL, ReportToken: reportToken,
+	})
+}
+
+// reportCategory is one option in the public abuse-report form.
+type reportCategory struct{ Value, Label string }
+
+// reportCategoryOptions maps each stored category to its human label (D-42).
+var reportCategoryOptions = []reportCategory{
+	{store.ReportSpam, "Spam"},
+	{store.ReportDontKnow, "I don't know this person"},
+	{store.ReportPhishing, "Phishing or a scam"},
+	{store.ReportHarassment, "Harassment"},
+	{store.ReportOther, "Something else"},
+}
+
+// reportData backs the public abuse-report form (D-42 / AC-11).
+type reportData struct {
+	Token      string
+	Sent       bool // thank-you state after a successful submit
+	Error      bool // both-fields-required validation error
+	Categories []reportCategory
+}
+
+// reportPage renders the public "report this invite" form (D-42): category + message, both required.
+// No auth — the magic-link token in the path is the only identifier, and it is resolved to the
+// reporter/host server-side (EN-24), never trusted from the form.
+func (rd *renderer) reportPage(w http.ResponseWriter, r *http.Request, token string, sent, hasErr bool) {
+	rd.render(w, r, "report.html", pageData{
+		Title: "Report this invite",
+		Data:  reportData{Token: token, Sent: sent, Error: hasErr, Categories: reportCategoryOptions},
+	})
 }
 
 // sourcePage renders the chromeless OBS cam source page (EN-13): a standalone, font-free,

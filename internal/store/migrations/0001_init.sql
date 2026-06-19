@@ -127,3 +127,19 @@ CREATE TABLE pass_locks (
     created_at         INTEGER NOT NULL,
     PRIMARY KEY (pass_id, modality)
 ) STRICT;
+
+-- Abuse reports (D-42/EN-24): a public "didn't expect this? report it" submission against the host
+-- who sent an invite. Each row is one individual report (not a per-host counter). The reporter's
+-- identity (reporter_email) is resolved server-side from the magic-link token — never form input —
+-- and is ADMIN-ONLY; the reported host never sees who reported them (retaliation guard). reporter_
+-- email + message are retained only for the review window, then anonymized to NULL (D-37).
+CREATE TABLE reports (
+    id             TEXT    PRIMARY KEY,                                       -- UUIDv4
+    host_id        TEXT    NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,   -- the reported (sending) host
+    stream_id      TEXT    REFERENCES streams(id) ON DELETE SET NULL,         -- the stream the pass was for (nullable)
+    reporter_email TEXT,                                                      -- the invited guest's email; NULL after anonymize
+    category       TEXT    NOT NULL CHECK (category IN ('spam','dont-know','phishing','harassment','other')),
+    message        TEXT,                                                      -- free-text; required at submit, NULL after anonymize
+    created_at     INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_reports_host ON reports(host_id, created_at);

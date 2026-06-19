@@ -168,14 +168,77 @@ type adminHostRow struct {
 	Self    bool // this is the acting admin's own row — self-suspend/self-demote are blocked (no lockout)
 }
 
+// adminReportRow / adminReportGroup render the abuse reports grouped per reported host (D-42). The
+// reporter identity (email) shows ONLY here, on the admin console — never to the reported host.
+type adminReportRow struct {
+	Reporter string // reporter email, or "(anonymized)" once the retention window has passed
+	Category string // human label
+	Message  string // free text, or "(anonymized)"
+	Stream   string // stream title, or "(deleted)"
+	When     string
+}
+
+type adminReportGroup struct {
+	HostID   string
+	HostName string
+	Count    int
+	Reports  []adminReportRow
+}
+
 type adminData struct {
 	LiveSessions int
 	LivePeers    int
 	RelayLabel   string // "12.5%" or "n/a" when no connection data has been recorded yet
 	Sessions     []adminSessionRow
 	Hosts        []adminHostRow
+	Reports      []adminReportGroup
 	Flash        string // PRG result banner (e.g. "Host suspended.")
 	FlashError   string // PRG error banner (e.g. "You can't suspend your own account.")
+}
+
+// labelForReportCategory maps a stored category to its human label (falls back to the raw value).
+func labelForReportCategory(c string) string {
+	for _, opt := range reportCategoryOptions {
+		if opt.Value == c {
+			return opt.Label
+		}
+	}
+	return c
+}
+
+// gatherReports loads the abuse reports and groups them per reported host (newest-first within each),
+// resolving the human labels and the anonymized placeholders for display (D-42 / AC-11).
+func (s *adminServer) gatherReports(r *http.Request) ([]adminReportGroup, error) {
+	rows, err := s.store.ListReports(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	var groups []adminReportGroup
+	index := map[string]int{} // host id → position in groups (ListReports is ordered by host)
+	for _, row := range rows {
+		i, ok := index[row.HostID]
+		if !ok {
+			groups = append(groups, adminReportGroup{HostID: row.HostID, HostName: row.HostName})
+			i = len(groups) - 1
+			index[row.HostID] = i
+		}
+		reporter, message, stream := "(anonymized)", "(anonymized)", "(deleted)"
+		if row.ReporterEmail != nil {
+			reporter = *row.ReporterEmail
+		}
+		if row.Message != nil {
+			message = *row.Message
+		}
+		if row.StreamTitle != nil {
+			stream = *row.StreamTitle
+		}
+		groups[i].Reports = append(groups[i].Reports, adminReportRow{
+			Reporter: reporter, Category: labelForReportCategory(row.Category),
+			Message: message, Stream: stream, When: formatInstant(row.CreatedAt),
+		})
+		groups[i].Count++
+	}
+	return groups, nil
 }
 
 // adminConsole renders the read-only admin console (AC-9): a metadata-only snapshot of cross-host
@@ -202,8 +265,13 @@ func (s *adminServer) adminConsole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not load admin console", http.StatusInternalServerError)
 		return
 	}
+	reports, err := s.gatherReports(r)
+	if err != nil {
+		http.Error(w, "could not load admin console", http.StatusInternalServerError)
+		return
+	}
 
-	d := adminData{LiveSessions: stats.LiveSessions, LivePeers: stats.LivePeers, RelayLabel: "n/a"}
+	d := adminData{LiveSessions: stats.LiveSessions, LivePeers: stats.LivePeers, RelayLabel: "n/a", Reports: reports}
 	if stats.TurnRelay.Available {
 		d.RelayLabel = strconv.FormatFloat(stats.TurnRelay.Percent, 'f', 1, 64) + "%"
 	}
@@ -243,6 +311,8 @@ func adminFlash(code string) string {
 		return "Host promoted to admin."
 	case "demoted":
 		return "Admin demoted to host."
+	case "dismissed":
+		return "Reports dismissed."
 	case "self":
 		return "You can't suspend or demote your own account."
 	case "notfound":
