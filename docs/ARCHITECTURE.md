@@ -1408,8 +1408,21 @@ list (identity + status + role — never `google_sub`). The handlers read only
 host/session/stream rows — never `passes` (guest PII) and never a room's media/chat — so
 the privacy boundary above holds by construction; a `web` test seeds a foreign live
 session with a PII-bearing guest and asserts no admin surface leaks that guest's name,
-email, or pass token. The mutating actions (approve / suspend + cascade / promote) land
-in PR-8.
+email, or pass token.
+
+**Host-management actions (M5 PR-8).** The same `RequireAdmin` group adds four
+server-rendered form POSTs (PRG back to `/admin`, CSRF-safe via the SameSite cookie):
+`approve` (activate a pending host, D-28; also reinstates a suspended one), `suspend`
+(status→`suspended`, blocking future streams — read live by the authz middleware, EN-6),
+`promote`/`demote` (the `is_admin` flag, D-14). Suspending a host who is **live now**
+offers the **D-27 cascade**: with `end_live=1` the running session is force-ended — the
+DB session row is closed (starting the 24h guest-PII purge clock, D-40/D-37) and the
+in-memory room is terminated for every peer incl. OBS sources (`TerminateHostRoom`; the
+suspended host has no next session to reconnect to). The force-end takes the target's
+per-host binding lock so an in-flight go-live can't outlive the suspend. Authority is the
+live `is_admin` gate; the only extra guard is **no self-suspend / self-demote** (no admin
+lockout). This stays within the §7.7 boundary — a force-end is a cooperative teardown +
+reconnect block (D-25), never a media/chat read.
 
 ### 24h purge (D-37)
 

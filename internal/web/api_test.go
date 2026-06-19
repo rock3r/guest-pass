@@ -61,6 +61,7 @@ type apiHarness struct {
 	hasher *token.Hasher
 	mailer *captureMailer
 	live   *fakeLiveChecker
+	hub    *signaling.Hub
 }
 
 func newAPIHarness(t *testing.T) *apiHarness {
@@ -83,10 +84,11 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	}
 	mailer := &captureMailer{}
 	live := newFakeLiveChecker()
+	hub := signaling.NewHub(nil, nil)
 
 	h, err := NewRouter(RouterConfig{
 		SourceURL:   testSourceURL,
-		Hub:         signaling.NewHub(nil, nil),
+		Hub:         hub,
 		Auth:        authn,
 		Store:       st,
 		Hasher:      hasher,
@@ -98,7 +100,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	return &apiHarness{h: h, store: st, ring: ring, hasher: hasher, mailer: mailer, live: live}
+	return &apiHarness{h: h, store: st, ring: ring, hasher: hasher, mailer: mailer, live: live, hub: hub}
 }
 
 // host creates an active host and returns it with a valid session cookie.

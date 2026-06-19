@@ -70,3 +70,64 @@ func TestAdminConsole_RendersCrossHostMetadata(t *testing.T) {
 		}
 	})
 }
+
+// T-10 / AC-10: the suspend cascade (D-27). The admin suspends a live foreign host with the
+// "end live session now" option checked; the host is suspended AND its running session is ended, so
+// it drops out of the live-sessions list. Server-rendered, no WebRTC (the DB session end is the
+// observable cascade; the in-memory teardown is covered by web httptest).
+func TestAdminConsole_SuspendCascadeEndsLiveSession(t *testing.T) {
+	s := seedHostApp(t)
+	ctx := context.Background()
+	if err := s.store.SetHostAdmin(ctx, s.hostID, true); err != nil {
+		t.Fatalf("promote to admin: %v", err)
+	}
+	hostB, err := s.store.CreateHost(ctx, store.CreateHostParams{
+		GoogleSub: "cascade-foreign-sub", Email: "cascade@example.com", Name: "Cascade Host", Status: store.HostActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateHost(foreign): %v", err)
+	}
+	streamB, err := s.store.CreateStream(ctx, store.CreateStreamParams{HostID: hostB.ID, Title: "Cascade Live Show"})
+	if err != nil {
+		t.Fatalf("CreateStream: %v", err)
+	}
+	if _, err := s.store.StartSession(ctx, streamB.ID, hostB.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCkie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	suspendForm := `form[action="/api/admin/hosts/` + hostB.ID + `/suspend"]`
+
+	Chrome(t, 60*time.Second, func(ctx context.Context) {
+		var flash, sessionsText string
+		if err := chromedp.Run(ctx,
+			network.Enable(),
+			setHostCookie,
+			chromedp.Navigate(s.base+"/admin"),
+			// The live foreign host's row offers the cascade checkbox.
+			chromedp.WaitVisible(suspendForm+` input[name="end_live"]`, chromedp.ByQuery),
+			chromedp.Click(suspendForm+` input[name="end_live"]`, chromedp.ByQuery),
+			chromedp.Click(suspendForm+` button[type="submit"]`, chromedp.ByQuery),
+			// After the PRG redirect: the cascade flash, and the session is gone from the live list.
+			chromedp.WaitVisible(`.admin-flash-ok`, chromedp.ByQuery),
+			chromedp.Text(`.admin-flash-ok`, &flash, chromedp.ByQuery),
+			chromedp.Text(`.admin-sessions`, &sessionsText, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("suspend cascade flow: %v", err)
+		}
+		if !strings.Contains(flash, "ended") {
+			t.Fatalf("flash = %q, want it to confirm the session was ended", flash)
+		}
+		if strings.Contains(sessionsText, "Cascade Live Show") {
+			t.Fatalf("the suspended host's session should be gone from the live list:\n%s", sessionsText)
+		}
+		if got, _ := s.store.GetHost(ctx, hostB.ID); got.Status != store.HostSuspended {
+			t.Fatalf("host status = %q, want suspended", got.Status)
+		}
+		if _, err := s.store.ActiveSession(ctx, hostB.ID); err == nil {
+			t.Fatal("the foreign host's session should be ended")
+		}
+	})
+}
