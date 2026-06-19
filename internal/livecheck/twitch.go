@@ -86,9 +86,15 @@ func (v *twitchVerifier) verify(ctx context.Context, channel string) Status {
 	if resp.StatusCode != http.StatusOK {
 		return StatusUnavailable // 404 (no such channel) / 429 (rate-limited) / 5xx → can't tell
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, v.maxBody))
+	// Read one byte past the cap so an oversized body is detectable: if it read more than maxBody
+	// the page was truncated and a missing live marker can't be trusted — degrade to unavailable
+	// rather than reporting a false "offline" (codex). A within-cap body parses normally.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, v.maxBody+1))
 	if err != nil {
 		return StatusUnavailable
+	}
+	if int64(len(body)) > v.maxBody {
+		return StatusUnavailable // oversized → can't reliably parse
 	}
 	return parseTwitchLive(body)
 }

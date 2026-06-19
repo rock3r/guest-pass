@@ -104,8 +104,13 @@ func (c *Checker) Check(ctx context.Context, platform, channel string) Result {
 	status := v.verify(ctx, norm)
 	res := Result{Status: status, WatchURL: v.watchURL(norm), CheckedAt: c.now().Unix()}
 
-	c.mu.Lock()
-	c.cache[key] = cacheEntry{res: res, expires: c.now().Add(c.ttl)}
-	c.mu.Unlock()
+	// Do NOT cache a result produced under a caller-cancelled/expired context: that
+	// status-unavailable reflects the caller, not the platform, and caching it would poison the
+	// shared (platform,channel) entry for up to the TTL, denying other clients a retry (codex/bugbot).
+	if ctx.Err() == nil {
+		c.mu.Lock()
+		c.cache[key] = cacheEntry{res: res, expires: c.now().Add(c.ttl)}
+		c.mu.Unlock()
+	}
 	return res
 }

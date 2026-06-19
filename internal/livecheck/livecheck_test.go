@@ -84,9 +84,9 @@ func TestTwitchVerify_ParsesAndDegrades(t *testing.T) {
 	}
 }
 
-// The response-size cap (§7.4) truncates the read: a live signal placed BEYOND the cap is not
-// seen, so an oversize page can't be read unbounded. Proven by lowering the cap below the signal.
-func TestTwitchVerify_SizeCapTruncates(t *testing.T) {
+// The response-size cap (§7.4) bounds the read AND an oversized body degrades to unavailable rather
+// than a false "offline" — a truncated page whose live marker is past the cap can't be trusted.
+func TestTwitchVerify_OversizeDegradesToUnavailable(t *testing.T) {
 	signal := `"isLiveBroadcast":true`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("x", 1024))) // 1 KiB of filler...
@@ -95,15 +95,40 @@ func TestTwitchVerify_SizeCapTruncates(t *testing.T) {
 	defer srv.Close()
 
 	v := newTwitchVerifier(srv.Client(), srv.URL)
-	v.maxBody = 64 // cap below the 1 KiB filler → the signal past the cap is never read
-	if got := v.verify(context.Background(), "chan"); got != StatusOffline {
-		t.Fatalf("with the signal beyond the size cap, status = %q, want offline (cap truncated the read)", got)
+	v.maxBody = 64 // body (1 KiB+) exceeds the cap → oversized → unavailable, NOT a false offline
+	if got := v.verify(context.Background(), "chan"); got != StatusUnavailable {
+		t.Fatalf("oversized body status = %q, want status-unavailable (truncated, can't trust)", got)
 	}
 
-	// With a generous cap the same body reads the signal → live (control case).
+	// With a generous cap the same body fits and the signal is read → live (control case).
 	v.maxBody = maxBodyBytes
 	if got := v.verify(context.Background(), "chan"); got != StatusLive {
 		t.Fatalf("within the cap the signal should be read, status = %q, want live", got)
+	}
+}
+
+// A result produced under a caller-cancelled context must NOT be cached — otherwise one caller's
+// cancellation poisons the shared (platform,channel) entry, denying other clients a retry for the
+// whole TTL (codex/bugbot).
+func TestChecker_DoesNotCacheCancelledContext(t *testing.T) {
+	fake := &fakeVerifier{status: StatusLive}
+	c := &Checker{
+		verifiers: map[string]verifier{PlatformTwitch: fake},
+		cache:     map[string]cacheEntry{},
+		ttl:       45 * time.Second,
+		now:       time.Now,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled when Check runs
+
+	c.Check(ctx, PlatformTwitch, "ninja")
+	if got := atomic.LoadInt32(&fake.calls); got != 1 {
+		t.Fatalf("first (cancelled) check verify calls = %d, want 1", got)
+	}
+	// A subsequent check with a live context must re-fetch (the cancelled result wasn't cached).
+	c.Check(context.Background(), PlatformTwitch, "ninja")
+	if got := atomic.LoadInt32(&fake.calls); got != 2 {
+		t.Fatalf("after a cancelled check, verify calls = %d, want 2 (not cached → re-fetched)", got)
 	}
 }
 
