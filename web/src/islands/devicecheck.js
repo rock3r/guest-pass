@@ -1,3 +1,4 @@
+import "./devicecheck.css";
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { Publisher } from "../rtc/publisher.js";
@@ -19,6 +20,40 @@ import { GuestSession } from "./guest-session.js";
 function passTokenFromPath() {
   const m = location.pathname.match(/^\/p\/([^/]+)/);
   return m ? m[1] : "";
+}
+
+// sessionStorage keys for the guest's chosen camera/mic (M5.5 device picker). The pick sticks
+// across a retry or a reload within the same tab session — deviceIds are origin-stable once
+// permission is granted, so re-using them is safe and saves the guest re-choosing every visit.
+const CAM_KEY = "gp.device.cam";
+const MIC_KEY = "gp.device.mic";
+
+/**
+ * loadDevice / storeDevice are best-effort: a private-mode browser throws on sessionStorage access,
+ * in which case the selection is simply held in component state for the life of the island and the
+ * browser default is used on the next load — never a thrown error.
+ * @param {string} key
+ * @returns {string}
+ */
+function loadDevice(key) {
+  try {
+    return sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * storeDevice persists a chosen deviceId; a no-op (swallowed) when storage is unavailable.
+ * @param {string} key
+ * @param {string} id
+ */
+function storeDevice(key, id) {
+  try {
+    if (id) sessionStorage.setItem(key, id);
+  } catch {
+    /* storage blocked (private mode) — the pick stays session-local, which is fine */
+  }
 }
 
 // Grace before a screen capture that the server says is no longer pooled (screenShare:"") with no
@@ -91,6 +126,23 @@ function DeviceCheck() {
   // learns the live sharer from the roster's screenShare:"live" fold (the screen-roster is host-only).
   const [liveScreen, setLiveScreen] = useState(/** @type {{id:string,name:string,stream:MediaStream}|null} */ (null));
   const [error, setError] = useState("");
+  // Pre-join device picker (M5.5/AC-5): the guest chooses a camera + microphone before going live,
+  // and the choice persists into the published stream — they never re-pick once in session. The
+  // chosen ids drive getUserMedia's deviceId constraint. Refs are the source of truth for the async
+  // re-acquire (no stale render closure); the state mirrors drive the <select> values + option list.
+  // An audio-OUTPUT picker is deliberately omitted: the guest surface has no audible sink (every
+  // <video> is muted, there is no <audio> element), so setSinkId would have nothing to attach to.
+  const [devices, setDevices] = useState(
+    /** @type {{cams: Array<{id:string,label:string}>, mics: Array<{id:string,label:string}>}} */ ({ cams: [], mics: [] }),
+  );
+  const [camId, setCamId] = useState("");
+  const [micId, setMicId] = useState("");
+  const camIdRef = useRef("");
+  const micIdRef = useRef("");
+  // Set the instant entry begins, so a device switch still acquiring when the guest hits Enter does
+  // NOT swap (and stop the tracks of) the stream the publisher just took live (a dead/old stream on
+  // air). Cleared whenever we return to a fresh, switchable preview (a retry or network-retry).
+  const enteringRef = useRef(false);
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   /** @type {{current: MediaStream|null}} */
@@ -164,20 +216,138 @@ function DeviceCheck() {
     }
   }
 
+  // mediaConstraints builds the getUserMedia constraints from the current selection: an explicit
+  // deviceId when the guest has chosen one, else the browser default (`true`). Read from the refs so
+  // an async re-acquire always uses the latest pick, not a stale render closure.
+  function mediaConstraints() {
+    return {
+      video: camIdRef.current ? { deviceId: { exact: camIdRef.current } } : true,
+      audio: micIdRef.current ? { deviceId: { exact: micIdRef.current } } : true,
+    };
+  }
+
+  // getStream captures the current camera+mic selection, retrying once on the browser default if a
+  // stored/selected device is gone (OverconstrainedError) so a stale saved id never hard-fails the
+  // check — syncSelectedFromTracks then re-points the dropdowns at whatever was actually captured.
+  async function getStream() {
+    try {
+      return await navigator.mediaDevices.getUserMedia(mediaConstraints());
+    } catch (e) {
+      if (e && /** @type {Error} */ (e).name === "OverconstrainedError") {
+        camIdRef.current = "";
+        micIdRef.current = "";
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      }
+      throw e;
+    }
+  }
+
+  // installStream swaps a freshly captured stream into the preview, stopping the PRIOR stream only
+  // after the new one is in place so a device switch never flashes black (and the old device's
+  // capture light goes off). Points the live <video> at it when the preview is already mounted.
+  function installStream(stream) {
+    const prev = streamRef.current;
+    streamRef.current = stream;
+    if (prev && prev !== stream) prev.getTracks().forEach((t) => t.stop());
+    if (videoRef.current) videoRef.current.srcObject = stream;
+  }
+
+  // syncSelectedFromTracks points the dropdowns at the devices the captured stream is ACTUALLY using
+  // (getUserMedia honours a chosen id, or falls back to the default when it's gone) and persists
+  // those ids, so the selects never show a device that isn't live and the pick sticks for the session.
+  function syncSelectedFromTracks(stream) {
+    const vt = stream.getVideoTracks()[0];
+    const at = stream.getAudioTracks()[0];
+    const vid = vt && vt.getSettings ? vt.getSettings().deviceId || "" : "";
+    const aid = at && at.getSettings ? at.getSettings().deviceId || "" : "";
+    if (vid) {
+      camIdRef.current = vid;
+      setCamId(vid);
+      storeDevice(CAM_KEY, vid);
+    }
+    if (aid) {
+      micIdRef.current = aid;
+      setMicId(aid);
+      storeDevice(MIC_KEY, aid);
+    }
+  }
+
+  // refreshDevices lists the available cameras + microphones for the dropdowns (AC-5). Device LABELS
+  // are only populated AFTER getUserMedia grants permission, so this runs post-capture; entries with
+  // no deviceId (no permission / phantom) are dropped so the selects only ever offer real devices.
+  async function refreshDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let list;
+    try {
+      list = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      return; // enumeration unsupported/blocked — the preview still works on the default device
+    }
+    if (cancelledRef.current) return;
+    const cams = [];
+    const mics = [];
+    for (const d of list) {
+      if (!d.deviceId) continue;
+      if (d.kind === "videoinput") cams.push({ id: d.deviceId, label: d.label || "Camera" });
+      else if (d.kind === "audioinput") mics.push({ id: d.deviceId, label: d.label || "Microphone" });
+    }
+    setDevices({ cams, mics });
+  }
+
   async function startCheck() {
     if (requestingRef.current) return; // a getUserMedia is already in flight
+    enteringRef.current = false; // a fresh check (incl. a retry) is back to a switchable preview
     requestingRef.current = true;
     stopStream(); // release any previous stream (e.g. on retry) before requesting a new one
     setPhase("requesting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await getStream();
       if (cancelledRef.current) {
         // The island unmounted while the prompt was pending — don't keep the camera on.
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      streamRef.current = stream;
+      installStream(stream);
+      syncSelectedFromTracks(stream); // point the dropdowns at the devices actually captured
+      await refreshDevices(); // labels resolve only post-permission — list the choices now
       setPhase("preview");
+    } catch (e) {
+      setError((e && /** @type {Error} */ (e).name) || String(e));
+      setPhase("error");
+    } finally {
+      requestingRef.current = false;
+    }
+  }
+
+  // switchDevice re-acquires the preview on a newly chosen camera or mic (AC-5). It runs only in the
+  // preview phase (the picker isn't shown once entered), records the pick in ref + state + session
+  // storage, then swaps the stream in place. A failed re-acquire surfaces the error screen, the same
+  // as the initial check. Guarded against a concurrent acquire (a rapid change while one is in flight).
+  async function switchDevice(kind, id) {
+    if (requestingRef.current || enteringRef.current) return; // acquiring, or entry already locked the stream
+    if (kind === "cam") {
+      camIdRef.current = id;
+      setCamId(id);
+      storeDevice(CAM_KEY, id);
+    } else {
+      micIdRef.current = id;
+      setMicId(id);
+      storeDevice(MIC_KEY, id);
+    }
+    requestingRef.current = true;
+    try {
+      const stream = await getStream();
+      // The guest hit Enter (or the island unmounted) while we were acquiring: the publisher has
+      // already taken the prior stream live, so installing this one would stop the published tracks
+      // (dead air). Release the just-captured stream and leave the live one untouched. The pick is
+      // still saved (storeDevice above), so the next session honours it.
+      if (cancelledRef.current || enteringRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      installStream(stream); // stops the prior capture once the new device is live (no black flash)
+      syncSelectedFromTracks(stream);
+      await refreshDevices();
     } catch (e) {
       setError((e && /** @type {Error} */ (e).name) || String(e));
       setPhase("error");
@@ -207,6 +377,34 @@ function DeviceCheck() {
     },
     [],
   );
+
+  // Seed the picker from this tab's session storage so a reload / retry reuses the guest's earlier
+  // pick before the first capture (mediaConstraints reads the refs). Best-effort (see loadDevice).
+  useEffect(() => {
+    const c = loadDevice(CAM_KEY);
+    const m = loadDevice(MIC_KEY);
+    if (c) {
+      camIdRef.current = c;
+      setCamId(c);
+    }
+    if (m) {
+      micIdRef.current = m;
+      setMicId(m);
+    }
+  }, []);
+
+  // Keep the dropdowns fresh when the guest plugs in / unplugs a device while on the check screen.
+  // Only the device LIST is refreshed (labels need the permission we already hold once previewing);
+  // the active capture is untouched. Registered once and cleaned up on unmount.
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md || !md.addEventListener) return undefined;
+    const onChange = () => {
+      refreshDevices();
+    };
+    md.addEventListener("devicechange", onChange);
+    return () => md.removeEventListener("devicechange", onChange);
+  }, []);
 
   // syncThumbnails rebuilds the backstage thumbnail list from the current roster (every other
   // guest/co-host) and the mesh's received streams, in a stable id order so tiles don't reshuffle.
@@ -578,6 +776,10 @@ function DeviceCheck() {
   }
 
   async function enter() {
+    // Lock the preview stream against an in-flight device switch (set synchronously, before any
+    // await): from here the stream we hold is the one the publisher will take live, and a late
+    // switch resolving mid-entry must not swap or stop it.
+    enteringRef.current = true;
     setPhase("entering");
     try {
       const res = await fetch(`/p/${encodeURIComponent(passTokenFromPath())}/enter`, {
@@ -593,6 +795,9 @@ function DeviceCheck() {
       startPublishing(); // keep the camera and publish it to the greenroom (PR-7)
       setPhase("entered");
     } catch (e) {
+      // Leave enteringRef set: the error screen's only exit is "Try again" → startCheck, which
+      // resets it. Holding it through the error phase makes a still-in-flight switch bail (it can't
+      // install behind the error UI), and the picker isn't rendered here so no new switch can start.
       stopStream(); // entry failed — don't leave the camera running behind the error UI
       setError(String((e && /** @type {Error} */ (e).message) || e));
       setPhase("error");
@@ -817,6 +1022,7 @@ function DeviceCheck() {
       sessionRef.current = null;
     }
     stopScreenCapture();
+    enteringRef.current = false; // back to a switchable preview — re-allow device changes
     setNetBlocked(false);
     setPhase("preview");
   }
@@ -909,6 +1115,42 @@ function DeviceCheck() {
     return (
       <div class="dc-preview">
         <video ref={videoRef} class="dc-video" autoplay playsinline muted />
+        {/* Device picker (AC-5): choose the camera + mic before going live. Switching re-acquires
+            the preview on the new device; the choice persists into the published stream. */}
+        <div class="dc-devices">
+          <label class="dc-device">
+            <span class="dc-device-label">Camera</span>
+            <select
+              class="dc-device-select dc-cam-select"
+              value={camId}
+              disabled={phase === "entering"}
+              onChange={(e) => switchDevice("cam", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
+            >
+              {devices.cams.length === 0 ? <option value="">Default camera</option> : null}
+              {devices.cams.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="dc-device">
+            <span class="dc-device-label">Microphone</span>
+            <select
+              class="dc-device-select dc-mic-select"
+              value={micId}
+              disabled={phase === "entering"}
+              onChange={(e) => switchDevice("mic", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
+            >
+              {devices.mics.length === 0 ? <option value="">Default microphone</option> : null}
+              {devices.mics.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <p>This is your camera preview. Only you can see it until you enter.</p>
         <button type="button" class="dc-enter" disabled={phase === "entering"} onClick={enter}>
           {phase === "entering" ? "Entering…" : "Enter the greenroom"}

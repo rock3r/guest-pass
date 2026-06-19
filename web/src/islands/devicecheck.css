@@ -1,0 +1,54 @@
+/* Device-check pre-join surface — functional-first styling (D-B); pixel-fidelity to the v2
+   prototype is a deferred polish pass (DEF-2). The guest picks a camera + microphone before going
+   live (M5.5 UX). These styles ride the same app.css bundle the guest pass page already loads. */
+
+.dc-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.dc-video {
+  width: min(100%, 360px);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+/* Camera + microphone dropdowns, sat under the preview at the same width. */
+.dc-devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: min(100%, 360px);
+}
+
+.dc-device {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.dc-device-label {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.dc-device-select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  max-width: 100%;
+}
+
+.dc-device-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
