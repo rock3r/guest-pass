@@ -4,6 +4,7 @@ package browsertest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
 	"testing"
@@ -193,6 +194,434 @@ func TestDeviceCheck_PreviewAndExplicitEntry(t *testing.T) {
 		}
 		if p.Status != store.PassOpened || p.OpenedAt == nil {
 			t.Fatalf("after entry, status=%q openedAt=%v, want opened + stamped", p.Status, p.OpenedAt)
+		}
+	})
+}
+
+// M5.5 device picker (pre-join UX): the preview phase offers a camera + microphone chooser
+// populated from enumerateDevices, the dropdown reflects the device actually captured, picking a
+// different device re-acquires getUserMedia with the deviceId constraint, and the chosen device
+// persists into the published session stream (no mid-session re-pick needed). Fake media exposes
+// one camera but several microphones, so the switch is exercised on the mic.
+func TestDeviceCheck_DevicePickerSelectsAndPersists(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		// Run the device check → the preview renders with the camera + mic pickers present.
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-cam-select`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview + device picker did not render: %v", err)
+		}
+
+		// The dropdowns are populated from enumerateDevices (real, selectable devices only).
+		var camOpts, micOpts int
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`[...document.querySelectorAll('.dc-cam-select option')].filter((o) => o.value).length`, &camOpts),
+			chromedp.Evaluate(`[...document.querySelectorAll('.dc-mic-select option')].filter((o) => o.value).length`, &micOpts),
+		); err != nil {
+			t.Fatalf("read option counts: %v", err)
+		}
+		if camOpts < 1 || micOpts < 1 {
+			t.Fatalf("device pickers not populated: cams=%d mics=%d (want >=1 each)", camOpts, micOpts)
+		}
+
+		// The camera dropdown reflects the device actually being captured in the preview.
+		var camSel, activeCam string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`document.querySelector('.dc-cam-select').value`, &camSel),
+			chromedp.Evaluate(`document.querySelector('.dc-video').srcObject.getVideoTracks()[0].getSettings().deviceId`, &activeCam),
+		); err != nil {
+			t.Fatalf("read camera selection: %v", err)
+		}
+		if camSel == "" || camSel != activeCam {
+			t.Fatalf("camera picker = %q but captured device = %q; the dropdown must reflect the live camera", camSel, activeCam)
+		}
+
+		// Pick a DIFFERENT microphone → the preview re-acquires getUserMedia with that deviceId.
+		var targetMic string
+		if err := chromedp.Run(cctx, chromedp.Evaluate(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			const cur = sel.value;
+			return [...sel.options].map(o => o.value).find(v => v && v !== cur) || "";
+		})()`, &targetMic)); err != nil {
+			t.Fatalf("find an alternate mic: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone to switch to")
+		}
+		pickMic := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		})()`, targetMic)
+		audioIs := fmt.Sprintf(`(() => {
+			const v = document.querySelector('.dc-video');
+			if (!v || !v.srcObject) return false;
+			const at = v.srcObject.getAudioTracks()[0];
+			return !!at && at.getSettings().deviceId === %q;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(pickMic, nil),
+			chromedp.Poll(audioIs, nil, chromedp.WithPollingTimeout(20*time.Second)),
+		); err != nil {
+			t.Fatalf("switching the mic did not re-acquire the chosen device: %v", err)
+		}
+
+		// Enter → the chosen mic persists into the stream published to the greenroom (AC-12);
+		// the guest never has to re-pick once in session.
+		sessionMicIs := fmt.Sprintf(`(() => {
+			const v = document.querySelector('.gs-selfview');
+			if (!v || !v.srcObject) return false;
+			const at = v.srcObject.getAudioTracks()[0];
+			return !!at && at.getSettings().deviceId === %q;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+			chromedp.Poll(sessionMicIs, nil, chromedp.WithPollingTimeout(10*time.Second)),
+		); err != nil {
+			t.Fatalf("the selected mic must persist into the published session stream: %v", err)
+		}
+	})
+}
+
+// Race guard: if the guest changes a device and then hits Enter before the re-acquire finishes, the
+// in-flight switch must NOT swap (and stop the tracks of) the stream the publisher just took live —
+// that would put a dead/old stream on air. The switch's getUserMedia is delayed so it resolves AFTER
+// entry has published; the published self-view tracks must still be LIVE once it does.
+func TestDeviceCheck_SwitchDuringEntryDoesNotPublishStoppedStream(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview did not render: %v", err)
+		}
+
+		// From here, delay every getUserMedia so the device switch's re-acquire resolves well after
+		// the (fast, local) entry has published — opening the race window deterministically. The
+		// initial capture already happened above, so only the switch is affected; it flags on resolve.
+		inject := `(() => {
+			const md = navigator.mediaDevices;
+			const orig = md.getUserMedia.bind(md);
+			window.__switchResolved = false;
+			md.getUserMedia = (c) => new Promise((resolve, reject) => {
+				setTimeout(() => { orig(c).then((str) => { window.__switchResolved = true; resolve(str); }, reject); }, 700);
+			});
+			return true;
+		})()`
+		var targetMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(inject, nil),
+			chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('.dc-mic-select');
+				const cur = sel.value;
+				return [...sel.options].map((o) => o.value).find((v) => v && v !== cur) || "";
+			})()`, &targetMic),
+		); err != nil {
+			t.Fatalf("inject + pick alternate mic: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone")
+		}
+
+		// Start the (now-delayed) switch, then immediately Enter — the publisher takes the current
+		// stream live while the switch is still acquiring.
+		switchThenEnter := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			// Click Enter synchronously, in the SAME tick as the change — before Preact re-renders the
+			// held/disabled Enter — to drive the sub-frame micro-race the code guard defends. (A real
+			// user can't change-then-click inside one frame; the held Enter covers them, exercised by
+			// TestDeviceCheck_EnterHeldDuringSwitchPublishesChosenDevice.)
+			document.querySelector('.dc-enter').click();
+			return true;
+		})()`, targetMic)
+		// Grab the entry-time track OBJECTS (the stream taken live) the instant we're entered, while
+		// the switch is still acquiring — then assert THOSE objects stay live after it resolves. We
+		// hold the track refs (not the element's srcObject) because a late switch re-points the
+		// self-view to its new stream on re-render, which would otherwise mask the stopped publish.
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(switchThenEnter, nil),
+			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+			chromedp.Evaluate(`(() => {
+				const so = document.querySelector('.gs-selfview').srcObject;
+				window.__pub = { audio: so.getAudioTracks()[0], video: so.getVideoTracks()[0] };
+				return !!(window.__pub.audio && window.__pub.video);
+			})()`, nil),
+			// Wait until the late switch has actually resolved — the moment the bug would swap +
+			// stop the published stream — before checking the published tracks are still alive.
+			chromedp.Poll(`window.__switchResolved === true`, nil, chromedp.WithPollingTimeout(20*time.Second)),
+		); err != nil {
+			t.Fatalf("switch-then-enter flow: %v", err)
+		}
+
+		var audioState, videoState string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`window.__pub.audio.readyState`, &audioState),
+			chromedp.Evaluate(`window.__pub.video.readyState`, &videoState),
+		); err != nil {
+			t.Fatalf("read published track states: %v", err)
+		}
+		if audioState != "live" || videoState != "live" {
+			t.Fatalf("a late device switch stopped the published stream: audio=%q video=%q (want both live)", audioState, videoState)
+		}
+	})
+}
+
+// When entry wins the switch-vs-enter race the picker keeps the prior stream live — so the saved
+// selection (and the dropdown it drives) must be resynced to the device that stream actually uses,
+// not left on the aborted pick. Otherwise the persisted choice (and the select after a network
+// retry back to preview) names a device the live stream isn't using.
+func TestDeviceCheck_AbortedSwitchResyncsPersistedDevice(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview did not render: %v", err)
+		}
+
+		inject := `(() => {
+			const md = navigator.mediaDevices;
+			const orig = md.getUserMedia.bind(md);
+			window.__switchResolved = false;
+			md.getUserMedia = (c) => new Promise((resolve, reject) => {
+				setTimeout(() => { orig(c).then((str) => { window.__switchResolved = true; resolve(str); }, reject); }, 700);
+			});
+			return true;
+		})()`
+		var targetMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(inject, nil),
+			chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('.dc-mic-select');
+				const cur = sel.value;
+				return [...sel.options].map((o) => o.value).find((v) => v && v !== cur) || "";
+			})()`, &targetMic),
+		); err != nil {
+			t.Fatalf("inject + pick alternate mic: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone")
+		}
+
+		switchThenEnter := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			// Click Enter synchronously, in the SAME tick as the change — before Preact re-renders the
+			// held/disabled Enter — to drive the sub-frame micro-race the code guard defends. (A real
+			// user can't change-then-click inside one frame; the held Enter covers them, exercised by
+			// TestDeviceCheck_EnterHeldDuringSwitchPublishesChosenDevice.)
+			document.querySelector('.dc-enter').click();
+			return true;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(switchThenEnter, nil),
+			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+			chromedp.Evaluate(`(() => {
+				const so = document.querySelector('.gs-selfview').srcObject;
+				window.__liveMic = so.getAudioTracks()[0].getSettings().deviceId;
+				return !!window.__liveMic;
+			})()`, nil),
+			chromedp.Poll(`window.__switchResolved === true`, nil, chromedp.WithPollingTimeout(20*time.Second)),
+		); err != nil {
+			t.Fatalf("switch-then-enter flow: %v", err)
+		}
+
+		// The persisted mic must match the device the published stream is actually using — the
+		// aborted pick (targetMic) must not survive in storage or drive the (re-shown) dropdown.
+		var savedMic, liveMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`sessionStorage.getItem("gp.device.mic") || ""`, &savedMic),
+			chromedp.Evaluate(`window.__liveMic`, &liveMic),
+		); err != nil {
+			t.Fatalf("read persisted vs live mic: %v", err)
+		}
+		if savedMic != liveMic {
+			t.Fatalf("aborted switch left the picker desynced: saved mic=%q but live mic=%q (want equal)", savedMic, liveMic)
+		}
+		if savedMic == targetMic {
+			t.Fatalf("the aborted pick %q must not persist as the selection", targetMic)
+		}
+	})
+}
+
+// The chosen device must be the one published: while a switch is still acquiring, Enter is held
+// disabled, so a guest who picks a new mic and reaches for Enter goes live on THAT mic once the
+// switch settles (not the prior one). Verifies the hold and that entry afterward publishes the pick.
+func TestDeviceCheck_EnterHeldDuringSwitchPublishesChosenDevice(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview did not render: %v", err)
+		}
+
+		// Delay the switch acquire so the "held" window is observable.
+		inject := `(() => {
+			const md = navigator.mediaDevices;
+			const orig = md.getUserMedia.bind(md);
+			window.__switchResolved = false;
+			md.getUserMedia = (c) => new Promise((resolve, reject) => {
+				setTimeout(() => { orig(c).then((str) => { window.__switchResolved = true; resolve(str); }, reject); }, 700);
+			});
+			return true;
+		})()`
+		var targetMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(inject, nil),
+			chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('.dc-mic-select');
+				const cur = sel.value;
+				return [...sel.options].map((o) => o.value).find((v) => v && v !== cur) || "";
+			})()`, &targetMic),
+		); err != nil {
+			t.Fatalf("inject + pick alternate mic: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone")
+		}
+
+		dispatch := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		})()`, targetMic)
+		// Enter is held disabled while the switch acquires, then released once it settles.
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(dispatch, nil),
+			chromedp.Poll(`document.querySelector('.dc-enter').disabled === true`,
+				nil, chromedp.WithPollingTimeout(5*time.Second)),
+			chromedp.Poll(`window.__switchResolved === true && document.querySelector('.dc-enter').disabled === false`,
+				nil, chromedp.WithPollingTimeout(20*time.Second)),
+		); err != nil {
+			t.Fatalf("Enter was not held during the switch then released: %v", err)
+		}
+
+		// Entering after the switch settles publishes the CHOSEN mic, live.
+		liveMicIs := fmt.Sprintf(`(() => {
+			const v = document.querySelector('.gs-selfview');
+			if (!v || !v.srcObject) return false;
+			const at = v.srcObject.getAudioTracks()[0];
+			return !!at && at.readyState === "live" && at.getSettings().deviceId === %q;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+			chromedp.Poll(liveMicIs, nil, chromedp.WithPollingTimeout(10*time.Second)),
+		); err != nil {
+			t.Fatalf("after the switch settled, entry must publish the chosen mic live: %v", err)
+		}
+	})
+}
+
+// A device switch whose getUserMedia fails (unplugged / busy device) must not strand the guest on
+// the error screen with the prior camera/mic still running behind it. The working preview stays
+// live, the picker rolls back to the device actually in use, and a notice explains the no-op.
+func TestDeviceCheck_SwitchFailureKeepsPreviewAndRollsBack(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("preview did not render: %v", err)
+		}
+
+		// Remember the live mic + hold a ref to the working audio track, then make the NEXT acquire
+		// (the switch) fail with a non-overconstrained error so getStream rethrows.
+		var origMic, targetMic string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`document.querySelector('.dc-mic-select').value`, &origMic),
+			chromedp.Evaluate(`(() => { window.__a = document.querySelector('.dc-video').srcObject.getAudioTracks()[0]; return true; })()`, nil),
+			chromedp.Evaluate(`(() => {
+				const md = navigator.mediaDevices;
+				const orig = md.getUserMedia.bind(md);
+				md.getUserMedia = (c) => { md.getUserMedia = orig; return Promise.reject(new DOMException("busy", "NotReadableError")); };
+				return true;
+			})()`, nil),
+			chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('.dc-mic-select');
+				const cur = sel.value;
+				return [...sel.options].map((o) => o.value).find((v) => v && v !== cur) || "";
+			})()`, &targetMic),
+		); err != nil {
+			t.Fatalf("setup failing switch: %v", err)
+		}
+		if targetMic == "" {
+			t.Fatalf("expected fake media to expose more than one microphone")
+		}
+
+		// Pick the (doomed) device; the switch fails.
+		pick := fmt.Sprintf(`(() => {
+			const sel = document.querySelector('.dc-mic-select');
+			sel.value = %q;
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		})()`, targetMic)
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(pick, nil),
+			// The failure surfaces a notice and KEEPS the preview — it must not drop to the error screen.
+			chromedp.WaitVisible(`.dc-switch-error`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("a failed switch must keep the preview and show a notice, not the error screen: %v", err)
+		}
+
+		var hasError, hasVideo bool
+		var micNow, trackState string
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`!!document.querySelector('.dc-error')`, &hasError),
+			chromedp.Evaluate(`!!document.querySelector('.dc-video')`, &hasVideo),
+			chromedp.Evaluate(`document.querySelector('.dc-mic-select').value`, &micNow),
+			chromedp.Evaluate(`window.__a.readyState`, &trackState),
+		); err != nil {
+			t.Fatalf("read post-failure state: %v", err)
+		}
+		if hasError || !hasVideo {
+			t.Fatalf("a failed switch must stay in preview: errorScreen=%v videoPresent=%v", hasError, hasVideo)
+		}
+		if trackState != "live" {
+			t.Fatalf("the working preview stream must stay live after a failed switch, got %q", trackState)
+		}
+		if micNow != origMic || micNow == targetMic {
+			t.Fatalf("the failed pick must roll back to the working device: now=%q orig=%q failed=%q", micNow, origMic, targetMic)
 		}
 	})
 }
