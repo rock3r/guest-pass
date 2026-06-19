@@ -39,6 +39,8 @@ type detailData struct {
 	ChannelLinked  bool   // ?channel=linked
 	ChannelCleared bool   // ?channel=cleared
 	ChannelError   bool   // ?error=channel — the submitted channel was invalid
+	// Progressive-trust (D-36)
+	InviteQuotaError bool // ?error=invite-quota — the host hit their per-window invite cap
 	// Sources tab (read-only, EN-26)
 	Slots     []slotCard
 	RevealAll string // newline-joined freshly-minted OBS URLs for the copy-all block ("" if none)
@@ -123,6 +125,7 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 	d.ChannelLinked = q.Get("channel") == "linked"
 	d.ChannelCleared = q.Get("channel") == "cleared"
 	d.ChannelError = q.Get("error") == "channel"
+	d.InviteQuotaError = q.Get("error") == "invite-quota"
 	s.rd.render(w, r, "streamdetail.html", pageData{
 		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
 		Data: d,
@@ -132,7 +135,7 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 // createInvite mints a guest pass from the invite form (name/email/role only — EN-23),
 // emails the magic link, and reveals it once. Eligibility (can_screen) is never set here.
 func (s *appServer) createInvite(w http.ResponseWriter, r *http.Request) {
-	_, st, ok := s.ownedStream(w, r)
+	host, st, ok := s.ownedStream(w, r)
 	if !ok {
 		return
 	}
@@ -144,6 +147,12 @@ func (s *appServer) createInvite(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(r.PostFormValue("email"))
 	if email == "" {
 		http.Error(w, "email is required to send an invite", http.StatusBadRequest)
+		return
+	}
+	// Progressive-trust invite cap (D-36): reject before minting/sending if the host has hit their
+	// per-window invite quota. PRG back to the stream detail with the quota flash.
+	if over, _ := overInviteQuota(r.Context(), s.store, s.trust, host, time.Now()); over {
+		http.Redirect(w, r, "/app/streams/"+st.ID+"?error=invite-quota", http.StatusSeeOther)
 		return
 	}
 	role := normalizeRole(r.PostFormValue("role"))
@@ -180,8 +189,15 @@ func (s *appServer) setInviteRole(w http.ResponseWriter, r *http.Request) {
 // reissueInvite rotates the pass's magic-link token (the old link stops resolving),
 // re-emails it, sets the pass back to sent (PD-2), and reveals the new link once.
 func (s *appServer) reissueInvite(w http.ResponseWriter, r *http.Request) {
-	_, st, pass, ok := s.ownedStreamAndPass(w, r)
+	host, st, pass, ok := s.ownedStreamAndPass(w, r)
 	if !ok {
+		return
+	}
+	// Re-issue re-sends a real invite email and re-stamps sent_at, so it counts against — and is
+	// capped by — the progressive-trust invite quota (D-36) exactly like a fresh invite. Without this
+	// gate a host could spam unbounded emails to one address by repeatedly re-issuing a single pass.
+	if over, _ := overInviteQuota(r.Context(), s.store, s.trust, host, time.Now()); over {
+		http.Redirect(w, r, "/app/streams/"+st.ID+"?error=invite-quota", http.StatusSeeOther)
 		return
 	}
 	raw, err := token.Mint()

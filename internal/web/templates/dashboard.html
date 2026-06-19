@@ -4,6 +4,8 @@
 <h1>Your streams</h1>
 </div>
 
+{{if .Data.QuotaError}}<p class="dash-flash dash-flash-error" role="alert">You've reached the stream limit for your account. New accounts start with a lower limit that grows with account age — delete an old stream or try again later.</p>{{end}}
+
 {{if .Data.Streams}}
 <ul class="stream-list">
 {{range .Data.Streams}}

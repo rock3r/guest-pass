@@ -34,6 +34,7 @@ type appServer struct {
 	binds     *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
 	auth      *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
 	liveCheck LiveChecker         // D-29 live-verify (validate + persist a linked channel); may be nil
+	trust     auth.TrustPolicy    // D-36 progressive-trust invite/stream quotas; zero value = disabled
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
@@ -46,7 +47,8 @@ type dashStream struct {
 }
 
 type dashboardData struct {
-	Streams []dashStream
+	Streams    []dashStream
+	QuotaError bool // ?error=stream-quota — the host hit their progressive-trust stream cap (D-36)
 }
 
 // settingsData backs the host's account settings page (AC-3..5): the host's own Google identity
@@ -121,7 +123,7 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	s.rd.render(w, r, "dashboard.html", pageData{
 		Title: "Your streams", Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
-		Data: dashboardData{Streams: rows},
+		Data: dashboardData{Streams: rows, QuotaError: r.URL.Query().Get("error") == "stream-quota"},
 	})
 }
 
@@ -136,6 +138,12 @@ func (s *appServer) createStream(w http.ResponseWriter, r *http.Request) {
 	title, sched, dur, err := parseStreamForm(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Progressive-trust concurrent-stream cap (D-36): reject over-quota before creating. PRG back to
+	// the dashboard with the quota flash.
+	if over, _ := overStreamQuota(r.Context(), s.store, s.trust, host, time.Now()); over {
+		http.Redirect(w, r, "/app?error=stream-quota", http.StatusSeeOther)
 		return
 	}
 	if _, err := s.store.CreateStream(r.Context(), store.CreateStreamParams{

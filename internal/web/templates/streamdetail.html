@@ -82,6 +82,7 @@ Copy the link now; it won't be shown again:</p>
 
 <section class="invites">
 <h2>Invites</h2>
+{{if .Data.InviteQuotaError}}<p class="settings-flash settings-flash-error" data-flash="invite-quota" role="alert">You've reached the invite limit for your account right now. New accounts can send fewer invites; the limit grows with account age. Try again later.</p>{{end}}
 {{if .Data.Passes}}
 <table class="invite-table">
 <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead>

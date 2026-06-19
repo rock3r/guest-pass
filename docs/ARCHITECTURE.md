@@ -1454,6 +1454,24 @@ report or its complaint text, so a host can never learn which invitee reported t
 guard, EN-24). After the review window (`REPORT_RETENTION`, default 30d) the retention sweep nulls
 `reporter_email` + `message`, keeping only the anonymous `host_id`/`category`/`time` signal (D-37).
 
+**Progressive-trust quotas (M5 PR-10, D-36 / §7.9 / §9.4).** Two per-host caps, tightest for new
+accounts and looser once the account ages past `RATE_TRUST_AFTER`: an **invite (= email) cap** per
+rolling 24h and a **concurrent-stream cap**. They are a pure `auth.TrustPolicy` (config-backed
+numbers; the only dial is account age — "good standing" is already covered, since a suspended host
+can't reach these paths, EN-6) consulted at the four creation handlers (`createInvite`/`createPass`
+and both `createStream`s): an over-quota host is refused (a `429` on the JSON API, a PRG flash on the
+forms) **before** any pass is minted or email sent. Fail-safe by construction — a zero policy is
+unlimited (an unconfigured/test deployment never locks a host out), config rejects a non-positive
+number rather than silently disabling a limit, and a transient count-error fails **open** (the
+per-IP `GET /p/{token}` + `/ws`-reconnect limiters, abuse reporting, and suspend remain as
+backstops). The invite cap counts only **sent** invites (`passes.sent_at`), so a failed delivery
+doesn't consume the email quota. Quota state is the DB row counts themselves, so it survives a
+restart (unlike the in-memory per-IP limiter). Re-issue is gated by the same cap (it's a delivered
+email); and because re-issue re-sends to an existing address *without* growing the distinct-invite
+count, a separate **per-host send-rate limiter** (a token bucket keyed by host id) caps the rate of
+all three email-sending routes (`createInvite`/`createPass`/`reissueInvite`) — burst for a panel
+invite, slow refill to bound sustained re-send spam.
+
 ### 24h purge (D-37)
 
 Guest PII (`passes.name` / `passes.email`) is **deleted within 24h of stream end** by

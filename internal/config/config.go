@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -80,6 +81,14 @@ type Config struct {
 	ReportRetention time.Duration // REPORT_RETENTION: how long an abuse report's reporter/message is kept before anonymizing (D-42)
 	ReapInterval    time.Duration // REAP_INTERVAL: how often the idle-session reaper polls
 	ReapIdleAfter   time.Duration // REAP_IDLE_AFTER: end a session idle (no participants) this long
+
+	// Progressive-trust per-host quota dials (D-36 / §7.9 / §9.4), config-backed with safe defaults.
+	// A host graduates from the new tier to the trusted tier once its account age crosses RateTrustAfter.
+	RateTrustAfter     time.Duration // RATE_TRUST_AFTER: account age at which the looser tier applies
+	RateNewInvites     int           // RATE_NEW_INVITES: max invites sent / 24h for a new host
+	RateTrustedInvites int           // RATE_TRUSTED_INVITES: ... for a trusted host
+	RateNewStreams     int           // RATE_NEW_STREAMS: max existing streams for a new host
+	RateTrustedStreams int           // RATE_TRUSTED_STREAMS: ... for a trusted host
 }
 
 // defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
@@ -94,6 +103,15 @@ const (
 	defaultReportRetention = 30 * 24 * time.Hour // abuse-report review window before anonymizing (D-42)
 	defaultReapInterval    = time.Minute         // idle-session reaper poll cadence (D-40)
 	defaultReapIdleAfter   = 15 * time.Minute    // auto-end a session idle this long (frees the slot)
+)
+
+// Progressive-trust defaults (D-36). Tightest for new accounts, looser once aged; tuned at launch.
+const (
+	defaultRateTrustAfter     = 7 * 24 * time.Hour // graduate to the trusted tier after a week
+	defaultRateNewInvites     = 10                 // a brand-new host: 10 invite-emails / 24h
+	defaultRateTrustedInvites = 100                // an aged host: 100 / 24h
+	defaultRateNewStreams     = 3                  // a brand-new host: at most 3 streams
+	defaultRateTrustedStreams = 50                 // an aged host: at most 50
 )
 
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
@@ -154,6 +172,21 @@ func load(getenv func(string) string) (*Config, error) {
 	if c.ReapIdleAfter, err = parsePositiveDuration("REAP_IDLE_AFTER", getenv("REAP_IDLE_AFTER"), defaultReapIdleAfter); err != nil {
 		return nil, err
 	}
+	if c.RateTrustAfter, err = parsePositiveDuration("RATE_TRUST_AFTER", getenv("RATE_TRUST_AFTER"), defaultRateTrustAfter); err != nil {
+		return nil, err
+	}
+	if c.RateNewInvites, err = parsePositiveInt("RATE_NEW_INVITES", getenv("RATE_NEW_INVITES"), defaultRateNewInvites); err != nil {
+		return nil, err
+	}
+	if c.RateTrustedInvites, err = parsePositiveInt("RATE_TRUSTED_INVITES", getenv("RATE_TRUSTED_INVITES"), defaultRateTrustedInvites); err != nil {
+		return nil, err
+	}
+	if c.RateNewStreams, err = parsePositiveInt("RATE_NEW_STREAMS", getenv("RATE_NEW_STREAMS"), defaultRateNewStreams); err != nil {
+		return nil, err
+	}
+	if c.RateTrustedStreams, err = parsePositiveInt("RATE_TRUSTED_STREAMS", getenv("RATE_TRUSTED_STREAMS"), defaultRateTrustedStreams); err != nil {
+		return nil, err
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -176,6 +209,24 @@ func parsePositiveDuration(name, raw string, def time.Duration) (time.Duration, 
 		return 0, fmt.Errorf("config: %s=%q must be positive: %w", name, raw, ErrInvalidValue)
 	}
 	return d, nil
+}
+
+// parsePositiveInt parses a positive integer (e.g. a quota), returning def for an empty value and a
+// fail-closed error for a non-integer or a non-positive one. A non-positive quota is rejected rather
+// than silently disabling the limit (limits fail safe, D-36); to loosen, raise the number.
+func parsePositiveInt(name, raw string, def int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q: %w", name, raw, ErrInvalidValue)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("config: %s=%q must be positive: %w", name, raw, ErrInvalidValue)
+	}
+	return n, nil
 }
 
 // validate enforces the step-1 fail-closed invariants. Additional required-var checks

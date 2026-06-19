@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type apiServer struct {
 	binds     *bindingLocks       // serialize a host's slot-binding ops with the /ws join-replay (D-20)
 	auth      *auth.Authenticator // clears the session cookie on account erasure (DELETE /api/me, AC-5)
 	liveCheck LiveChecker         // D-29 live-verify (watch link + verified status); may be nil
+	trust     auth.TrustPolicy    // D-36 progressive-trust invite/stream quotas; zero value = disabled
 }
 
 // --- response DTOs (never expose token hashes or raw tokens) ---
@@ -85,6 +87,10 @@ func (a *apiServer) createStream(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Title) == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if over, limit := overStreamQuota(r.Context(), a.store, a.trust, host, time.Now()); over {
+		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("stream limit reached (%d) for your account", limit))
 		return
 	}
 	s, err := a.store.CreateStream(r.Context(), store.CreateStreamParams{
@@ -194,6 +200,13 @@ func (a *apiServer) createPass(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Email) == "" {
 		writeError(w, http.StatusBadRequest, "email is required to send an invite")
 		return
+	}
+	// Progressive-trust invite cap (D-36): reject before minting/sending if the host is over quota.
+	if host, ok := auth.HostFromContext(r.Context()); ok {
+		if over, limit := overInviteQuota(r.Context(), a.store, a.trust, host, time.Now()); over {
+			writeError(w, http.StatusTooManyRequests, fmt.Sprintf("invite limit reached (%d) for your account", limit))
+			return
+		}
 	}
 	role := store.RoleGuest
 	if req.Role == store.RoleCohost {
