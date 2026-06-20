@@ -107,9 +107,21 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	if r.Header.Get("Sec-WebSocket-Version") != "13" || !validWebSocketKey(r.Header.Get("Sec-WebSocket-Key")) {
 		return false
 	}
-	for _, tok := range strings.Split(r.Header.Get("Connection"), ",") {
-		if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
-			return true
+	// "Connection" may arrive comma-joined OR split across multiple header fields (a proxy can do
+	// either, and they're equivalent per RFC 7230). Header.Get reads only the first field, so check
+	// every value — matching what websocket.Accept itself accepts, so a genuine upgrade behind such
+	// a proxy is still exempted rather than wrongly capped.
+	return headerListContainsToken(r.Header.Values("Connection"), "upgrade")
+}
+
+// headerListContainsToken reports whether token (case-insensitive) appears among the comma-listed
+// tokens across all of values — the multi-field, comma-joined form HTTP allows for list headers.
+func headerListContainsToken(values []string, token string) bool {
+	for _, v := range values {
+		for _, tok := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), token) {
+				return true
+			}
 		}
 	}
 	return false

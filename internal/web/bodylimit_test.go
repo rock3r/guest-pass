@@ -95,6 +95,24 @@ func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	}
 }
 
+// A genuine upgrade whose Connection tokens are SPLIT across multiple header fields (as a proxy may
+// send them) is still recognized and exempt — Header.Get would see only the first field.
+func TestRequestBodyLimit_WSUpgradeSplitConnectionHeader(t *testing.T) {
+	next, called, _ := readEcho(t)
+	mw := RequestBodyLimit(16)(next)
+
+	req := wsUpgradeReq()
+	req.Header.Del("Connection")
+	req.Header.Add("Connection", "keep-alive") // first field lacks the Upgrade token
+	req.Header.Add("Connection", "Upgrade")    // ...it's in a second Connection field
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if !*called || rec.Code != http.StatusOK {
+		t.Fatalf("split-Connection upgrade: called=%v code=%d, want true/200", called, rec.Code)
+	}
+}
+
 // A non-upgrade request to /ws (POST /ws, or a GET missing the full handshake — e.g. only the
 // Connection/Upgrade pair without Sec-WebSocket-Key/Version) is NOT exempt: the exemption requires
 // the genuine handshake, not the path or a partial header set, so the cap still applies.
