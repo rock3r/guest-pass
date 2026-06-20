@@ -74,7 +74,9 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 > guest journey (`/p`, `/ws`, `/static`) and **refuses `/auth/dev`, the greenroom, the admin API, and
 > the OBS source pages `/s`** — so neither a host/admin capability nor a slot **source token** ever
 > traverses the tunnel (OBS runs on the host machine over loopback). The **host signs in on loopback**
-> (`localhost`) on the machine running `smoke.sh`. It's still a throwaway dev instance — don't reuse
+> (`localhost`) on the machine running `smoke.sh`. (`/auth/dev?as=host2` mints a second, **non-admin**
+> dev host for the local admin-gate smoke below; it is equally loopback-only and the same path-block
+> keeps it off the tunnel.) It's still a throwaway dev instance — don't reuse
 > the tunnel URL beyond the smoke, and **Ctrl-C to tear it down** when done.
 
 ---
@@ -216,3 +218,37 @@ The driver already proves this headless; this confirms it on the **real OBS-CEF 
   (`TURN_URL`/`TURN_SECRET` + a coturn, `DEPLOYMENT.md` §2/§9) — it's simply not exercised here.
 - See `docs/TESTING.md` §5 for why these gates are manual, and `docs/ARCHITECTURE.md` (RF-8, §7)
   for the suppression-lock receiver-side contract this smoke confirms on real OBS + peers.
+
+---
+
+## Local M5 gate: admin suspend-cascade (two dev hosts, no remote deploy)
+
+The D-27 **admin suspend-cascade** — plus the §7.7 metadata-only boundary and the non-admin
+`/admin` 403 — needs a SECOND, non-admin host, which the single always-admin dev identity can't
+provide. **`/auth/dev?as=host2`** mints a distinct non-admin active host (`host2@localhost`), so the
+whole gate runs on **one local instance with no tunnel and no Google**: `localhost` is a secure
+context, so a same-machine guest's camera works over loopback.
+
+Run a `dev` binary that includes this seam (e.g. `scripts/smoke.sh --no-tunnel` from a checkout that
+has it). Use **three separate browser contexts** (distinct cookie jars — e.g. a normal window, an
+incognito window, and a second profile):
+
+1. **Admin (A):** open `http://localhost:8137/auth/dev` → active + admin host.
+2. **Host B:** open `http://localhost:8137/auth/dev?as=host2` → a distinct **non-admin** host. In B's
+   `/app`: create a stream → invite a guest → **Go live**.
+3. **Guest:** open B's guest link (`/p/<token>`) on `localhost`, allow camera, **Enter the greenroom**
+   → B now has a live session with a connected peer.
+4. **A → `/admin` → Live sessions:** B's session lists host name/email, stream title, and a participant
+   **count** — never B's guest names/emails or any media/chat.
+5. **A → Hosts → B's row:** tick **"end live session now"** (shown only because B is live) → **Suspend**.
+
+Confirm:
+- [ ] B is blocked from starting a new stream (suspended).
+- [ ] B's session is force-ended — the guest gets a terminal "session ended" reason and the session
+      drops off `/admin` Live sessions.
+- [ ] A never saw B's guest PII or backstage media/chat (metadata only).
+- [ ] Signing in as B (non-admin) and opening `/admin` → **403**.
+- [ ] A cannot suspend its **own** account (`error=self`).
+
+`?as=host2` is **dev-build-only** and **loopback-only** (same guard as the primary dev login); the
+smoke proxy's path-block keeps `/auth/dev` — including this variant — off any tunnel.
