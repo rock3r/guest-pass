@@ -98,10 +98,10 @@ func TestRequestBodyLimit_WSNonUpgradeCapped(t *testing.T) {
 	}
 }
 
-// Even without a declared Content-Length (chunked), the cap is enforced: the handler's read
-// past the limit fails, so an unbounded body can't be buffered.
-func TestRequestBodyLimit_ChunkedEnforced(t *testing.T) {
-	next, called, readErr := readEcho(t)
+// An oversized chunked/unknown-length body is rejected with 413 BEFORE the handler runs, so a
+// handler that never reads the body still can't execute on an oversized request.
+func TestRequestBodyLimit_ChunkedOversizeRejected(t *testing.T) {
+	next, called, _ := readEcho(t)
 	mw := RequestBodyLimit(16)(next)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/streams", strings.NewReader(strings.Repeat("x", 64)))
@@ -110,10 +110,37 @@ func TestRequestBodyLimit_ChunkedEnforced(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
-	if !*called {
-		t.Fatal("a chunked body reaches the handler (no Content-Length fast path)")
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize chunked body = %d, want 413", rec.Code)
 	}
-	if *readErr == nil {
-		t.Fatal("reading a chunked body past the cap must error (cap enforced via MaxBytesReader)")
+	if *called {
+		t.Fatal("the wrapped handler must not run for an oversize chunked body")
+	}
+}
+
+// A within-cap chunked body passes through to the handler intact (the middleware buffers and
+// re-provides it), so legitimate unknown-length requests still work.
+func TestRequestBodyLimit_ChunkedWithinCapPasses(t *testing.T) {
+	called := false
+	var got string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := RequestBodyLimit(64)(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/streams", strings.NewReader("hello chunked"))
+	req.ContentLength = -1 // unknown length (chunked)
+	req.Header.Del("Content-Length")
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if !called || rec.Code != http.StatusOK {
+		t.Fatalf("within-cap chunked: called=%v code=%d, want true/200", called, rec.Code)
+	}
+	if got != "hello chunked" {
+		t.Fatalf("handler saw body %q, want it re-provided intact", got)
 	}
 }
