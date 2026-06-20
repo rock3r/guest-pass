@@ -351,7 +351,10 @@ pages.
   declared `Content-Length` over the cap is refused outright; a chunked/unknown-length
   body is buffered up to the cap and rejected there if it exceeds it, else re-provided to
   the handler intact (GuestPass has no streaming-upload route, so this never truncates a
-  legitimate body and the buffer is bounded by the cap). The cap is config-backed
+  legitimate body and the buffer is bounded by the cap). To stop a slowloris client from
+  stalling that read and pinning a goroutine, the middleware also sets a per-request body
+  read deadline (the server uses only `ReadHeaderTimeout`, since a global `ReadTimeout`
+  would kill the long-lived `/ws` stream). The cap is config-backed
   (`MAX_REQUEST_BODY_BYTES`, default 1 MiB) and fails closed; **only a genuine WebSocket
   upgrade to `/ws` is exempt** (the hijacked streaming socket, not a finite request body)
   — the exemption is gated on the upgrade handshake, not the path, so a stray `POST /ws`

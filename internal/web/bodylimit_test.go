@@ -4,9 +4,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
+
+// deadlineBody is a request body whose Read always reports a read-deadline timeout, simulating a
+// slowloris stream that the per-request body deadline tripped.
+type deadlineBody struct{}
+
+func (deadlineBody) Read([]byte) (int, error) { return 0, os.ErrDeadlineExceeded }
+func (deadlineBody) Close() error             { return nil }
 
 // readEcho is a next handler that drains the body and reports whether the read succeeded,
 // so the cap-enforcement (read error past the limit) is observable in the chunked case.
@@ -135,6 +143,26 @@ func TestRequestBodyLimit_ChunkedOversizeRejected(t *testing.T) {
 	}
 	if *called {
 		t.Fatal("the wrapped handler must not run for an oversize chunked body")
+	}
+}
+
+// A chunked body whose read times out (the slowloris guard's deadline firing) is rejected with
+// 408 before dispatch, so a stalled stream can't pin the handler goroutine.
+func TestRequestBodyLimit_ChunkedReadTimeout(t *testing.T) {
+	next, called, _ := readEcho(t)
+	mw := RequestBodyLimit(1024)(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/streams", nil)
+	req.Body = deadlineBody{}
+	req.ContentLength = -1 // unknown length (chunked)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestTimeout {
+		t.Fatalf("stalled chunked read = %d, want 408", rec.Code)
+	}
+	if *called {
+		t.Fatal("the handler must not run when the body read times out")
 	}
 }
 
