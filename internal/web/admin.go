@@ -76,7 +76,9 @@ func (s *adminServer) gatherSessions(r *http.Request) ([]adminSessionView, int, 
 	for _, a := range rows {
 		n := 0
 		if s.hub != nil {
-			n = s.hub.ParticipantCount(a.SessionID)
+			// Hub rooms are keyed by HOST id (one live session per host), not the DB session-row id —
+			// so the live participant count must look up by host id, else it is always 0.
+			n = s.hub.ParticipantCount(a.HostID)
 		}
 		totalPeers += n
 		out = append(out, adminSessionView{
