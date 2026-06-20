@@ -275,6 +275,14 @@ func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
 // slot (codex P2): otherwise the host keeps seeing the displaced guest on a slot that now belongs
 // to someone else. Pre-live bind A→cam-1 (override) → out-of-band rebind cam-1 to B (displaces A)
 // → Go live replays B onto cam-1 → A's picker must drop back to Unassigned, not stay on cam-1.
+// NB on timing (de-flake, M5.5 PR-2): this is the one binding test that runs TWO guests in their
+// own browsers (A and B) plus the host greenroom — three contending headless-Chrome instances and
+// the P2P mesh between them. Under a loaded CI runner that contention occasionally pushed the
+// per-step poll budgets (which were 20s/30s) past their limit, even though the binding/override
+// logic itself is deterministic (it passes in ~4s on an idle machine). The budgets are widened to
+// 60s and the run deadline to 240s — generous for a slow runner, still bounded so a genuine hang
+// fails — matching the headroom the other multi-browser tests in this package already use. This
+// changes test timing only, not any product behavior.
 func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 	s := seedDeviceCheck(t) // NO session yet → the first bind is DB-only (override)
 
@@ -282,7 +290,7 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 	defer cancelAlloc()
 	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
 	defer cancelRoot()
-	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 200*time.Second)
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 240*time.Second)
 	defer cancelDeadline()
 	guestACtx := rootCtx
 	guestBCtx, cancelB := chromedp.NewContext(rootCtx)
@@ -316,7 +324,7 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
 	}
 	aCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
-	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(60*time.Second))); err != nil {
 		t.Fatalf("A's pre-live override did not stick to cam-1: %v", err)
 	}
 
@@ -342,7 +350,7 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 
 	// A's picker must drop to Unassigned (its override cleared by the displacement), not stay cam-1.
 	aUnassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
-	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
+	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(60*time.Second))); err != nil {
 		t.Fatalf("A's stale override survived B being bound into cam-1: %v", err)
 	}
 }

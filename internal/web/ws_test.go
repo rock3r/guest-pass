@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -26,7 +25,7 @@ func wsjsonRead(ctx context.Context, c *websocket.Conn, v *signaling.Frame) erro
 
 func wsWriteFrame(t *testing.T, c *websocket.Conn, f signaling.Frame) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	if err := wsjson.Write(ctx, c, f); err != nil {
 		t.Fatalf("write: %v", err)
@@ -46,7 +45,7 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 // roster/peer-joined/peer-left bookkeeping frames join now emits (EN-8).
 func wsReadFrameOfType(t *testing.T, c *websocket.Conn, want string) signaling.Frame {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	for {
 		var f signaling.Frame
@@ -78,7 +77,7 @@ func TestWSDrainSendsTerminate(t *testing.T) {
 
 	h.hub.Shutdown("reconnect")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	for {
 		var f signaling.Frame
