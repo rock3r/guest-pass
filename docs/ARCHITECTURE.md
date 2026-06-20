@@ -307,7 +307,15 @@ not universal (EN-19).
   (exponential-backoff) signaling WS.
 - Peers are keyed by **stable `pass_id`**, so an OBS slot source reattaches to the
   same occupant automatically — the host never edits OBS mid-show (EN-3). The room
-  persists through host disconnects; the host auto-reconnects and resumes (D-40).
+  persists through host disconnects; the host **greenroom auto-reconnects and resumes**
+  (D-40/AC-4) — it runs on the same `ReconnectingSession` (exponential-backoff retry,
+  terminal-vs-transient routing) as the guest, showing a recoverable "reconnecting"
+  banner on a drop rather than an error screen, and rebuilding the grid from the fresh
+  roster on recovery. Co-hosts have their own sockets (they keep moderating during the
+  host's gap) and can never assume host — the room is keyed to the host id server-side,
+  so there is no host-handoff path. Only a terminal `session-ended` (the host ended it,
+  or an admin force-ended it, D-27) routes the greenroom to the "ended" screen;
+  exhausted reconnects (RF-22 cap) route to the error screen.
 - **Slot-binding grace across a transient guest drop (D-40/D-M5.5-3).** A guest's
   socket close is treated as transient: the room **retains** its cam-slot binding
   for a grace window (`SLOT_GRACE_WINDOW`, default 45s) instead of vacating — **no
