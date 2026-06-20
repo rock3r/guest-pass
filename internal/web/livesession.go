@@ -22,8 +22,20 @@ func (s *appServer) sessionStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	live, _ := s.sessionState(r.Context(), host.ID, st.ID)
-	writeJSON(w, http.StatusOK, map[string]bool{"live": live})
+	// Distinguish "no live session" (a real, reportable not-live) from a transient store failure:
+	// sessionState collapses both to false, but on an ERROR we must NOT answer live:false, or the
+	// poller would retire a still-running session's pill on a blip. A 500 makes the poller treat it
+	// as transient (it only acts on 200 live:false or 401/403) and keep polling.
+	sess, err := s.store.ActiveSession(r.Context(), host.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]bool{"live": false})
+		return
+	}
+	if err != nil {
+		http.Error(w, "could not read session", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"live": sess.StreamID == st.ID})
 }
 
 // goLive opens the host's live session for this stream (EN-2/D-20). This is the runtime

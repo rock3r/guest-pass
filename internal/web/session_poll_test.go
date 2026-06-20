@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-
-	"github.com/rock3r/guest-pass/internal/store"
 )
 
 // decodeLive pulls the {"live":bool} body the session-status poll endpoint returns.
@@ -73,5 +71,4 @@ func TestSessionStatus_AuthAndOwnership(t *testing.T) {
 	if rec := a.req(t, http.MethodGet, "/api/streams/"+id+"/session", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anon GET session status = %d, want 401", rec.Code)
 	}
-	_ = store.HostActive
 }

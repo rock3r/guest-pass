@@ -698,9 +698,13 @@ function Greenroom() {
       ) : null}
       <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
         {tiles.length === 0 ? (
-          <p class="gr-empty" data-state={state}>
-            Waiting for guests to join…
-          </p>
+          // Once ended/dropped, the teardown banner above already explains the empty grid — the
+          // "waiting for guests" hint would contradict it, so suppress it in those states.
+          state === "ended" || state === "error" ? null : (
+            <p class="gr-empty" data-state={state}>
+              Waiting for guests to join…
+            </p>
+          )
         ) : (
           tiles.map((t) => (
           <Tile
