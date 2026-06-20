@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -91,10 +92,11 @@ func RequestBodyLimit(maxBytes int64) func(http.Handler) http.Handler {
 
 // isWebSocketUpgrade reports whether r is a genuine WebSocket upgrade handshake (RFC 6455): a GET
 // carrying `Connection: Upgrade` (a comma-listed, case-insensitive token), `Upgrade: websocket`,
-// a non-empty `Sec-WebSocket-Key`, and `Sec-WebSocket-Version: 13`. Requiring the full handshake —
-// not just the Connection/Upgrade pair — means a malformed request that merely sets those two
-// headers (and would be rejected by websocket.Accept anyway) is NOT exempted, so it still goes
-// through the body cap rather than skipping it.
+// `Sec-WebSocket-Version: 13`, and a well-formed `Sec-WebSocket-Key` (base64 of 16 bytes, per the
+// RFC — the form every compliant client sends). Requiring the full, validated handshake — not just
+// the Connection/Upgrade pair or any non-empty key — means a malformed request that merely sets
+// these headers (and would be rejected by websocket.Accept anyway) is NOT exempted, so it still
+// goes through the body cap rather than skipping it.
 func isWebSocketUpgrade(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
@@ -102,7 +104,7 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		return false
 	}
-	if r.Header.Get("Sec-WebSocket-Key") == "" || r.Header.Get("Sec-WebSocket-Version") != "13" {
+	if r.Header.Get("Sec-WebSocket-Version") != "13" || !validWebSocketKey(r.Header.Get("Sec-WebSocket-Key")) {
 		return false
 	}
 	for _, tok := range strings.Split(r.Header.Get("Connection"), ",") {
@@ -111,4 +113,12 @@ func isWebSocketUpgrade(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// validWebSocketKey reports whether k is a well-formed Sec-WebSocket-Key: the base64 encoding of a
+// 16-byte value (RFC 6455 §11.3.1). Every compliant client sends this form; rejecting anything else
+// keeps the body-cap exemption to requests that are actually shaped like a real handshake.
+func validWebSocketKey(k string) bool {
+	b, err := base64.StdEncoding.DecodeString(k)
+	return err == nil && len(b) == 16
 }

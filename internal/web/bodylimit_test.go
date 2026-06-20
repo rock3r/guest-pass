@@ -109,6 +109,14 @@ func TestRequestBodyLimit_WSNonUpgradeCapped(t *testing.T) {
 			req.Header.Set("Upgrade", "websocket")
 			return req
 		},
+		"malformed Sec-WebSocket-Key (not 16-byte base64)": func() *http.Request {
+			req := httptest.NewRequest(http.MethodGet, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Upgrade", "websocket")
+			req.Header.Set("Sec-WebSocket-Key", "not-a-real-key")
+			req.Header.Set("Sec-WebSocket-Version", "13")
+			return req
+		},
 	}
 	for name, mk := range cases {
 		t.Run(name, func(t *testing.T) {
