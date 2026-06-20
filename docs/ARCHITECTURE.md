@@ -1445,9 +1445,17 @@ DB session row is closed (starting the 24h guest-PII purge clock, D-40/D-37) and
 in-memory room is terminated for every peer incl. OBS sources (`TerminateHostRoom`; the
 suspended host has no next session to reconnect to). The force-end takes the target's
 per-host binding lock so an in-flight go-live can't outlive the suspend. Authority is the
-live `is_admin` gate; the only extra guard is **no self-suspend / self-demote** (no admin
-lockout). This stays within the §7.7 boundary — a force-end is a cooperative teardown +
-reconnect block (D-25), never a media/chat read.
+live `is_admin` gate; the extra guards are **no self-suspend / self-demote** (PR-8) and the
+**last-admin lockout guard** (M5.5/D-M5.5-5/AC-9): a `suspend` or `demote` is refused when the
+target is currently an active admin **and** is the only one (`CountActiveAdmins`, counting
+`is_admin = 1 AND status = 'active'`, would drop to zero), so the instance always retains ≥1
+active admin. The self-guard already covers an admin acting on themselves; this forecloses the
+sole-admin path (one admin removing the last OTHER admin) and surfaces a `last-admin` PRG flash.
+(The check is read-then-act, not transactional, so it narrows rather than fully closes a
+two-admins-remove-each-other race; the residual is a recoverable zero-admin state, not an
+escalation — closing it atomically is a non-goal per D-M5.5-5.) This stays
+within the §7.7 boundary — a force-end is a cooperative teardown + reconnect block (D-25),
+never a media/chat read.
 
 **Abuse reports (M5 PR-9, D-42/EN-24).** Every invite email and the guest pass page carry a
 "didn't expect this? report it" link to a **public, no-auth** form at `/p/{token}/report`

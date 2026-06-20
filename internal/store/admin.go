@@ -28,6 +28,20 @@ func (s *Store) ListHosts(ctx context.Context) ([]*Host, error) {
 	return out, nil
 }
 
+// CountActiveAdmins returns the number of hosts that are both admin and active
+// (is_admin = 1 AND status = 'active') — the input to the last-admin lockout guard (D-M5.5-5 /
+// AC-9). Suspended or demoted admins are excluded, since only an active admin can administer the
+// instance. The guard refuses a demote/suspend that would drop this count to zero.
+func (s *Store) CountActiveAdmins(ctx context.Context) (int, error) {
+	var n int
+	err := s.reader.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM hosts WHERE is_admin = 1 AND status = ?", HostActive).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting active admins: %w", err)
+	}
+	return n, nil
+}
+
 // ActiveSessionInfo is one cross-host live session as the admin console sees it (AC-9 / EN-2):
 // session + owning-host + stream metadata only. It deliberately carries NO guest PII, no tokens, and
 // nothing from the backstage media/chat path — the §7.7 privacy boundary. Live participant counts

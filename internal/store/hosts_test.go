@@ -6,6 +6,40 @@ import (
 	"testing"
 )
 
+// CountActiveAdmins counts only is_admin=1 AND status='active' hosts — the input to the
+// last-admin lockout guard (D-M5.5-5). Pending/suspended admins and non-admins don't count.
+func TestHostRepo_CountActiveAdmins(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+
+	mk := func(sub, status string, admin bool) {
+		h, err := st.CreateHost(ctx, CreateHostParams{GoogleSub: sub, Email: sub + "@x.com", Name: sub, Status: status})
+		if err != nil {
+			t.Fatalf("CreateHost(%s): %v", sub, err)
+		}
+		if admin {
+			if err := st.SetHostAdmin(ctx, h.ID, true); err != nil {
+				t.Fatalf("SetHostAdmin(%s): %v", sub, err)
+			}
+		}
+	}
+
+	if n, err := st.CountActiveAdmins(ctx); err != nil || n != 0 {
+		t.Fatalf("empty: count=%d err=%v, want 0", n, err)
+	}
+	mk("active-admin", HostActive, true)       // counts
+	mk("active-plain", HostActive, false)      // not admin
+	mk("suspended-admin", HostSuspended, true) // admin but not active
+	mk("pending-admin", HostPending, true)     // admin but not active
+	if n, err := st.CountActiveAdmins(ctx); err != nil || n != 1 {
+		t.Fatalf("one active admin: count=%d err=%v, want 1", n, err)
+	}
+	mk("active-admin-2", HostActive, true)
+	if n, err := st.CountActiveAdmins(ctx); err != nil || n != 2 {
+		t.Fatalf("two active admins: count=%d err=%v, want 2", n, err)
+	}
+}
+
 func TestHostRepo_CreateGetUpdate(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

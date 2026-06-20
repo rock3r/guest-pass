@@ -67,6 +67,13 @@ func (s *adminServer) suspendHost(w http.ResponseWriter, r *http.Request) {
 		s.redirectAdmin(w, r, "error", "self")
 		return
 	}
+	if stranded, err := s.wouldStrandLastAdmin(r.Context(), target); err != nil {
+		http.Error(w, "could not check admin count", http.StatusInternalServerError)
+		return
+	} else if stranded {
+		s.redirectAdmin(w, r, "error", "last-admin")
+		return
+	}
 	if err := s.store.SetHostStatus(r.Context(), target.ID, store.HostSuspended); err != nil {
 		http.Error(w, "could not update host", http.StatusInternalServerError)
 		return
@@ -113,6 +120,29 @@ func (s *adminServer) forceEndLive(ctx context.Context, hostID string) error {
 	return nil
 }
 
+// wouldStrandLastAdmin reports whether a demote or suspend of target would leave the instance with
+// zero active admins (D-M5.5-5 / AC-9) — the last-admin lockout guard. It triggers only when the
+// target is CURRENTLY an active admin (the one case where the action removes an active admin: a
+// suspend flips status to suspended, a demote clears is_admin — both drop the target out of the
+// is_admin=1 AND status=active set) AND that set has just one member (the target). The PR-8 self-
+// guard handles the acting admin acting on themselves; this guards the instance invariant itself.
+//
+// The check is read-then-act, not a single atomic transaction, so it forecloses the realistic
+// single-actor path (an admin demoting/suspending the last OTHER admin) rather than a sub-
+// millisecond race of two admins simultaneously removing each other; that residual leaves a
+// recoverable zero-admin state an operator can fix at the DB, not a privilege escalation. Closing
+// it fully (a conditional UPDATE gated on the count) is a deliberate non-goal here per D-M5.5-5.
+func (s *adminServer) wouldStrandLastAdmin(ctx context.Context, target *store.Host) (bool, error) {
+	if !target.IsAdmin || target.Status != store.HostActive {
+		return false, nil // not an active admin → the action doesn't reduce the active-admin count
+	}
+	n, err := s.store.CountActiveAdmins(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n <= 1, nil // target is the sole active admin → removing it strands the instance
+}
+
 // promoteHost grants is_admin (D-14); idempotent on an existing admin.
 func (s *adminServer) promoteHost(w http.ResponseWriter, r *http.Request) {
 	_, target, ok := s.adminTarget(w, r)
@@ -134,6 +164,13 @@ func (s *adminServer) demoteHost(w http.ResponseWriter, r *http.Request) {
 	}
 	if target.ID == acting.ID {
 		s.redirectAdmin(w, r, "error", "self")
+		return
+	}
+	if stranded, err := s.wouldStrandLastAdmin(r.Context(), target); err != nil {
+		http.Error(w, "could not check admin count", http.StatusInternalServerError)
+		return
+	} else if stranded {
+		s.redirectAdmin(w, r, "error", "last-admin")
 		return
 	}
 	if err := s.store.SetHostAdmin(r.Context(), target.ID, false); err != nil {

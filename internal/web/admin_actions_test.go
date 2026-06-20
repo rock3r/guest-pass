@@ -3,9 +3,13 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
@@ -163,6 +167,64 @@ func TestAdminActions_Authority(t *testing.T) {
 	// The target was never modified by the rejected calls.
 	if got := a.hostStatus(t, target.ID); got != store.HostActive {
 		t.Fatalf("target status changed under rejected calls: %q", got)
+	}
+}
+
+// The last-admin lockout guard (D-M5.5-5 / AC-9): demote/suspend is refused while the target is
+// the only active admin (the instance always retains ≥1 active admin), and allowed once a second
+// active admin exists. Driven at the handler level (the acting host injected via context) because
+// through the router the acting admin is always counted, so the guard's refusal can't be reached.
+func TestAdminActions_LastAdminGuard(t *testing.T) {
+	a := newAPIHarness(t)
+	admin := &adminServer{store: a.store, hub: a.hub, binds: newBindingLocks()}
+
+	// The sole active admin in the instance is the target.
+	target := a.hostInState(t, "lone-admin", store.HostActive)
+	if err := a.store.SetHostAdmin(context.Background(), target.ID, true); err != nil {
+		t.Fatalf("SetHostAdmin(target): %v", err)
+	}
+	// A distinct acting identity (so the self-guard doesn't fire). The guard is the instance
+	// invariant, independent of who acts, so the acting host need not itself be a counted admin.
+	acting := a.hostInState(t, "acting", store.HostActive)
+
+	call := func(action string) *httptest.ResponseRecorder {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", target.ID)
+		ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+		ctx = auth.ContextWithHost(ctx, acting)
+		r := httptest.NewRequest(http.MethodPost, "/admin/x", nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+		switch action {
+		case "suspend":
+			admin.suspendHost(w, r)
+		case "demote":
+			admin.demoteHost(w, r)
+		}
+		return w
+	}
+
+	for _, action := range []string{"suspend", "demote"} {
+		rec := call(action)
+		if !strings.Contains(rec.Header().Get("Location"), "error=last-admin") {
+			t.Fatalf("%s of last admin: loc=%q, want error=last-admin", action, rec.Header().Get("Location"))
+		}
+	}
+	// The refused actions left the target untouched.
+	if h, _ := a.store.GetHost(context.Background(), target.ID); h.Status != store.HostActive || !h.IsAdmin {
+		t.Fatalf("refused actions changed the target: status=%q admin=%v", h.Status, h.IsAdmin)
+	}
+
+	// With a second active admin, the (now non-last) admin can be demoted.
+	other := a.hostInState(t, "other-admin", store.HostActive)
+	if err := a.store.SetHostAdmin(context.Background(), other.ID, true); err != nil {
+		t.Fatalf("SetHostAdmin(other): %v", err)
+	}
+	rec := call("demote")
+	if !strings.Contains(rec.Header().Get("Location"), "msg=demoted") {
+		t.Fatalf("demote with a second admin present: loc=%q, want msg=demoted", rec.Header().Get("Location"))
+	}
+	if h, _ := a.store.GetHost(context.Background(), target.ID); h.IsAdmin {
+		t.Fatal("demote should have cleared is_admin once a second active admin existed")
 	}
 }
 

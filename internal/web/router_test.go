@@ -54,6 +54,40 @@ func do(h http.Handler, method, target string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// The global body cap (D-M5.5-4 / AC-8) is wired before the auth/rate-limit groups, so an
+// oversized body is rejected with 413 instance-wide — even on a route that would otherwise
+// 401/403 — while a within-cap body is not blocked by it.
+func TestRouter_GlobalBodyCap(t *testing.T) {
+	ring, err := auth.NewKeyRing("router-test-secret-aaaaaaaaaaaaaaaaaaaa")
+	if err != nil {
+		t.Fatalf("key ring: %v", err)
+	}
+	authn := auth.NewAuthenticator(ring, stubHostStore{}, false)
+	h, err := NewRouter(RouterConfig{
+		SourceURL:           testSourceURL,
+		Hub:                 signaling.NewHub(nil, nil),
+		Auth:                authn,
+		MaxRequestBodyBytes: 16,
+	})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	big := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(strings.Repeat("x", 64)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, big)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize POST = %d, want 413", rec.Code)
+	}
+
+	small := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader("ok"))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, small)
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatal("a within-cap body must not be rejected by the body cap")
+	}
+}
+
 func TestRouter_LandingHasCSPAndSource(t *testing.T) {
 	h := testRouter(t, NewRateLimiter(1000, 1000))
 	rec := do(h, http.MethodGet, "/")

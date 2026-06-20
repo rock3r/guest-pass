@@ -75,6 +75,11 @@ type Config struct {
 	AuthMode           string // "" => production (Google OAuth); "dev" => fake host session (AD-8)
 	DBPath             string // SQLite file path (DB_PATH); defaults to guestpass.db
 
+	// MaxRequestBodyBytes caps the request body on every non-streaming HTTP route (D-M5.5-4 /
+	// AC-8). Config-backed with a 1 MiB default; fails closed (a non-positive value is rejected)
+	// so the cap can't be silently disabled. /ws is exempt (streaming signaling).
+	MaxRequestBodyBytes int64 // MAX_REQUEST_BODY_BYTES
+
 	// Background-job dials (DESIGN §9.7 / D-37 / D-40), config-backed with safe defaults.
 	PurgeInterval   time.Duration // PURGE_INTERVAL: how often the guest-PII purge sweeps
 	PurgeRetention  time.Duration // PURGE_RETENTION: how long guest PII is kept after stream end
@@ -94,6 +99,10 @@ type Config struct {
 // defaultDBPath is used when DB_PATH is unset; docker-compose overrides it to the
 // mounted volume (DEPLOYMENT §6).
 const defaultDBPath = "guestpass.db"
+
+// defaultMaxRequestBodyBytes is the global request-body cap when MAX_REQUEST_BODY_BYTES is
+// unset (1 MiB). Generous for the app's small JSON/form bodies; /ws is exempt (D-M5.5-4).
+const defaultMaxRequestBodyBytes int64 = 1 << 20
 
 // Default background-job dials (DESIGN §9.7). DEPLOYMENT §8 documents PURGE_INTERVAL /
 // PURGE_RETENTION as the overrides.
@@ -157,6 +166,9 @@ func load(getenv func(string) string) (*Config, error) {
 		c.DBPath = defaultDBPath
 	}
 	var err error
+	if c.MaxRequestBodyBytes, err = parsePositiveInt64("MAX_REQUEST_BODY_BYTES", getenv("MAX_REQUEST_BODY_BYTES"), defaultMaxRequestBodyBytes); err != nil {
+		return nil, err
+	}
 	if c.PurgeInterval, err = parsePositiveDuration("PURGE_INTERVAL", getenv("PURGE_INTERVAL"), defaultPurgeInterval); err != nil {
 		return nil, err
 	}
@@ -209,6 +221,24 @@ func parsePositiveDuration(name, raw string, def time.Duration) (time.Duration, 
 		return 0, fmt.Errorf("config: %s=%q must be positive: %w", name, raw, ErrInvalidValue)
 	}
 	return d, nil
+}
+
+// parsePositiveInt64 parses a positive 64-bit integer (e.g. a byte cap), returning def for an
+// empty value and a fail-closed error for a non-integer or a non-positive one — a zero/negative
+// request-body cap would disable the DoS guard (D-M5.5-4), so it is rejected rather than ignored.
+func parsePositiveInt64(name, raw string, def int64) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q: %w", name, raw, ErrInvalidValue)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("config: %s=%q must be positive: %w", name, raw, ErrInvalidValue)
+	}
+	return n, nil
 }
 
 // parsePositiveInt parses a positive integer (e.g. a quota), returning def for an empty value and a

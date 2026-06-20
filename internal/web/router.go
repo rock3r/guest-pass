@@ -42,6 +42,11 @@ type RouterConfig struct {
 	BaseURL   string           // absolute origin used to build magic links
 	LiveCheck LiveChecker      // D-29 live-verify (watch link + verified status); nil disables the channel routes
 	Trust     auth.TrustPolicy // D-36 progressive-trust per-host invite/stream quotas; zero value disables them
+
+	// MaxRequestBodyBytes caps the request body on every non-streaming route (D-M5.5-4 / AC-8).
+	// Zero/negative falls back to defaultMaxRequestBodyBytes (1 MiB) so the cap is always present;
+	// the production value is config-backed (MAX_REQUEST_BODY_BYTES) and validated positive at load.
+	MaxRequestBodyBytes int64
 }
 
 // NewRouter builds the GuestPass HTTP handler: strict security headers globally, the
@@ -63,6 +68,15 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
+
+	// Global request-body cap (D-M5.5-4 / AC-8): reject an oversized body instance-wide with 413,
+	// before any handler reads it. /ws is exempt (streaming signaling). Always on — a zero/negative
+	// configured value falls back to the 1 MiB default so the cap can't be disabled by misconfig.
+	bodyLimit := cfg.MaxRequestBodyBytes
+	if bodyLimit <= 0 {
+		bodyLimit = defaultMaxRequestBodyBytes
+	}
+	r.Use(RequestBodyLimit(bodyLimit))
 
 	// One per-host slot-binding lock shared by the /ws join-replay and the binding API, so a
 	// host's binding ops are serialized across both surfaces (D-20).

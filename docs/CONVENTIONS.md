@@ -344,6 +344,13 @@ pages.
   URLs from referrer- and history-based leakage (ties to the §3.6 / §4
   slot-token posture).
 - **Cookies:** the host JWT cookie is `httpOnly` + `SameSite` + `Secure`.
+- **Global request-body cap (D-M5.5-4).** A `RequestBodyLimit` middleware wraps every
+  route (registered alongside `SecurityHeaders`) and rejects an oversized body with
+  `413` before any handler reads it: a declared `Content-Length` over the cap is
+  refused outright, and a chunked/unknown-length body is bounded via
+  `http.MaxBytesReader` so it can never be buffered. The cap is config-backed
+  (`MAX_REQUEST_BODY_BYTES`, default 1 MiB) and fails closed; **`/ws` is exempt** (the
+  streaming signaling socket, not a finite request body).
 
 ### 3.6 OBS source-page invariants (EN-15)
 
