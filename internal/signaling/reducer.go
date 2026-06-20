@@ -717,6 +717,15 @@ func (s *roomState) expireGrace(sid SlotID, occupant PeerID, gen int) []outbound
 	if st == nil || st.occupant != occupant || !st.disconnected || st.graceGen != gen {
 		return nil
 	}
+	// The occupant may have reconnected in the narrow window between Room.Join (re-adds it to
+	// s.peers) and the ResumeBind that clears `disconnected` — both are separate room commands, and
+	// this expiry could interleave between them. Don't vacate a slot whose occupant is connected
+	// again: the in-flight resume will re-affirm the binding (and a fresh re-disconnect would have
+	// advanced graceGen). This prevents a placeholder flash on a reconnect that lands right at the
+	// grace boundary (AC-3).
+	if _, connected := s.peers[occupant]; connected {
+		return nil
+	}
 	out := s.vacateSlot(sid)
 	return append(out, s.rebroadcastRoster()...)
 }

@@ -301,7 +301,12 @@ func (r *Room) EvictPeers(reason string, targets []PeerID) {
 		for _, target := range targets {
 			c := conns[target]
 			if c == nil {
-				continue // not connected — nothing to evict
+				// No live conn to evict, but a target in its transient-drop grace window (D-40) still
+				// owns its cam slot. An eviction is TERMINAL, so vacate that grace-bound slot NOW rather
+				// than leave a zombie binding alive until the grace expires; leave(terminal=true) vacates
+				// it (and is a roster no-op when the target holds nothing). No socket → no terminate frame.
+				deliver(conns, st.leave(target, true))
+				continue
 			}
 			// Tell the OTHERS the peer left (peer-left + roster, slot-unbound to a source); a slow
 			// RECIPIENT may drop one of those routine frames (AD-12) — non-terminal, so fine.

@@ -916,6 +916,54 @@ func TestGraceGenerationGuardsAgainstStaleExpiry(t *testing.T) {
 	}
 }
 
+// A reconnect that lands in the narrow window between Room.Join (re-adds the peer) and the
+// ResumeBind that clears `disconnected` must not be vacated by a grace timer firing there — the
+// in-flight resume re-affirms the binding (no placeholder flash on a boundary-time rejoin, AC-3).
+func TestExpireGraceNoOpWhenOccupantReconnected(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false)
+	gen := s.slots["cam-1"].graceGen
+
+	// The guest reconnects (Join re-adds it to s.peers) but ResumeBind hasn't run yet.
+	s.join("g1", "guest", "")
+	if !s.slots["cam-1"].disconnected {
+		t.Fatal("precondition: disconnected stays set until ResumeBind clears it")
+	}
+	if out := s.expireGrace("cam-1", "g1", gen); out != nil {
+		t.Fatalf("expireGrace must no-op when the occupant has reconnected, got %+v", out)
+	}
+	if s.slots["cam-1"].occupant != "g1" {
+		t.Fatal("a reconnected occupant's slot must not be vacated by a boundary-time grace timer")
+	}
+}
+
+// A TERMINAL leave (an eviction) of a guest that is CURRENTLY in its grace window — disconnected,
+// no longer in s.peers — must still vacate its grace-bound slot immediately, not leave a zombie
+// binding alive until the grace expires. This backs the EvictPeers c==nil path.
+func TestTerminalLeaveVacatesGraceBoundSlotWhenDisconnected(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false) // transient → grace-bound (g1 gone from peers, slot retained)
+	if s.slots["cam-1"].occupant != "g1" || !s.slots["cam-1"].disconnected {
+		t.Fatalf("precondition: grace-bound, got %+v", s.slots["cam-1"])
+	}
+
+	out := s.leave("g1", true) // a terminal eviction of the now-disconnected guest
+	if s.slots["cam-1"].occupant != "" {
+		t.Fatalf("a terminal leave must vacate a grace-bound slot, got occupant=%q", s.slots["cam-1"].occupant)
+	}
+	if !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("a terminal leave of a grace-bound guest should emit slot-unbound, got %+v", out)
+	}
+}
+
 // A terminal vacate during the grace window (host unbind, kick, displacement) clears the binding
 // immediately, and the pending expiry no-ops (occupant changed/cleared).
 func TestTerminalVacateDuringGraceDefusesExpiry(t *testing.T) {

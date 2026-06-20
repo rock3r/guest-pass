@@ -116,6 +116,29 @@ func TestRoomGraceRejoinResumesWithoutVacate(t *testing.T) {
 	assertNoFrameWithin(t, srcOut, 3*grace)
 }
 
+// A terminal eviction of a guest that is CURRENTLY in its grace window vacates its grace-bound slot
+// at once (the source gets slot-unbound) rather than leaving a zombie binding until the grace timer
+// — even though the guest has no live connection to evict. Long grace so only the evict can vacate.
+func TestRoomEvictPeersVacatesGraceBoundSlot(t *testing.T) {
+	r := newRoom("evictgrace", nil, nil, 5*time.Second)
+	go r.run()
+	defer r.Close()
+
+	srcOut := make(chan Frame, 8)
+	r.Join("src", "obs", "", "cam-1", srcOut)
+	recvFrameOfType(t, srcOut, "slot-unbound")
+	g1Out := make(chan Frame, 8)
+	r.Join("g1", "guest", "", "", g1Out)
+	r.Rebind("cam-1", "g1")
+	recvFrameOfType(t, srcOut, "slot-rebind")
+	drainFrames(srcOut)
+
+	r.Leave("g1", g1Out)                                 // transient drop → grace-bound (won't expire for 5s)
+	assertNoFrameWithin(t, srcOut, 100*time.Millisecond) // grace retains: no slot-unbound yet
+	r.EvictPeers("session-ended", []PeerID{"g1"})        // terminal eviction of the disconnected guest
+	recvFrameOfType(t, srcOut, "slot-unbound")           // the grace-bound slot vacates NOW
+}
+
 // The actor delivers a slot-rebind to the source page's channel when the host
 // rebinds the slot — end to end through the command channel and delivery.
 func TestRoomDeliversSlotRebindToSource(t *testing.T) {
