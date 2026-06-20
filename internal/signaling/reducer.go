@@ -628,11 +628,25 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 // occupant live while the DB already names the new one. Vacating instead drops the slot to a
 // placeholder (D-24) — never the displaced guest — so live and the DB agree. The occupant is
 // (re)bound for real once it connects (the /ws join replays passes.slot_id).
+//
+// One cam slot per occupant (D-20) still holds for an OFFLINE occupant: since PR-3 a transient drop
+// RETAINS the guest's old cam slot for the grace window, so moving that offline guest to sid must
+// also vacate the cam slot it still grace-holds — otherwise the old OBS source keeps showing the
+// moved guest while the DB/host UI say it moved (the online rebindSlot path already does this).
 func (s *roomState) rebindOrVacate(sid SlotID, occupant PeerID) []outbound {
 	if _, ok := s.peers[occupant]; ok {
 		return s.rebindSlot(sid, occupant)
 	}
-	return s.unbindSlot(sid)
+	var out []outbound
+	if isCamSlot(sid) {
+		for other, st := range s.slots {
+			if other != sid && st.occupant == occupant && isCamSlot(other) {
+				out = append(out, s.vacateSlot(other)...) // clear the grace-held old slot
+			}
+		}
+	}
+	out = append(out, s.vacateSlot(sid)...)
+	return append(out, s.rebroadcastRoster()...)
 }
 
 // resumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a

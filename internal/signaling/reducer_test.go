@@ -964,6 +964,37 @@ func TestTerminalLeaveVacatesGraceBoundSlotWhenDisconnected(t *testing.T) {
 	}
 }
 
+// Moving an OFFLINE guest (one in its grace window) to a new cam slot must vacate the cam slot it
+// still grace-holds — the one-cam-slot-per-occupant invariant (D-20) — so the old OBS source can't
+// keep showing the moved guest while the DB/host UI say it moved. Both slots end as placeholders
+// (the offline guest can't receive media yet; its /ws join replays the new slot).
+func TestRebindOrVacateClearsGraceHeldSlotForOfflineGuest(t *testing.T) {
+	s := newRoomState()
+	s.join("src1", "obs", "")
+	s.attachSource("cam-1", "src1")
+	s.join("src2", "obs", "")
+	s.attachSource("cam-2", "src2")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false) // g1 drops → grace-held on cam-1
+	if s.slots["cam-1"].occupant != "g1" {
+		t.Fatal("precondition: g1 grace-held on cam-1")
+	}
+
+	// Host moves the OFFLINE guest to cam-2 (the live PUT path → RebindOrVacate; g1 not in s.peers).
+	out := s.rebindOrVacate("cam-2", "g1")
+
+	if s.slots["cam-1"].occupant != "" {
+		t.Fatalf("moving the offline guest must vacate its grace-held cam-1, got occupant=%q", s.slots["cam-1"].occupant)
+	}
+	if s.slots["cam-2"].occupant != "" {
+		t.Fatalf("cam-2 should be a placeholder for the offline guest, got occupant=%q", s.slots["cam-2"].occupant)
+	}
+	if !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("the freed sources should be sent slot-unbound, got %+v", out)
+	}
+}
+
 // A terminal vacate during the grace window (host unbind, kick, displacement) clears the binding
 // immediately, and the pending expiry no-ops (occupant changed/cleared).
 func TestTerminalVacateDuringGraceDefusesExpiry(t *testing.T) {
