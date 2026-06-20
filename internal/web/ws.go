@@ -140,6 +140,13 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if slot := h.resolver.guestBoundSlot(ctx, string(id.peer), id.session); slot != "" {
 			room.ResumeBind(slot, id.peer)
+		} else {
+			// No binding to resume (it was cleared, or this isn't the host's live session): vacate any
+			// cam slot this guest still grace-holds from a prior transient drop (D-40). Otherwise a
+			// reconnect that doesn't resume would leave the slot in limbo — occupant connected again but
+			// never re-linked — which the grace timer, now a no-op for a connected occupant, would never
+			// vacate. A guest that holds no slot makes this a no-op.
+			room.VacateOccupant(id.peer)
 		}
 		// Seed the guest's screenshare eligibility (EN-23/AC-9) into the roster UNDER the lock,
 		// re-reading passes.can_screen at seed time (like the slot replay) — so a host PATCH in the

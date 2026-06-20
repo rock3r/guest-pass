@@ -1063,10 +1063,16 @@ func TestVacateOccupantClearsGraceHeldSlot(t *testing.T) {
 	if s.slots["cam-1"].occupant != "g1" {
 		t.Fatal("precondition: g1 grace-held on cam-1")
 	}
+	// The guest reconnects but its replay is SKIPPED (no valid binding to resume), so it sits in
+	// s.peers with the slot still disconnected — the /ws join handler then vacates it explicitly.
+	s.join("g1", "guest", "")
 
 	out := s.vacateOccupant("g1")
 	if s.slots["cam-1"].occupant != "" {
-		t.Fatalf("vacateOccupant must clear a grace-held slot, got occupant=%q", s.slots["cam-1"].occupant)
+		t.Fatalf("vacateOccupant must clear a grace-held slot (even for a reconnected occupant), got occupant=%q", s.slots["cam-1"].occupant)
+	}
+	if s.slots["cam-1"].disconnected {
+		t.Fatal("vacating must also clear the grace flag so no limbo binding remains")
 	}
 	if !hasFrameType(out, "slot-unbound") {
 		t.Fatalf("the freed source should be sent slot-unbound, got %+v", out)
