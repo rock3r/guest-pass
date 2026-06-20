@@ -369,6 +369,13 @@ func (s *roomState) leave(id PeerID, terminal bool) []outbound {
 				// stale expiry from an earlier disconnect can't vacate a later one. The occupant is removed
 				// from s.peers above, so it has no roster entry during the gap — the binding is invisible
 				// until the rejoin re-folds it.
+				//
+				// Degrade the slot's on-air to status-unavailable though: the OBS link is dead, so any
+				// prior on-air reflection is now stale (D-24 "never assert on-air with no live signal").
+				// Without this, a reconnect's join roster — emitted before ResumeBind resets the slot —
+				// (or a skipped replay) would briefly assert on-air off a dead link. No slot-unbound and
+				// no epoch bump, so the source still isn't told to vacate or re-link.
+				s.degradeStaleOnAir(st)
 				st.disconnected = true
 				st.graceGen++
 			} else {

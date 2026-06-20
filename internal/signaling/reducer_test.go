@@ -831,6 +831,38 @@ func TestLeaveRetainsCamSlotBindingForGrace(t *testing.T) {
 	}
 }
 
+// Entering grace degrades the slot's stale on-air to status-unavailable (the OBS link is dead, so
+// the prior reflection is no longer truthful — D-24), but WITHOUT slot-unbound or an epoch bump, so
+// a reconnect's join roster (before ResumeBind) can't briefly assert on-air off a dead link.
+func TestLeaveDegradesStaleOnAirWhenEnteringGrace(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.obsSourceActive("cam-1", true, s.slots["cam-1"].epoch) // the slot reports on-air
+	if s.slots["cam-1"].onAir != OnAirYes {
+		t.Fatalf("precondition: slot should be on-air, got %q", s.slots["cam-1"].onAir)
+	}
+	epochBefore := s.slots["cam-1"].epoch
+
+	out := s.leave("g1", false) // transient drop → grace
+
+	st := s.slots["cam-1"]
+	if st.occupant != "g1" || !st.disconnected {
+		t.Fatalf("grace should retain the binding, got %+v", st)
+	}
+	if st.onAir != OnAirUnknown {
+		t.Fatalf("entering grace must degrade the stale on-air to %s, got %q", OnAirUnknown, st.onAir)
+	}
+	if st.epoch != epochBefore {
+		t.Fatalf("grace must not bump the epoch (got %d, want %d)", st.epoch, epochBefore)
+	}
+	if hasFrameType(out, "slot-unbound") {
+		t.Fatalf("grace must not send slot-unbound, got %+v", out)
+	}
+}
+
 // After the grace window with no rejoin, expireGrace vacates the slot — exactly today's behavior,
 // just deferred: occupant cleared, epoch bumped, slot-unbound to the source (placeholder).
 func TestExpireGraceVacatesAfterWindow(t *testing.T) {
