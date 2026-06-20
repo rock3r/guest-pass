@@ -493,6 +493,25 @@ func TestLoad_SlotGraceWindowDefaultAndOverride(t *testing.T) {
 	}
 }
 
+// SLOT_GRACE_WINDOW must stay below REAP_IDLE_AFTER (grace ≪ reaper, D-40); a grace that meets or
+// exceeds the idle-reap window is a fail-closed misconfiguration.
+func TestLoad_GraceWindowMustBeBelowReapIdle(t *testing.T) {
+	for _, grace := range []string{"20m", "15m"} { // over, then equal to the 15m reap default
+		env := validEnv()
+		env["SLOT_GRACE_WINDOW"] = grace
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Fatalf("SLOT_GRACE_WINDOW=%s (reap=15m): want ErrInvalidValue, got %v", grace, err)
+		}
+	}
+	// A grace below the reaper (incl. a lowered reaper still above the grace) loads cleanly.
+	env := validEnv()
+	env["SLOT_GRACE_WINDOW"] = "2m"
+	env["REAP_IDLE_AFTER"] = "5m"
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("grace below reap idle should load: %v", err)
+	}
+}
+
 func TestLoad_TrustDefaultsAndOverrides(t *testing.T) {
 	c, err := envLoad(validEnv())
 	if err != nil {

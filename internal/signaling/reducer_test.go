@@ -863,6 +863,29 @@ func TestLeaveDegradesStaleOnAirWhenEnteringGrace(t *testing.T) {
 	}
 }
 
+// An OBS sourceActive echo arriving WHILE the slot is in its grace window (epoch unchanged, but the
+// occupant's media is dead) must NOT re-assert on-air — that would undo the entering-grace degrade
+// and mislight a dead link (D-24). The rejoin's epoch bump lets a real transition re-assert later.
+func TestObsSourceActiveIgnoredDuringGrace(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false) // grace → on-air degraded to status-unavailable
+	if s.slots["cam-1"].onAir != OnAirUnknown {
+		t.Fatalf("precondition: on-air degraded on entering grace, got %q", s.slots["cam-1"].onAir)
+	}
+
+	out := s.obsSourceActive("cam-1", true, s.slots["cam-1"].epoch) // an echo at the unchanged epoch
+	if s.slots["cam-1"].onAir != OnAirUnknown {
+		t.Fatalf("a sourceActive echo during grace must be ignored, got %q", s.slots["cam-1"].onAir)
+	}
+	if out != nil {
+		t.Fatalf("an ignored echo should emit nothing, got %+v", out)
+	}
+}
+
 // After the grace window with no rejoin, expireGrace vacates the slot — exactly today's behavior,
 // just deferred: occupant cleared, epoch bumped, slot-unbound to the source (placeholder).
 func TestExpireGraceVacatesAfterWindow(t *testing.T) {

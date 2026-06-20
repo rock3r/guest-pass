@@ -208,6 +208,12 @@ func load(getenv func(string) string) (*Config, error) {
 	if c.RateTrustedStreams, err = parsePositiveInt("RATE_TRUSTED_STREAMS", getenv("RATE_TRUSTED_STREAMS"), defaultRateTrustedStreams); err != nil {
 		return nil, err
 	}
+	// The slot-binding grace must stay below the idle-session reaper (D-40/D-M5.5-3: "grace ≪
+	// ReapIdleAfter"): if it could outlive the reap window a truly-dead session might never free its
+	// slots before being reaped, inverting the intended ordering. Reject the misconfiguration.
+	if c.SlotGraceWindow >= c.ReapIdleAfter {
+		return nil, fmt.Errorf("config: SLOT_GRACE_WINDOW (%s) must be below REAP_IDLE_AFTER (%s): %w", c.SlotGraceWindow, c.ReapIdleAfter, ErrInvalidValue)
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}

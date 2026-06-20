@@ -755,10 +755,13 @@ func (s *roomState) expireGrace(sid SlotID, occupant PeerID, gen int) []outbound
 // ONLY when its epoch matches the slot's current epoch (EN-3): a stale event from a previous
 // occupant is ignored so it can't mislight the new occupant; a future epoch is also ignored.
 // A real change with a bound occupant re-broadcasts the roster; an unchanged or unoccupied
-// slot stays silent.
+// slot stays silent. While the slot is in its grace window (occupant disconnected, D-40) the
+// epoch is unchanged, so an OBS sourceActive echo would otherwise still fold in — but the
+// occupant's media is dead, so any on-air reflection is no longer truthful (D-24). Ignore it;
+// the rejoin's slot-rebind bumps the epoch and a fresh transition re-asserts on-air for real.
 func (s *roomState) obsSourceActive(sid SlotID, active bool, epoch int) []outbound {
 	st := s.slots[sid]
-	if st == nil || epoch != st.epoch {
+	if st == nil || epoch != st.epoch || st.disconnected {
 		return nil
 	}
 	want := OnAirNo
