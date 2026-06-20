@@ -54,6 +54,13 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		return nil, err
 	}
 
+	// Render denials (RequireHost/RequireAdmin) as explanatory HTML screens for navigations
+	// (suspended/pending/non-admin/sign-in), while fetch/XHR callers keep the terse plain body
+	// (M5.5). The authz decision stays in internal/auth; this only installs its presentation.
+	if cfg.Auth != nil {
+		cfg.Auth.SetDeniedHandler(rd.authDenied)
+	}
+
 	r := chi.NewRouter()
 	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
 
@@ -204,6 +211,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// /ws join-replay to that stream's guests. One live session per host.
 			hr.Post("/app/streams/{id}/session/start", app.goLive)
 			hr.Post("/app/streams/{id}/session/end", app.endSession)
+			// Read-only liveness for the stream-detail page's poll (M5.5): the no-JS page's "● Live"
+			// pill goes stale when the session is force-ended (admin D-27, idle reaper, other tab), so
+			// the page polls this to swap it for an "ended" notice in place. JSON {"live":bool}.
+			hr.Get("/api/streams/{id}/session", app.sessionStatus)
 			// Invites tab (EN-23): guest list + invite form (name/email/role only) +
 			// inline role edit + re-issue + revoke. No live production controls here.
 			hr.With(inviteThrottle).Post("/app/streams/{id}/passes", app.createInvite)

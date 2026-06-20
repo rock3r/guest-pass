@@ -400,6 +400,13 @@ answer to "which of my streams is live". It gates the host-scoped room three way
 
 The session row is a thin durable audit — live roster/lock/epoch state stays in-memory (AD-3).
 
+The detail page's **"● Live" pill** is rendered once (no-JS page), so it would go stale if the
+session is force-ended out from under it (admin D-27 cascade, idle reaper, an end from another
+tab). A minimal read-only poll (`GET /api/streams/{id}/session` → `{"live":bool}`, host-only,
+same-host) lets the page swap the pill for an "ended" notice **in place** — no reload, no mutation
+(M5.5; see CONVENTIONS §3.1). A suspended host's poll is gated to 403, which the poller also treats
+as ended.
+
 ### Slot-rebind protocol + slot epoch (EN-3)
 
 The source page authenticates with the **slot token only**; the occupant is
@@ -1238,9 +1245,9 @@ navigation, islands mount per-page against a known root element.
 | Marketing / comparison / parody | Go `html/template` | none |
 | Host sign-in (Google) | Go `html/template` | none |
 | Guest ticket / pass acceptance | Go `html/template` | none |
-| Host dashboard / calendar / invites / sources tabs | Go `html/template` | none |
+| Host dashboard / calendar / invites / sources tabs | Go `html/template` | none (the stream-detail page carries a minimal **read-only** liveness poll, M5.5 — see CONVENTIONS §3.1) |
 | Admin console | Go `html/template` | minimal (poll/refresh) |
-| Error / state screens | Go `html/template` | none (the in-session `reconnecting` overlay and terminate-routed screens are island-rendered — they react to a `{t:terminate}` WS frame) |
+| Error / state screens | Go `html/template` | none (the in-session `reconnecting` overlay and terminate-routed screens are island-rendered — they react to a `{t:terminate}` WS frame). Auth-denial screens (M5.5) are server-rendered for navigations: a gated host (suspended/pending), a non-admin hitting `/admin`, and an unauthenticated navigation each get an explanatory page keyed off the live authz outcome, while fetch/XHR callers (the islands → `/api/*`) keep the terse plain-text body. |
 | **Device check** | `/p/{token}` server page + island | Preact island |
 | **Guest session** | in-session phase of the device-check island (same page, signaling connection, and captured camera) | Preact island |
 | **Greenroom** (host + co-host + guest) | server page + island | Preact island |
@@ -1251,7 +1258,8 @@ tiny and the frontend off the DB/PII path entirely (server-side authz EN-6/EN-8 
 the guard).
 
 **Host-app shell routes (M4).** The out-of-room host UI mounts under the `/app`
-prefix, all behind `RequireHost` (EN-6, so pending/suspended hosts are gated). The
+prefix, all behind `RequireHost` (EN-6, so pending/suspended hosts are gated — the
+gate renders an explanatory screen for a navigation, M5.5, not a bare 403 body). The
 dashboard is `GET /app` (lists the host's streams + the create form); stream
 create/edit/delete are server-rendered forms — `POST /app/streams`,
 `GET /app/streams/{id}/edit`, `POST /app/streams/{id}`, `POST /app/streams/{id}/delete`

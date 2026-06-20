@@ -163,9 +163,10 @@ func (g *GoogleOAuth) completeLogin(w http.ResponseWriter, r *http.Request, tok 
 
 // loginDestination is where a just-signed-in host lands. An active host goes to the
 // configured success URL (the host-app dashboard). A pending/suspended host has a valid
-// session but is gated out of every host-app route (RequireHost → 403, EN-6), so sending
-// them to the dashboard would dead-end on a bare forbidden page — they land on the public
-// landing instead. A richer "account pending/suspended" screen is later host-status work.
+// session but is gated out of every host-app route (RequireHost → 403, EN-6), so they land
+// on the public landing instead of dead-ending on the dashboard. (Should they navigate to a
+// gated route anyway, the DeniedHandler now renders an explanatory pending/suspended screen
+// rather than a bare 403 — M5.5.)
 func (g *GoogleOAuth) loginDestination(host *store.Host) string {
 	if host.Status != store.HostActive {
 		return "/"

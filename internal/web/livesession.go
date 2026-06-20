@@ -10,6 +10,34 @@ import (
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
+// sessionStatus reports whether THIS stream is the host's currently-live session — the read-only
+// liveness the no-JS stream-detail page polls (M5.5). The page computes its "● Live" pill once at
+// render, so when the session is force-ended out from under it (admin D-27 cascade, idle reaper,
+// or an end from another tab) the pill goes stale until a manual refresh; the poll lets the page
+// swap the pill for an "ended" notice in place. Host-only (RequireHost), RF-2 same-host via
+// ownedStream (a foreign/unknown stream is 404). Read-only — no DB write. A suspended host is
+// gated by the middleware before reaching here (403), which the poller treats as "ended" too.
+func (s *appServer) sessionStatus(w http.ResponseWriter, r *http.Request) {
+	host, st, ok := s.ownedStream(w, r)
+	if !ok {
+		return
+	}
+	// Distinguish "no live session" (a real, reportable not-live) from a transient store failure:
+	// sessionState collapses both to false, but on an ERROR we must NOT answer live:false, or the
+	// poller would retire a still-running session's pill on a blip. A 500 makes the poller treat it
+	// as transient (it only acts on 200 live:false or 401/403) and keep polling.
+	sess, err := s.store.ActiveSession(r.Context(), host.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]bool{"live": false})
+		return
+	}
+	if err != nil {
+		http.Error(w, "could not read session", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"live": sess.StreamID == st.ID})
+}
+
 // goLive opens the host's live session for this stream (EN-2/D-20). This is the runtime
 // declaration of "which of my streams is live"; it gates the /ws join-replay so only this
 // stream's guests auto-bind into the host-global slot pool (a guest of a non-live stream opening

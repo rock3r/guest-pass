@@ -141,9 +141,14 @@ WS host-join / rejoin gates on `status=active`.
 | `allowlist` | Only emails in `ALLOWED_HOSTS` (plus `ADMIN_EMAIL`) may become hosts. | Solo / known-team self-host |
 
 - A `pending` host sees a "waiting for approval" state (`GET /api/me`); admins
-  work the queue via `POST /api/admin/hosts/{id}/approve`.
+  work the queue via `POST /api/admin/hosts/{id}/approve`. Navigating to a gated
+  host route renders an explanatory **awaiting-approval** screen (403), not a bare
+  "forbidden" body (M5.5).
 - A `suspended` host is blocked from creating/running future streams; if one is
-  live, suspend offers a cascade prompt (§5).
+  live, suspend offers a cascade prompt (§5). Navigating to a gated host route
+  renders an **account-suspended** screen — what it means + how to appeal — instead
+  of bare text (M5.5). A force-ended host still in the greenroom gets a clear
+  "this session has ended" teardown screen rather than a silent drop.
 - The admin/owner is a host with `is_admin` set — never a separate identity
   (D-14). The first sign-in matching `ADMIN_EMAIL` becomes that owner.
 

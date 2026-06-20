@@ -577,3 +577,30 @@ body.app {
   font-size: 0.85rem;
   opacity: 0.7;
 }
+
+/* Stream-detail live-state wrapper (M5.5): a transparent container around the "● Live / End
+   session" controls so the liveness poll can swap them for an "ended" notice in place. display:
+   contents keeps its children in the .detail-actions flex row (no layout change). */
+.session-state {
+  display: contents;
+}
+
+/* Auth-denial / error screens (M5.5). Rendered into base.html (the public shell), so they are
+   unscoped from body.app. Functional-first/on-brand (D-B); pixel polish is DEF-2. */
+.error-screen {
+  max-width: 36rem;
+  margin: 12vh auto 0;
+  padding: 0 20px;
+  color: var(--ink);
+  font-family: system-ui, sans-serif;
+}
+.error-heading {
+  margin: 0 0 12px;
+}
+.error-body {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.error-actions {
+  margin-top: 20px;
+}
