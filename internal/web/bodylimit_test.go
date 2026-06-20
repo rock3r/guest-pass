@@ -60,21 +60,41 @@ func TestRequestBodyLimit_WithinCapPasses(t *testing.T) {
 	}
 }
 
-// /ws is exempt (the streaming signaling endpoint, D-M5.5-4): even an oversize declared body
-// passes through, so the cap can't truncate the WS upgrade/stream.
-func TestRequestBodyLimit_WSExempt(t *testing.T) {
+// A genuine WebSocket upgrade to /ws is exempt (the streaming signaling endpoint, D-M5.5-4): the
+// cap must not truncate the hijacked stream, so even an oversize declared body passes through.
+func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	next, called, _ := readEcho(t)
 	mw := RequestBodyLimit(16)(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+	req.Header.Set("Connection", "keep-alive, Upgrade")
+	req.Header.Set("Upgrade", "websocket")
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
 	if !*called {
-		t.Fatal("/ws must be exempt from the body cap")
+		t.Fatal("a genuine /ws upgrade must be exempt from the body cap")
 	}
 	if rec.Code != http.StatusOK {
-		t.Fatalf("/ws exempt = %d, want 200", rec.Code)
+		t.Fatalf("/ws upgrade exempt = %d, want 200", rec.Code)
+	}
+}
+
+// A non-upgrade request to /ws (e.g. POST /ws, or a GET without the upgrade handshake) is NOT
+// exempt — the exemption is gated on the upgrade headers, not the path, so the cap still applies.
+func TestRequestBodyLimit_WSNonUpgradeCapped(t *testing.T) {
+	next, called, _ := readEcho(t)
+	mw := RequestBodyLimit(16)(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("non-upgrade POST /ws = %d, want 413", rec.Code)
+	}
+	if *called {
+		t.Fatal("a non-upgrade /ws request must not bypass the cap")
 	}
 }
 

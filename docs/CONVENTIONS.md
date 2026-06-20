@@ -349,8 +349,10 @@ pages.
   `413` before any handler reads it: a declared `Content-Length` over the cap is
   refused outright, and a chunked/unknown-length body is bounded via
   `http.MaxBytesReader` so it can never be buffered. The cap is config-backed
-  (`MAX_REQUEST_BODY_BYTES`, default 1 MiB) and fails closed; **`/ws` is exempt** (the
-  streaming signaling socket, not a finite request body).
+  (`MAX_REQUEST_BODY_BYTES`, default 1 MiB) and fails closed; **only a genuine
+  WebSocket upgrade to `/ws` is exempt** (the hijacked streaming socket, not a finite
+  request body) — the exemption is gated on the upgrade handshake, not the path, so a
+  stray `POST /ws` is still capped.
 
 ### 3.6 OBS source-page invariants (EN-15)
 
