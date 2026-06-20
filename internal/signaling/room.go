@@ -180,10 +180,13 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			return
 		}
 		if old := conns[id]; old != nil {
-			// Tell the evicted client to reconnect (EN-9 transient) before closing
-			// its channel, so a duplicate identity is a clean handover.
+			// A SECOND live connection for this identity took over (EN-16). Tell the evicted client it
+			// was DISPLACED (terminal) — NOT to reconnect: an auto-reconnecting client (the greenroom /
+			// guest ReconnectingSession) would otherwise retry, evict the newcomer, and the two tabs
+			// would ping-pong forever (codex). A genuine reconnect never hits this path — the old socket
+			// has already closed and left before the new one joins — so only a real duplicate is told.
 			select {
-			case old.out <- Frame{T: "terminate", Reason: TerminateReconnect}:
+			case old.out <- Frame{T: "terminate", Reason: TerminateDisplaced}:
 			default:
 			}
 			close(old.out)

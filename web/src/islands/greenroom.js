@@ -402,8 +402,14 @@ function Greenroom() {
       query: "", // the host session cookie authenticates the WS
       setup,
       teardown,
-      onState: (s) => setState((prev) => (prev === "ended" ? prev : s === "live" ? "live" : "reconnecting")),
-      onTerminal: (reason) => setState(reason === "unreachable" ? "error" : "ended"),
+      onState: (s) =>
+        setState((prev) =>
+          prev === "ended" || prev === "error" || prev === "displaced" ? prev : s === "live" ? "live" : "reconnecting",
+        ),
+      // displaced (a second greenroom tab took over, EN-16) stops THIS tab so the two don't
+      // reconnect-war; unreachable (RF-22 cap) shows the error screen; any other terminal end
+      // (session-ended) shows the "ended" screen.
+      onTerminal: (reason) => setState(reason === "displaced" ? "displaced" : reason === "unreachable" ? "error" : "ended"),
     });
     return () => session.close();
   }, []);
@@ -642,6 +648,13 @@ function Greenroom() {
             the session yourself, or when an administrator ends it.
           </p>
         </div>
+      ) : state === "displaced" ? (
+        <div class="gr-error" role="alert">
+          <p class="gr-error-body">
+            The greenroom is now open in another tab or window. This tab has been disconnected to
+            avoid two greenrooms fighting over the connection — close it and use the other one.
+          </p>
+        </div>
       ) : state === "reconnecting" ? (
         <div class="gr-reconnecting" role="status">
           <p class="gr-reconnecting-body">
@@ -718,7 +731,7 @@ function Greenroom() {
           // Once ended/dropped/reconnecting, the banner above already explains the empty grid — the
           // "waiting for guests" hint would contradict it, so suppress it in those states (the grid
           // rebuilds from the fresh roster once a reconnect recovers).
-          state === "ended" || state === "error" || state === "reconnecting" ? null : (
+          state === "ended" || state === "error" || state === "reconnecting" || state === "displaced" ? null : (
             <p class="gr-empty" data-state={state}>
               Waiting for guests to join…
             </p>

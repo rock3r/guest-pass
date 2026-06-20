@@ -1148,7 +1148,7 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 // Terminate-reason taxonomy (EN-9) — sent BEFORE close so the client routes correctly
 {"t":"terminate","reason":"reconnect"}                    // TRANSIENT → retry with backoff (keyed by pass_id)
 {"t":"terminate","reason":
-   "kicked"|"expired"|"revoked"|"session-ended"|"token-rotated"}   // TERMINAL → stop, route to error screen
+   "displaced"|"kicked"|"expired"|"revoked"|"session-ended"|"token-rotated"}   // TERMINAL → stop, route to error screen
 ```
 
 ### Roster projection (EN-8)
@@ -1245,8 +1245,8 @@ The server emits `terminate` with a reason, **then closes**.
 
 | Class | Reasons | Client action |
 |---|---|---|
-| **Transient** | `reconnect` (and network blips) | Reconnect with exponential backoff, re-keyed by stable `pass_id` (D-40) so OBS sources auto-reattach. |
-| **Terminal** | `kicked`, `expired`, `revoked`, `session-ended`, `token-rotated` | Stop reconnection; route to the matching error screen — `kicked` → "removed by host", `expired`/`revoked` → pass error screens, `session-ended` → "stream ended", `token-rotated` → re-auth (e.g. after D-22 slot-token rotation). |
+| **Transient** | `reconnect` (server drain) and network blips | Reconnect with exponential backoff, re-keyed by stable `pass_id` (D-40) so OBS sources auto-reattach. |
+| **Terminal** | `displaced`, `kicked`, `expired`, `revoked`, `session-ended`, `token-rotated` | Stop reconnection; route to the matching error screen — `displaced` → "opened in another tab" (a SECOND live connection for this identity took over, EN-16; the older tab stops so the two don't reconnect-war — only the duplicate-identity handoff, never a genuine reconnect, sends this), `kicked` → "removed by host", `expired`/`revoked` → pass error screens, `session-ended` → "stream ended", `token-rotated` → re-auth (e.g. after D-22 slot-token rotation). |
 
 **No-frame fallback (RF-22).** Real WS failures often close without a final frame.
 Define close-code conventions; **absence of a `terminate` frame ⇒ treat as transient**

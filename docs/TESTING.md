@@ -75,8 +75,8 @@ What the reducer layer must cover:
   placeholder, not the kicked occupant.
 - **Terminate routing** (EN-9): the `{t:"terminate","reason":…}` taxonomy —
   transient (`reconnect`) → client retries with backoff keyed by `pass_id`;
-  terminal (`kicked`/`expired`/`revoked`/`session-ended`/`token-rotated`) → stop
-  and route to the correct error screen.
+  terminal (`displaced`/`kicked`/`expired`/`revoked`/`session-ended`/`token-rotated`)
+  → stop and route to the correct error screen.
 - **Screenshare preview-switcher** (D-21): multiple eligible sharers populate the
   host-only preview rail; `screen-select` is host-only and promotes one share
   live; co-hosts may `force-no-share` but **cannot** `screen-select`;
