@@ -1300,7 +1300,10 @@ PII surface — account + their streams + the invited-guest PII they hold, never
 an **amend** form that rectifies the display name (→ the same write as `PATCH /api/me`), and a
 **delete-account** form (confirm-gated) that erases the account + all the host's data (→ the same
 as `DELETE /api/me`: `store.DeleteHost` cascade, **refused while a live session exists** — D-M5-3
-"end your live stream first" — then the session cookie is cleared). The JSON routes
+"end your live stream first" — **and refused while the host is the only active admin** (the AC-9
+last-admin invariant — "promote another admin first"; erasure is deferred, not denied, so a data
+subject keeps their right to erasure without orphaning the instance) — then the session cookie is
+cleared). The JSON routes
 (`GET /api/me/export`, `PATCH /api/me`, `DELETE /api/me`) are the canonical API (DESIGN §5); the
 no-JS settings page drives the same operations via POST-redirect-GET forms + the download link
 since HTML forms can't issue PATCH/DELETE. No JS rides these pages (D-32); state-changing POSTs
@@ -1451,6 +1454,8 @@ target is currently an active admin **and** is the only one (`CountActiveAdmins`
 `is_admin = 1 AND status = 'active'`, would drop to zero), so the instance always retains ≥1
 active admin. The self-guard already covers an admin acting on themselves; this forecloses the
 sole-admin path (one admin removing the last OTHER admin) and surfaces a `last-admin` PRG flash.
+The same invariant guards GDPR **self-erasure**: `deleteHostAccount` refuses when the host is the
+only active admin (see §"Host self-service"), so the third way to remove an admin is covered too.
 (The check is read-then-act, not transactional, so it narrows rather than fully closes a
 two-admins-remove-each-other race; the residual is a recoverable zero-admin state, not an
 escalation — closing it atomically is a non-goal per D-M5.5-5.) This stays

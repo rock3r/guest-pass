@@ -35,6 +35,13 @@ const maxHostNameRunes = 100 // a sane cap for the host's display name (rectific
 // refused until they end it (D-M5-3).
 var errAccountLive = errors.New("account has a live session")
 
+// errAccountLastAdmin is returned by deleteHostAccount when the host is the only active admin, so
+// self-erasure would strand the instance with no admin (the AC-9 / D-M5.5-5 invariant). Like the
+// live-session guard, erasure is DEFERRED not denied — the host promotes a replacement admin, then
+// deletes — so a data subject's right to erasure is preserved (GDPR), it just can't orphan the
+// instance.
+var errAccountLastAdmin = errors.New("account is the last active admin")
+
 // --- export DTOs (PII surface only — NO token hashes, NO slot/source secrets) ---
 
 type exportAccount struct {
@@ -139,6 +146,21 @@ func deleteHostAccount(ctx context.Context, st *store.Store, hub *signaling.Hub,
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
+	// Refuse if this host is the only active admin: erasing it would strand the instance with no
+	// admin able to approve/promote hosts (the AC-9 invariant the suspend/demote guard also keeps).
+	// Erasure is deferred, not denied — promote a replacement admin first (mirrors the live guard).
+	host, err := st.GetHost(ctx, hostID)
+	if err != nil {
+		return err // the host was authed for this request; a miss here is an infra error, propagate it
+	}
+	if host.IsAdmin && host.Status == store.HostActive {
+		switch n, err := st.CountActiveAdmins(ctx); {
+		case err != nil:
+			return err
+		case n <= 1:
+			return errAccountLastAdmin
+		}
+	}
 	// Tear down any pre-live room (greenroom open but never went live) with a TERMINAL reason for
 	// EVERY peer including OBS sources — bracketing the wipe on BOTH sides (codex):
 	//   • BEFORE DeleteHost: a source connected NOW gets the terminal frame over its existing socket
@@ -222,6 +244,9 @@ func (a *apiServer) deleteMe(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errAccountLive):
 		writeError(w, http.StatusConflict, "end your live stream first")
 		return
+	case errors.Is(err, errAccountLastAdmin):
+		writeError(w, http.StatusConflict, "promote another admin before deleting your account")
+		return
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "could not delete account")
 		return
@@ -272,6 +297,9 @@ func (s *appServer) deleteSettings(w http.ResponseWriter, r *http.Request) {
 	switch err := deleteHostAccount(r.Context(), s.store, s.hub, s.binds, host.ID); {
 	case errors.Is(err, errAccountLive):
 		http.Redirect(w, r, "/app/settings?error=live", http.StatusSeeOther)
+		return
+	case errors.Is(err, errAccountLastAdmin):
+		http.Redirect(w, r, "/app/settings?error=last-admin", http.StatusSeeOther)
 		return
 	case err != nil:
 		http.Error(w, "could not delete account", http.StatusInternalServerError)
