@@ -24,6 +24,18 @@ import (
 
 const wsTestTokenSecret = "ws-test-token-secret-cccccccccccccccc"
 
+// wsTestTimeout bounds how long a WS test waits for an expected async frame (or the dial
+// handshake) to arrive. It was 3s, which flaked on loaded CI runners under -race —
+// TestWSSignalRelayICEStripsExtras in particular, where the relayed signal must travel
+// guest→hub→room→peer while the goroutine scheduler is saturated; the test logic is
+// race-free (the join-roster barrier guarantees the addressee is registered before the
+// relay), so the only nondeterminism was this deadline being too tight. 10s keeps a genuine
+// hang bounded while leaving ample headroom for a slow runner; it only affects how long a
+// truly-stuck read waits before failing, never the happy path (a frame that arrives returns
+// immediately). The deliberate short deadline that asserts a frame does NOT arrive (a
+// negative probe) is intentionally left unchanged.
+const wsTestTimeout = 10 * time.Second
+
 // wsHarness is an in-process server wired with credential auth (AD-5 [INT]): a real
 // store seeded with hosts/streams/passes/slots, the JWT key ring, and the token hasher.
 // It dials /ws as each role over a real WebSocket so the auth→role→room path is
@@ -174,7 +186,7 @@ func (h *wsHarness) dial(t *testing.T, qs string, header http.Header) (*websocke
 	if qs != "" {
 		url += "?" + qs
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	return websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
 }
@@ -191,7 +203,7 @@ func (h *wsHarness) dialOK(t *testing.T, qs string, header http.Header) *websock
 
 func wsReadFrame(t *testing.T, c *websocket.Conn) signaling.Frame {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	var f signaling.Frame
 	if err := wsjsonRead(ctx, c, &f); err != nil {
@@ -755,7 +767,7 @@ func TestWS_OneConnPerIdentityEviction(t *testing.T) {
 	defer second.CloseNow()
 
 	// The first connection receives terminate:reconnect before its socket closes.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	for {
 		var f signaling.Frame
