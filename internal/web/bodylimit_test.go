@@ -95,22 +95,35 @@ func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	}
 }
 
-// A genuine upgrade whose Connection tokens are SPLIT across multiple header fields (as a proxy may
-// send them) is still recognized and exempt — Header.Get would see only the first field.
-func TestRequestBodyLimit_WSUpgradeSplitConnectionHeader(t *testing.T) {
-	next, called, _ := readEcho(t)
-	mw := RequestBodyLimit(16)(next)
+// A genuine upgrade whose Connection/Upgrade tokens are SPLIT across multiple header fields or sit
+// in a comma list (as a proxy may send them) is still recognized and exempt — Header.Get + an exact
+// match would miss the token, but websocket.Accept scans all values, and so must the exemption.
+func TestRequestBodyLimit_WSUpgradeLenientHeaders(t *testing.T) {
+	mw := RequestBodyLimit(16)
 
-	req := wsUpgradeReq()
-	req.Header.Del("Connection")
-	req.Header.Add("Connection", "keep-alive") // first field lacks the Upgrade token
-	req.Header.Add("Connection", "Upgrade")    // ...it's in a second Connection field
-	rec := httptest.NewRecorder()
-	mw.ServeHTTP(rec, req)
+	t.Run("split Connection field", func(t *testing.T) {
+		next, called, _ := readEcho(t)
+		req := wsUpgradeReq()
+		req.Header.Del("Connection")
+		req.Header.Add("Connection", "keep-alive") // first field lacks the Upgrade token
+		req.Header.Add("Connection", "Upgrade")    // ...it's in a second Connection field
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if !*called || rec.Code != http.StatusOK {
+			t.Fatalf("split-Connection upgrade: called=%v code=%d, want true/200", called, rec.Code)
+		}
+	})
 
-	if !*called || rec.Code != http.StatusOK {
-		t.Fatalf("split-Connection upgrade: called=%v code=%d, want true/200", called, rec.Code)
-	}
+	t.Run("listed Upgrade token", func(t *testing.T) {
+		next, called, _ := readEcho(t)
+		req := wsUpgradeReq()
+		req.Header.Set("Upgrade", "websocket, foo") // token in a comma list, not an exact match
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if !*called || rec.Code != http.StatusOK {
+			t.Fatalf("listed-Upgrade upgrade: called=%v code=%d, want true/200", called, rec.Code)
+		}
+	})
 }
 
 // A non-upgrade request to /ws (POST /ws, or a GET missing the full handshake — e.g. only the
