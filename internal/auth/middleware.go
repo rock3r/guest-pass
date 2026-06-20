@@ -90,6 +90,14 @@ func HostFromContext(ctx context.Context) (*store.Host, bool) {
 	return h, ok
 }
 
+// ContextWithHost attaches an authenticated host to ctx under the same key RequireHost uses, so
+// HostFromContext recovers it. It is the symmetric setter for HostFromContext; RequireHost/
+// RequireAdmin call the equivalent internally, and tests use it to drive a handler that reads the
+// acting host from context without standing up the full middleware chain.
+func ContextWithHost(ctx context.Context, h *store.Host) context.Context {
+	return context.WithValue(ctx, hostCtxKey, h)
+}
+
 // SetDeniedHandler installs the renderer for denied requests (the web layer's HTML error
 // screens). With none installed, denials fall back to the plain-text bodies below. It is wired
 // once at startup, before the server serves traffic — not concurrency-safe with live requests.
@@ -124,7 +132,7 @@ func (a *Authenticator) RequireHost(next http.Handler) http.Handler {
 		if !ok {
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), hostCtxKey, host)))
+		next.ServeHTTP(w, r.WithContext(ContextWithHost(r.Context(), host)))
 	})
 }
 

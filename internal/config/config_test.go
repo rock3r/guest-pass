@@ -30,6 +30,40 @@ func envLoad(env map[string]string) (*Config, error) {
 	return load(func(k string) string { return env[k] })
 }
 
+// MAX_REQUEST_BODY_BYTES defaults to 1 MiB, accepts a positive override, and fails closed on a
+// non-positive or non-integer value (the cap can't be silently disabled — D-M5.5-4 / AC-8).
+func TestLoad_MaxRequestBodyBytes(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		c, err := envLoad(validEnv())
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if c.MaxRequestBodyBytes != 1<<20 {
+			t.Fatalf("default = %d, want %d", c.MaxRequestBodyBytes, 1<<20)
+		}
+	})
+	t.Run("positive override", func(t *testing.T) {
+		env := validEnv()
+		env["MAX_REQUEST_BODY_BYTES"] = "4096"
+		c, err := envLoad(env)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if c.MaxRequestBodyBytes != 4096 {
+			t.Fatalf("override = %d, want 4096", c.MaxRequestBodyBytes)
+		}
+	})
+	for _, bad := range []string{"0", "-1", "notanumber"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			env := validEnv()
+			env["MAX_REQUEST_BODY_BYTES"] = bad
+			if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+				t.Fatalf("MAX_REQUEST_BODY_BYTES=%q: want ErrInvalidValue, got %v", bad, err)
+			}
+		})
+	}
+}
+
 func TestLoad_JWTSecretFailsClosed(t *testing.T) {
 	cases := []struct {
 		name   string

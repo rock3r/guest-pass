@@ -317,6 +317,8 @@ func adminFlash(code string) string {
 		return "Reports dismissed."
 	case "self":
 		return "You can't suspend or demote your own account."
+	case "last-admin":
+		return "You can't suspend or demote the last remaining admin — promote another host to admin first."
 	case "notfound":
 		return "That host no longer exists."
 	default:

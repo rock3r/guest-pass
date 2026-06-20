@@ -234,5 +234,7 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 			TrustedStreams: cfg.RateTrustedStreams,
 		},
 		Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		// Global request-body cap (D-M5.5-4 / AC-8): reject an oversized body instance-wide with 413.
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
 	})
 }

@@ -135,6 +135,43 @@ func TestGDPR_DeleteRefusedWhileLive(t *testing.T) {
 	}
 }
 
+// Self-service delete is refused (409) when the host is the only active admin — erasing it would
+// strand the instance with no admin (AC-9). Once a second active admin exists the delete proceeds,
+// so erasure is deferred, not denied. The settings form redirects with ?error=last-admin.
+func TestGDPR_DeleteRefusedWhenLastAdmin(t *testing.T) {
+	a := newAPIHarness(t)
+	admin, adminCookie := a.adminHost(t, "sole-admin")
+
+	rec := a.req(t, http.MethodDelete, "/api/me", "", adminCookie)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete as sole admin = %d, want 409", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "promote another admin") {
+		t.Fatalf("sole-admin delete body = %q", rec.Body.String())
+	}
+	if _, err := a.store.GetHost(context.Background(), admin.ID); err != nil {
+		t.Fatalf("admin must still exist after a refused delete: %v", err)
+	}
+
+	// The no-JS settings form takes the same path → PRG with ?error=last-admin.
+	form := a.formPost(t, "/app/settings/delete", "confirm=1", adminCookie)
+	if loc := form.Header().Get("Location"); loc != "/app/settings?error=last-admin" {
+		t.Fatalf("settings delete (sole admin) loc=%q, want /app/settings?error=last-admin", loc)
+	}
+
+	// Promote a second active admin; now the first admin may erase themselves.
+	other := a.hostInState(t, "other-admin", store.HostActive)
+	if err := a.store.SetHostAdmin(context.Background(), other.ID, true); err != nil {
+		t.Fatalf("SetHostAdmin(other): %v", err)
+	}
+	if rec := a.req(t, http.MethodDelete, "/api/me", "", adminCookie); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with a second admin present = %d, want 204", rec.Code)
+	}
+	if _, err := a.store.GetHost(context.Background(), admin.ID); err == nil {
+		t.Fatal("admin should be erased once a second admin exists")
+	}
+}
+
 // Delete erases the account + all the host's data and clears the session cookie (AC-5).
 func TestGDPR_DeleteErasesAccount(t *testing.T) {
 	a := newAPIHarness(t)
