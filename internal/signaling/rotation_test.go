@@ -9,7 +9,7 @@ import (
 // TERMINAL {t:terminate,token-rotated} and is evicted; a participant is never terminated by
 // this path, and rotating an offline/absent source is a no-op.
 func TestRoomRotateSourceTerminatesAndEvicts(t *testing.T) {
-	r := newRoom("rot", nil, nil)
+	r := newRoom("rot", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -49,7 +49,7 @@ func TestRoomRotateSourceTerminatesAndEvicts(t *testing.T) {
 // would drop it, the OBS page would see a bare close, treat it as transient, and reconnect-loop
 // the dead token. With the budgeted send it is delivered once the writer drains a slot.
 func TestRoomRotateSourceTerminalSurvivesFullQueue(t *testing.T) {
-	r := newRoom("rotfull", nil, nil)
+	r := newRoom("rotfull", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 

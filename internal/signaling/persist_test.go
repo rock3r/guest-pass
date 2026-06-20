@@ -121,7 +121,7 @@ func TestSeedLocksReapplies(t *testing.T) {
 // stores a NULL applier (empty string here).
 func TestRoomPersistsForceAndRelease(t *testing.T) {
 	fs := newFakeLockStore()
-	r := newRoom("h", fs, discardLogger())
+	r := newRoom("h", fs, discardLogger(), 0)
 	go r.run()
 	defer r.Close()
 
@@ -154,7 +154,7 @@ func TestRoomReappliesLocksOnRespawn(t *testing.T) {
 	_ = fs.SaveLock(context.Background(), PersistedLock{Target: "g1", Modality: "mic", ApplierRankFloor: "host", Applier: ""})
 
 	// Restart: a fresh room with the same store loads the lock on spawn, before any join.
-	r := newRoom("h", fs, discardLogger())
+	r := newRoom("h", fs, discardLogger(), 0)
 	go r.run()
 	defer r.Close()
 
@@ -185,7 +185,7 @@ func TestRoomReappliesLocksOnRespawn(t *testing.T) {
 func TestRoomSurvivesLockLoadError(t *testing.T) {
 	fs := newFakeLockStore()
 	fs.loadErr = errors.New("db unavailable")
-	r := newRoom("h", fs, discardLogger())
+	r := newRoom("h", fs, discardLogger(), 0)
 	go r.run()
 	defer r.Close()
 

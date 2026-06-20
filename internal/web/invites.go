@@ -233,10 +233,23 @@ func (s *appServer) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Revoke is a TERMINAL state (D-M5.5-3), so vacate any LIVE cam slot the guest holds — INCLUDING
+	// one RETAINED across a transient drop (the grace window, D-40) — under the per-host binding lock
+	// so it orders with the /ws join-replay + picker PUTs (D-20), mirroring re-issue. Without this a
+	// guest who had already dropped and was grace-bound would keep showing on its OBS source until the
+	// grace timer expired, despite the link being revoked.
+	unlock := s.binds.lock(st.HostID)
 	if err := s.store.SetPassStatus(r.Context(), pass.ID, store.PassRevoked); err != nil {
+		unlock()
 		http.Error(w, "could not revoke invite", http.StatusInternalServerError)
 		return
 	}
+	if s.hub != nil {
+		if room := s.hub.RoomIfLive(st.HostID); room != nil {
+			room.VacateOccupant(signaling.PeerID(pass.ID))
+		}
+	}
+	unlock()
 	http.Redirect(w, r, "/app/streams/"+st.ID, http.StatusSeeOther)
 }
 

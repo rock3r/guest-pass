@@ -87,6 +87,11 @@ type Config struct {
 	ReapInterval    time.Duration // REAP_INTERVAL: how often the idle-session reaper polls
 	ReapIdleAfter   time.Duration // REAP_IDLE_AFTER: end a session idle (no participants) this long
 
+	// SlotGraceWindow keeps a guest's OBS cam-slot bound across a transient WS drop (D-40/D-M5.5-3):
+	// a rejoin within it resumes the slot with no placeholder flash; after it the slot vacates. Kept
+	// well below ReapIdleAfter so the idle reaper still ends a truly-dead session.
+	SlotGraceWindow time.Duration // SLOT_GRACE_WINDOW
+
 	// Progressive-trust per-host quota dials (D-36 / §7.9 / §9.4), config-backed with safe defaults.
 	// A host graduates from the new tier to the trusted tier once its account age crosses RateTrustAfter.
 	RateTrustAfter     time.Duration // RATE_TRUST_AFTER: account age at which the looser tier applies
@@ -112,6 +117,7 @@ const (
 	defaultReportRetention = 30 * 24 * time.Hour // abuse-report review window before anonymizing (D-42)
 	defaultReapInterval    = time.Minute         // idle-session reaper poll cadence (D-40)
 	defaultReapIdleAfter   = 15 * time.Minute    // auto-end a session idle this long (frees the slot)
+	defaultSlotGraceWindow = 45 * time.Second    // keep a cam-slot bound across a transient guest drop (D-40); ≪ ReapIdleAfter
 )
 
 // Progressive-trust defaults (D-36). Tightest for new accounts, looser once aged; tuned at launch.
@@ -184,6 +190,9 @@ func load(getenv func(string) string) (*Config, error) {
 	if c.ReapIdleAfter, err = parsePositiveDuration("REAP_IDLE_AFTER", getenv("REAP_IDLE_AFTER"), defaultReapIdleAfter); err != nil {
 		return nil, err
 	}
+	if c.SlotGraceWindow, err = parsePositiveDuration("SLOT_GRACE_WINDOW", getenv("SLOT_GRACE_WINDOW"), defaultSlotGraceWindow); err != nil {
+		return nil, err
+	}
 	if c.RateTrustAfter, err = parsePositiveDuration("RATE_TRUST_AFTER", getenv("RATE_TRUST_AFTER"), defaultRateTrustAfter); err != nil {
 		return nil, err
 	}
@@ -198,6 +207,12 @@ func load(getenv func(string) string) (*Config, error) {
 	}
 	if c.RateTrustedStreams, err = parsePositiveInt("RATE_TRUSTED_STREAMS", getenv("RATE_TRUSTED_STREAMS"), defaultRateTrustedStreams); err != nil {
 		return nil, err
+	}
+	// The slot-binding grace must stay below the idle-session reaper (D-40/D-M5.5-3: "grace ≪
+	// ReapIdleAfter"): if it could outlive the reap window a truly-dead session might never free its
+	// slots before being reaped, inverting the intended ordering. Reject the misconfiguration.
+	if c.SlotGraceWindow >= c.ReapIdleAfter {
+		return nil, fmt.Errorf("config: SLOT_GRACE_WINDOW (%s) must be below REAP_IDLE_AFTER (%s): %w", c.SlotGraceWindow, c.ReapIdleAfter, ErrInvalidValue)
 	}
 	if err := c.validate(); err != nil {
 		return nil, err

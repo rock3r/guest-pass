@@ -3,6 +3,7 @@ package signaling
 import (
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // Hub is the supervisor above the room actors (AD-2a): it owns the room registry,
@@ -18,12 +19,30 @@ type Hub struct {
 	// the room logger. Both are handed to every room the hub spawns.
 	locks LockPersistence
 	log   *slog.Logger
+	// graceWindow is the slot-binding grace on a transient guest drop (D-40), handed to every room
+	// the hub spawns. <=0 lets newRoom fall back to defaultGraceWindow.
+	graceWindow time.Duration
+}
+
+// HubOption configures a Hub at construction. Variadic so existing callers (and the many tests that
+// build a bare hub) need no change.
+type HubOption func(*Hub)
+
+// WithGraceWindow sets the slot-binding grace window applied to every room the hub spawns (D-40/
+// D-M5.5-3). The production value is config-backed (SLOT_GRACE_WINDOW); tests pass a short value to
+// exercise expiry without waiting. A non-positive value falls back to defaultGraceWindow per room.
+func WithGraceWindow(d time.Duration) HubOption {
+	return func(h *Hub) { h.graceWindow = d }
 }
 
 // NewHub builds the room supervisor. lockStore persists suppression locks (AD-22); pass nil to
 // disable persistence (the pure transport/reducer tests). log may be nil (rooms default to slog).
-func NewHub(lockStore LockPersistence, log *slog.Logger) *Hub {
-	return &Hub{rooms: map[string]*Room{}, locks: lockStore, log: log}
+func NewHub(lockStore LockPersistence, log *slog.Logger, opts ...HubOption) *Hub {
+	h := &Hub{rooms: map[string]*Room{}, locks: lockStore, log: log}
+	for _, o := range opts {
+		o(h)
+	}
+	return h
 }
 
 // Room returns the room for a session, creating and starting it on first use. It returns
@@ -38,7 +57,7 @@ func (h *Hub) Room(session string) *Room {
 	}
 	r := h.rooms[session]
 	if r == nil {
-		r = newRoom(session, h.locks, h.log)
+		r = newRoom(session, h.locks, h.log, h.graceWindow)
 		go r.run()
 		h.rooms[session] = r
 	}

@@ -473,6 +473,45 @@ func TestLoad_ReapDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+// SLOT_GRACE_WINDOW (D-40/D-M5.5-3) defaults to 45s and accepts a positive override.
+func TestLoad_SlotGraceWindowDefaultAndOverride(t *testing.T) {
+	c, err := envLoad(validEnv())
+	if err != nil {
+		t.Fatalf("default load: %v", err)
+	}
+	if c.SlotGraceWindow != defaultSlotGraceWindow {
+		t.Errorf("default SlotGraceWindow = %v, want %v", c.SlotGraceWindow, defaultSlotGraceWindow)
+	}
+	env := validEnv()
+	env["SLOT_GRACE_WINDOW"] = "20s"
+	c, err = envLoad(env)
+	if err != nil {
+		t.Fatalf("override load: %v", err)
+	}
+	if c.SlotGraceWindow != 20*time.Second {
+		t.Errorf("SlotGraceWindow = %v, want 20s", c.SlotGraceWindow)
+	}
+}
+
+// SLOT_GRACE_WINDOW must stay below REAP_IDLE_AFTER (grace ≪ reaper, D-40); a grace that meets or
+// exceeds the idle-reap window is a fail-closed misconfiguration.
+func TestLoad_GraceWindowMustBeBelowReapIdle(t *testing.T) {
+	for _, grace := range []string{"20m", "15m"} { // over, then equal to the 15m reap default
+		env := validEnv()
+		env["SLOT_GRACE_WINDOW"] = grace
+		if _, err := envLoad(env); !errors.Is(err, ErrInvalidValue) {
+			t.Fatalf("SLOT_GRACE_WINDOW=%s (reap=15m): want ErrInvalidValue, got %v", grace, err)
+		}
+	}
+	// A grace below the reaper (incl. a lowered reaper still above the grace) loads cleanly.
+	env := validEnv()
+	env["SLOT_GRACE_WINDOW"] = "2m"
+	env["REAP_IDLE_AFTER"] = "5m"
+	if _, err := envLoad(env); err != nil {
+		t.Fatalf("grace below reap idle should load: %v", err)
+	}
+}
+
 func TestLoad_TrustDefaultsAndOverrides(t *testing.T) {
 	c, err := envLoad(validEnv())
 	if err != nil {
@@ -513,6 +552,9 @@ func TestLoad_PurgeInvalidAndNonPositiveRejected(t *testing.T) {
 		{"unparseable reap interval", "REAP_INTERVAL", "soon"},
 		{"zero reap interval", "REAP_INTERVAL", "0"},
 		{"negative reap idle", "REAP_IDLE_AFTER", "-1m"},
+		{"unparseable grace window", "SLOT_GRACE_WINDOW", "soon"},
+		{"zero grace window", "SLOT_GRACE_WINDOW", "0"},
+		{"negative grace window", "SLOT_GRACE_WINDOW", "-5s"},
 		// Progressive-trust quotas (D-36) fail safe: a non-positive / unparseable value refuses to boot
 		// rather than silently disabling the limit.
 		{"unparseable trust age", "RATE_TRUST_AFTER", "soon"},

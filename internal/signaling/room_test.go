@@ -35,10 +35,114 @@ func recvFrameOfType(t *testing.T, ch chan Frame, want string) Frame {
 	}
 }
 
+// assertNoFrameWithin fails if any frame arrives on ch before d elapses (used to assert the source
+// stays bound — no slot-unbound — during the grace window).
+func assertNoFrameWithin(t *testing.T, ch chan Frame, d time.Duration) {
+	t.Helper()
+	select {
+	case f := <-ch:
+		t.Fatalf("expected no frame within %s, got %+v", d, f)
+	case <-time.After(d):
+	}
+}
+
+// drainFrames consumes any frames already queued on ch (e.g. the occupant-locks frame bindSlot
+// sends to a source alongside slot-rebind), so a following no-frame assertion sees only new frames.
+func drainFrames(ch chan Frame) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// D-40/AC-3: a guest's transient WS drop keeps its cam-slot binding for the grace window — the OBS
+// source gets NO slot-unbound during it — and the slot vacates (slot-unbound) only after the window
+// expires with no rejoin. Driven through the real Room actor + its grace timer with a short window.
+func TestRoomGraceRetainsBindingThenVacatesOnExpiry(t *testing.T) {
+	const grace = 80 * time.Millisecond
+	r := newRoom("grace", nil, nil, grace)
+	go r.run()
+	defer r.Close()
+
+	srcOut := make(chan Frame, 8)
+	r.Join("src", "obs", "", "cam-1", srcOut)
+	recvFrameOfType(t, srcOut, "slot-unbound") // initial attach: no occupant yet
+
+	g1Out := make(chan Frame, 8)
+	r.Join("g1", "guest", "", "", g1Out)
+	r.Rebind("cam-1", "g1")
+	recvFrameOfType(t, srcOut, "slot-rebind") // source now bound to g1
+	drainFrames(srcOut)
+
+	r.Leave("g1", g1Out) // transient drop (socket close)
+
+	// During the grace window the binding is retained: the source must not be sent slot-unbound.
+	assertNoFrameWithin(t, srcOut, grace/2)
+	// After the window with no rejoin, the slot vacates and the source falls to placeholder.
+	recvFrameOfType(t, srcOut, "slot-unbound")
+}
+
+// D-40/AC-3: a rejoin within the grace window resumes the slot (slot-rebind) and defuses the
+// expiry, so the OBS source is NEVER sent slot-unbound — no placeholder flash, no host action.
+func TestRoomGraceRejoinResumesWithoutVacate(t *testing.T) {
+	const grace = 60 * time.Millisecond
+	r := newRoom("grace2", nil, nil, grace)
+	go r.run()
+	defer r.Close()
+
+	srcOut := make(chan Frame, 8)
+	r.Join("src", "obs", "", "cam-1", srcOut)
+	recvFrameOfType(t, srcOut, "slot-unbound")
+
+	g1Out := make(chan Frame, 8)
+	r.Join("g1", "guest", "", "", g1Out)
+	r.Rebind("cam-1", "g1")
+	recvFrameOfType(t, srcOut, "slot-rebind")
+	drainFrames(srcOut)
+
+	r.Leave("g1", g1Out) // transient drop
+
+	// The guest reconnects within the window: re-register + replay its persisted binding.
+	g1Out2 := make(chan Frame, 8)
+	r.Join("g1", "guest", "", "", g1Out2)
+	r.ResumeBind("cam-1", "g1")
+	recvFrameOfType(t, srcOut, "slot-rebind") // the source re-links to the rejoined occupant
+	drainFrames(srcOut)
+
+	// Well past the original window, the defused expiry must never have sent slot-unbound.
+	assertNoFrameWithin(t, srcOut, 3*grace)
+}
+
+// A terminal eviction of a guest that is CURRENTLY in its grace window vacates its grace-bound slot
+// at once (the source gets slot-unbound) rather than leaving a zombie binding until the grace timer
+// — even though the guest has no live connection to evict. Long grace so only the evict can vacate.
+func TestRoomEvictPeersVacatesGraceBoundSlot(t *testing.T) {
+	r := newRoom("evictgrace", nil, nil, 5*time.Second)
+	go r.run()
+	defer r.Close()
+
+	srcOut := make(chan Frame, 8)
+	r.Join("src", "obs", "", "cam-1", srcOut)
+	recvFrameOfType(t, srcOut, "slot-unbound")
+	g1Out := make(chan Frame, 8)
+	r.Join("g1", "guest", "", "", g1Out)
+	r.Rebind("cam-1", "g1")
+	recvFrameOfType(t, srcOut, "slot-rebind")
+	drainFrames(srcOut)
+
+	r.Leave("g1", g1Out)                                 // transient drop → grace-bound (won't expire for 5s)
+	assertNoFrameWithin(t, srcOut, 100*time.Millisecond) // grace retains: no slot-unbound yet
+	r.EvictPeers("session-ended", []PeerID{"g1"})        // terminal eviction of the disconnected guest
+	recvFrameOfType(t, srcOut, "slot-unbound")           // the grace-bound slot vacates NOW
+}
+
 // The actor delivers a slot-rebind to the source page's channel when the host
 // rebinds the slot — end to end through the command channel and delivery.
 func TestRoomDeliversSlotRebindToSource(t *testing.T) {
-	r := newRoom("s1", nil, nil)
+	r := newRoom("s1", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -62,7 +166,7 @@ func TestRoomDeliversSlotRebindToSource(t *testing.T) {
 // first (closes its out), and the evicted connection's Leave must NOT tear down the
 // connection that supplanted it.
 func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
-	r := newRoom("dup", nil, nil)
+	r := newRoom("dup", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -95,7 +199,7 @@ func TestDuplicateIdEvictsPriorAndLeaveIsIdentityChecked(t *testing.T) {
 }
 
 func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
-	r := newRoom("s2", nil, nil)
+	r := newRoom("s2", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -115,7 +219,7 @@ func TestRoomRelaysSignalBetweenPeers(t *testing.T) {
 // tick — the ticker fires on the room goroutine and delivers the meter map, proving the wiring
 // (applyState stores level → tick → buildLevels → deliver), not just the pure reducer.
 func TestRoomLevelsTickDelivers(t *testing.T) {
-	r := newRoom("lvl", nil, nil)
+	r := newRoom("lvl", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 

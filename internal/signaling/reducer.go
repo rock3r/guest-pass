@@ -42,6 +42,16 @@ type slotState struct {
 	source   PeerID // the OBS source-page peer subscribed to this slot ("" = none)
 	epoch    int    // monotonic; bumped on every (re)bind/unbind (EN-3)
 	onAir    string // D-24 three-state; reset to OnAirUnknown on every rebind
+	// disconnected marks a cam-slot binding that survives a guest's transient WS drop for the grace
+	// window (D-40/D-M5.5-3): the occupant left s.peers but the binding is RETAINED — no slot-unbound,
+	// no epoch bump — so the OBS source holds last-frame and a quick rejoin resumes with no
+	// placeholder flash (AC-3). The effectful room schedules a grace-expiry that vacates the slot if
+	// the guest never returns. Cleared on (re)bind (a rejoin re-binds, clearing it).
+	disconnected bool
+	// graceGen increments each time the occupant disconnects, so a grace-expiry scheduled for one
+	// disconnect no-ops if the guest rejoined and dropped AGAIN within the original window (the newer
+	// disconnect owns its own expiry). It is the disconnect generation the expiry is gated on.
+	graceGen int
 }
 
 // outbound is a frame the room wants delivered to a specific peer.
@@ -314,10 +324,15 @@ func (s *roomState) buildLevels() []outbound {
 }
 
 // leave removes a peer, detaches it from any slot it sourced or occupied, and tells the
-// remaining participants it left (peer-left, projected). An occupied slot is unbound
-// (epoch bump + placeholder) so a reconnecting source resolves to placeholder rather
-// than the departed occupant (EN-3).
-func (s *roomState) leave(id PeerID) []outbound {
+// remaining participants it left (peer-left, projected).
+//
+// terminal selects the cam-slot occupant policy (D-40/D-M5.5-3): a TRANSIENT drop (terminal=false,
+// the socket-close path) RETAINS the binding for a grace window so the OBS source holds last-frame
+// and a quick rejoin resumes with no placeholder flash (AC-3); a TERMINAL teardown (terminal=true —
+// kick D-25, evict, source rotation) vacates the slot at once (epoch bump + placeholder) so a
+// reconnecting modified source resolves to placeholder, never the removed occupant (EN-3). The
+// screenshare slot always vacates immediately regardless (a live action, not a persistent binding).
+func (s *roomState) leave(id PeerID, terminal bool) []outbound {
 	p := s.peers[id]
 	delete(s.peers, id)
 	// A leaver also drops out of the screenshare preview pool (D-21). If it held the live "screen"
@@ -345,10 +360,31 @@ func (s *roomState) leave(id PeerID) []outbound {
 			s.degradeStaleOnAir(st)
 		}
 		if st.occupant == id {
-			// The occupant left: free its slot (epoch bump + placeholder) so a reconnecting source
-			// resolves to placeholder, not the departed occupant (EN-3). Only the source frame is
-			// collected here; the roster re-broadcast below folds in the now-vacated slot.
-			out = append(out, s.vacateSlot(sid)...)
+			if isCamSlot(sid) && !terminal {
+				// Transient drop of a cam-slot occupant: RETAIN the binding for the grace window
+				// (D-40/D-M5.5-3) instead of vacating. No slot-unbound and no epoch bump — the OBS source
+				// holds last-frame, and a rejoin within the window re-binds (slot-rebind, new epoch) and
+				// resumes with NO placeholder flash and no host action (AC-3). The effectful room schedules
+				// a grace-expiry that vacates the slot if the guest never returns; graceGen advances so a
+				// stale expiry from an earlier disconnect can't vacate a later one. The occupant is removed
+				// from s.peers above, so it has no roster entry during the gap — the binding is invisible
+				// until the rejoin re-folds it.
+				//
+				// Degrade the slot's on-air to status-unavailable though: the OBS link is dead, so any
+				// prior on-air reflection is now stale (D-24 "never assert on-air with no live signal").
+				// Without this, a reconnect's join roster — emitted before ResumeBind resets the slot —
+				// (or a skipped replay) would briefly assert on-air off a dead link. No slot-unbound and
+				// no epoch bump, so the source still isn't told to vacate or re-link.
+				s.degradeStaleOnAir(st)
+				st.disconnected = true
+				st.graceGen++
+			} else {
+				// Terminal teardown (kick/evict/rotation) of a cam occupant, or the screenshare slot in any
+				// case (a live action, not a persistent identity, D-21): vacate immediately — epoch bump +
+				// placeholder, no grace — so a reconnecting modified source can't resolve to the removed
+				// occupant (EN-3). pulledFromShare above already dropped screen preview-pool membership.
+				out = append(out, s.vacateSlot(sid)...)
+			}
 		}
 	}
 	if p != nil {
@@ -546,6 +582,7 @@ func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = occupant
+	st.disconnected = false // a (re)bind — incl. a rejoin's resume — clears any pending grace state (D-40)
 	st.onAir = OnAirUnknown
 	if st.source == "" {
 		return nil
@@ -598,11 +635,25 @@ func (s *roomState) rebindSlot(sid SlotID, occupant PeerID) []outbound {
 // occupant live while the DB already names the new one. Vacating instead drops the slot to a
 // placeholder (D-24) — never the displaced guest — so live and the DB agree. The occupant is
 // (re)bound for real once it connects (the /ws join replays passes.slot_id).
+//
+// One cam slot per occupant (D-20) still holds for an OFFLINE occupant: since PR-3 a transient drop
+// RETAINS the guest's old cam slot for the grace window, so moving that offline guest to sid must
+// also vacate the cam slot it still grace-holds — otherwise the old OBS source keeps showing the
+// moved guest while the DB/host UI say it moved (the online rebindSlot path already does this).
 func (s *roomState) rebindOrVacate(sid SlotID, occupant PeerID) []outbound {
 	if _, ok := s.peers[occupant]; ok {
 		return s.rebindSlot(sid, occupant)
 	}
-	return s.unbindSlot(sid)
+	var out []outbound
+	if isCamSlot(sid) {
+		for other, st := range s.slots {
+			if other != sid && st.occupant == occupant && isCamSlot(other) {
+				out = append(out, s.vacateSlot(other)...) // clear the grace-held old slot
+			}
+		}
+	}
+	out = append(out, s.vacateSlot(sid)...)
+	return append(out, s.rebroadcastRoster()...)
 }
 
 // resumeBind replays a guest's persisted slot binding on join (D-40) WITHOUT displacing a
@@ -647,6 +698,7 @@ func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = ""
+	st.disconnected = false // vacating clears any pending grace state (D-40); the slot is now free
 	st.onAir = OnAirUnknown
 	if st.source == "" {
 		return nil
@@ -674,14 +726,42 @@ func (s *roomState) unbindSlot(sid SlotID) []outbound {
 	return append(out, s.rebroadcastRoster()...)
 }
 
+// expireGrace vacates a cam slot whose occupant disconnected and never returned within the grace
+// window (D-40/D-M5.5-3). The effectful room schedules it (time.AfterFunc) per disconnect, gated on
+// the disconnect generation: it no-ops unless the slot is STILL bound to that occupant, STILL marked
+// disconnected, AND graceGen still matches — so it can't vacate a slot the guest rejoined (bindSlot
+// cleared disconnected), one a later disconnect re-armed (graceGen advanced), one the host rebound
+// to someone else, or one already vacated terminally (occupant cleared). When it does fire, it is
+// exactly today's leave behavior, just deferred by the grace window: slot-unbound + roster fold.
+func (s *roomState) expireGrace(sid SlotID, occupant PeerID, gen int) []outbound {
+	st := s.slots[sid]
+	if st == nil || st.occupant != occupant || !st.disconnected || st.graceGen != gen {
+		return nil
+	}
+	// The occupant may have reconnected in the narrow window between Room.Join (re-adds it to
+	// s.peers) and the ResumeBind that clears `disconnected` — both are separate room commands, and
+	// this expiry could interleave between them. Don't vacate a slot whose occupant is connected
+	// again: the in-flight resume will re-affirm the binding (and a fresh re-disconnect would have
+	// advanced graceGen). This prevents a placeholder flash on a reconnect that lands right at the
+	// grace boundary (AC-3).
+	if _, connected := s.peers[occupant]; connected {
+		return nil
+	}
+	out := s.vacateSlot(sid)
+	return append(out, s.rebroadcastRoster()...)
+}
+
 // obsSourceActive folds an OBS on-program reflection into the occupant's roster onAir, but
 // ONLY when its epoch matches the slot's current epoch (EN-3): a stale event from a previous
 // occupant is ignored so it can't mislight the new occupant; a future epoch is also ignored.
 // A real change with a bound occupant re-broadcasts the roster; an unchanged or unoccupied
-// slot stays silent.
+// slot stays silent. While the slot is in its grace window (occupant disconnected, D-40) the
+// epoch is unchanged, so an OBS sourceActive echo would otherwise still fold in — but the
+// occupant's media is dead, so any on-air reflection is no longer truthful (D-24). Ignore it;
+// the rejoin's slot-rebind bumps the epoch and a fresh transition re-asserts on-air for real.
 func (s *roomState) obsSourceActive(sid SlotID, active bool, epoch int) []outbound {
 	st := s.slots[sid]
-	if st == nil || epoch != st.epoch {
+	if st == nil || epoch != st.epoch || st.disconnected {
 		return nil
 	}
 	want := OnAirNo
