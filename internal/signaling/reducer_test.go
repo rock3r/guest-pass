@@ -995,6 +995,29 @@ func TestRebindOrVacateClearsGraceHeldSlotForOfflineGuest(t *testing.T) {
 	}
 }
 
+// vacateOccupant (the greenroom unassign / the revoke + re-issue terminal paths) clears a cam slot
+// the occupant grace-holds while disconnected, so a terminal action on an already-dropped guest
+// doesn't leave the OBS source showing it until the grace timer expires (D-M5.5-3).
+func TestVacateOccupantClearsGraceHeldSlot(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false) // grace-held
+	if s.slots["cam-1"].occupant != "g1" {
+		t.Fatal("precondition: g1 grace-held on cam-1")
+	}
+
+	out := s.vacateOccupant("g1")
+	if s.slots["cam-1"].occupant != "" {
+		t.Fatalf("vacateOccupant must clear a grace-held slot, got occupant=%q", s.slots["cam-1"].occupant)
+	}
+	if !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("the freed source should be sent slot-unbound, got %+v", out)
+	}
+}
+
 // A terminal vacate during the grace window (host unbind, kick, displacement) clears the binding
 // immediately, and the pending expiry no-ops (occupant changed/cleared).
 func TestTerminalVacateDuringGraceDefusesExpiry(t *testing.T) {

@@ -315,12 +315,15 @@ not universal (EN-19).
   P2P link ICE-restarts, never falling to the "waiting" placeholder). A rejoin
   within the window replays `passes.slot_id` via `ResumeBind`, re-binding the same
   `pass_id` (a fresh `slot-rebind` at a new epoch) so the source re-links with **no
-  host action and no placeholder flash** (AC-3). If the guest never returns, the
+  host action and no placeholder flash** (AC-3) — on a same-occupant re-link the
+  source keeps the last frame painted until the new track arrives, so the program
+  output never blanks either. If the guest never returns, the
   room's grace-expiry timer vacates the slot — exactly today's behavior, just
   deferred — and a re-disconnect within the window re-arms its own expiry (the
   expiry is gated on the occupant + a disconnect generation). **Terminal** teardown
-  (kick D-25 / evict / source rotation) and the **screenshare** slot (a live action,
-  not a persistent identity, D-21) still vacate immediately. The grace stays far
+  (kick D-25 / evict / source rotation / **pass revoke**, which vacates the grace-held
+  slot in the host's live room) and the **screenshare** slot (a live action, not a
+  persistent identity, D-21) still vacate immediately. The grace stays far
   below `ReapIdleAfter` (15m) so the idle reaper still ends a truly-dead session.
 - On slot rebind, on-air state resets to `status-unavailable` until a fresh
   `obsSourceActiveChanged` transition arrives (EN-3).

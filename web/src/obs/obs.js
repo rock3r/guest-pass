@@ -145,8 +145,21 @@ function start() {
         renderNameplate(name);
         return;
       }
+      // A re-link to the SAME occupant at a NEW epoch is a grace reconnect (D-40): the guest dropped
+      // and rejoined, so the server re-sends slot-rebind to renegotiate. Keep the last frame painted
+      // (do NOT null srcObject) until the new track arrives, so the program output never blanks — no
+      // placeholder AND no flash (AC-3). A switch to a DIFFERENT occupant clears the old frame as
+      // before (clearLink nulls srcObject) so a stale occupant never lingers on a real reassignment.
+      const resuming = !!link && occupantPeerId === occupant;
       if (typeof ep === "number") epoch = ep;
-      clearLink();
+      if (resuming) {
+        link.close();
+        link = null;
+        lockedMods = []; // re-projected from the server on (re)bind; never carry the prior lock view
+        // intentionally keep video.srcObject (the frozen last frame) + the nameplate until ontrack swaps
+      } else {
+        clearLink();
+      }
       occupant = occupantPeerId;
       renderNameplate(name);
       const l = new PeerLink(room, occupantPeerId, room.iceServers, channel);
