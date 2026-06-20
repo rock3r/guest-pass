@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/signaling"
 	"github.com/rock3r/guest-pass/internal/store"
 	"github.com/rock3r/guest-pass/internal/token"
 )
@@ -141,6 +142,47 @@ func TestAdmin_StatsAndSessions(t *testing.T) {
 	}
 	if strings.Contains(hostsBody, sentinel.GoogleSub) {
 		t.Fatal("admin hosts list leaked google_sub")
+	}
+}
+
+// Regression (found in the gate-2 manual smoke): the admin console's per-session and total
+// participant counts must be keyed by HOST id, because the hub keys each live room by host id
+// (one live session per host) — NOT by the DB session-row id. Passing the session id looks up a
+// room that never exists, so the count is stuck at 0 no matter how many guests are connected.
+func TestAdmin_ParticipantCount_KeyedByHostNotSession(t *testing.T) {
+	a := newAPIHarness(t)
+	_, adminCookie := a.adminHost(t, "count-admin")
+	hostB, hostBCookie := a.host(t, "count-host")
+
+	streamID := a.createStream(t, hostBCookie, "Counted Show")
+	sess, err := a.store.StartSession(context.Background(), streamID, hostB.ID)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if sess.ID == hostB.ID {
+		t.Fatal("precondition: session id must differ from host id for this to be a real test")
+	}
+
+	// A connected greenroom guest joins the host's live room — rooms are keyed by host id.
+	a.hub.Room(hostB.ID).Join(signaling.PeerID("guest-peer"), "guest", "", "", make(chan signaling.Frame, 8))
+
+	var sessions []adminSessionView
+	if err := json.Unmarshal(a.req(t, http.MethodGet, "/api/admin/sessions", "", adminCookie).Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("decode sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(sessions))
+	}
+	if sessions[0].Participants != 1 {
+		t.Errorf("session Participants = %d, want 1 (count must key on host id, not session id)", sessions[0].Participants)
+	}
+
+	var stats adminStatsView
+	if err := json.Unmarshal(a.req(t, http.MethodGet, "/api/admin/stats", "", adminCookie).Body.Bytes(), &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.LivePeers != 1 {
+		t.Errorf("stats LivePeers = %d, want 1", stats.LivePeers)
 	}
 }
 
