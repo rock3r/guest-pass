@@ -8,7 +8,7 @@ import (
 // ParticipantCount counts greenroom participants (host/co-host/guest) and EXCLUDES OBS source
 // pages, so the reaper reads a session held open only by a lingering source as idle (D-40).
 func TestRoomParticipantCount_ExcludesSources(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 	r.Join(PeerID("h"), "host", "", "", make(chan Frame, 8))
@@ -23,7 +23,7 @@ func TestRoomParticipantCount_ExcludesSources(t *testing.T) {
 // TerminateIfIdle aborts (returns false, leaves the room intact) when a participant is connected —
 // so a reconnect in the poll→reap race is never reaped.
 func TestRoomTerminateIfIdle_AbortsWithParticipant(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 	out := make(chan Frame, 8)
@@ -56,7 +56,7 @@ func TestRoomTerminateIfIdle_AbortsWithParticipant(t *testing.T) {
 // TerminateIfIdle reaps when only OBS sources remain (no participants): it returns true and gives
 // each source a RECOVERABLE reconnect (wire-once pages outlive the session).
 func TestRoomTerminateIfIdle_ReapsSourceOnly(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 	srcOut := make(chan Frame, 8)
@@ -72,7 +72,7 @@ func TestRoomTerminateIfIdle_ReapsSourceOnly(t *testing.T) {
 
 // TerminateIfIdle reaps a fully empty room (no conns at all).
 func TestRoomTerminateIfIdle_ReapsEmpty(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 	if !r.TerminateIfIdle() {

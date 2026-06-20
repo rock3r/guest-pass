@@ -21,6 +21,6 @@ func (s *roomState) canKick(actor, target PeerID) bool {
 // after delivering these (the buffered terminate flushes before the socket closes); token
 // invalidation + refuse-rejoin are handled by the Room/handler around this call.
 func (s *roomState) kickPeer(target PeerID) []outbound {
-	outs := s.leave(target)
+	outs := s.leave(target, true) // terminal: vacate the slot now (no grace) so a modified source can't re-show the kicked occupant
 	return append(outs, outbound{to: target, frame: Frame{T: "terminate", Reason: TerminateKicked}})
 }

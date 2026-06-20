@@ -122,7 +122,7 @@ func TestScreenPullClearsLiveNoAutoAdvance(t *testing.T) {
 	}{
 		{"stop", func(s *roomState) { s.screenStop("g1") }},
 		{"force-no-share", func(s *roomState) { s.force("host", "g1", "share") }},
-		{"leave", func(s *roomState) { s.leave("g1") }},
+		{"leave", func(s *roomState) { s.leave("g1", false) }},
 		{"eligibility-revoke", func(s *roomState) { s.setScreenEligibleLive("g1", false) }},
 	}
 	for _, c := range cases {
@@ -205,7 +205,7 @@ func TestHostJoinReplaysScreenRoster(t *testing.T) {
 // live share without pool membership. (Driven through the Room actor: the rejected rebind emits no
 // slot-rebind, so the screen source's FIRST slot-rebind names the screen-SELECTed peer.)
 func TestRoomGenericRebindRejectsScreenSlot(t *testing.T) {
-	r := newRoom("screengate", nil, nil)
+	r := newRoom("screengate", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 

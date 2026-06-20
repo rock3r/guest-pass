@@ -132,7 +132,7 @@ func TestLeaveBroadcastsPeerLeft(t *testing.T) {
 	s.join("host", "host", "")
 	s.join("g1", "guest", "")
 
-	out := s.leave("g1")
+	out := s.leave("g1", false)
 	pl, ok := firstFrameOfType(out, "host", "peer-left")
 	if !ok || pl.PeerID != "g1" {
 		t.Fatalf("host should get peer-left(g1), got %+v", out)

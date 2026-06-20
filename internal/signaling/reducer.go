@@ -42,6 +42,16 @@ type slotState struct {
 	source   PeerID // the OBS source-page peer subscribed to this slot ("" = none)
 	epoch    int    // monotonic; bumped on every (re)bind/unbind (EN-3)
 	onAir    string // D-24 three-state; reset to OnAirUnknown on every rebind
+	// disconnected marks a cam-slot binding that survives a guest's transient WS drop for the grace
+	// window (D-40/D-M5.5-3): the occupant left s.peers but the binding is RETAINED — no slot-unbound,
+	// no epoch bump — so the OBS source holds last-frame and a quick rejoin resumes with no
+	// placeholder flash (AC-3). The effectful room schedules a grace-expiry that vacates the slot if
+	// the guest never returns. Cleared on (re)bind (a rejoin re-binds, clearing it).
+	disconnected bool
+	// graceGen increments each time the occupant disconnects, so a grace-expiry scheduled for one
+	// disconnect no-ops if the guest rejoined and dropped AGAIN within the original window (the newer
+	// disconnect owns its own expiry). It is the disconnect generation the expiry is gated on.
+	graceGen int
 }
 
 // outbound is a frame the room wants delivered to a specific peer.
@@ -314,10 +324,15 @@ func (s *roomState) buildLevels() []outbound {
 }
 
 // leave removes a peer, detaches it from any slot it sourced or occupied, and tells the
-// remaining participants it left (peer-left, projected). An occupied slot is unbound
-// (epoch bump + placeholder) so a reconnecting source resolves to placeholder rather
-// than the departed occupant (EN-3).
-func (s *roomState) leave(id PeerID) []outbound {
+// remaining participants it left (peer-left, projected).
+//
+// terminal selects the cam-slot occupant policy (D-40/D-M5.5-3): a TRANSIENT drop (terminal=false,
+// the socket-close path) RETAINS the binding for a grace window so the OBS source holds last-frame
+// and a quick rejoin resumes with no placeholder flash (AC-3); a TERMINAL teardown (terminal=true —
+// kick D-25, evict, source rotation) vacates the slot at once (epoch bump + placeholder) so a
+// reconnecting modified source resolves to placeholder, never the removed occupant (EN-3). The
+// screenshare slot always vacates immediately regardless (a live action, not a persistent binding).
+func (s *roomState) leave(id PeerID, terminal bool) []outbound {
 	p := s.peers[id]
 	delete(s.peers, id)
 	// A leaver also drops out of the screenshare preview pool (D-21). If it held the live "screen"
@@ -345,10 +360,24 @@ func (s *roomState) leave(id PeerID) []outbound {
 			s.degradeStaleOnAir(st)
 		}
 		if st.occupant == id {
-			// The occupant left: free its slot (epoch bump + placeholder) so a reconnecting source
-			// resolves to placeholder, not the departed occupant (EN-3). Only the source frame is
-			// collected here; the roster re-broadcast below folds in the now-vacated slot.
-			out = append(out, s.vacateSlot(sid)...)
+			if isCamSlot(sid) && !terminal {
+				// Transient drop of a cam-slot occupant: RETAIN the binding for the grace window
+				// (D-40/D-M5.5-3) instead of vacating. No slot-unbound and no epoch bump — the OBS source
+				// holds last-frame, and a rejoin within the window re-binds (slot-rebind, new epoch) and
+				// resumes with NO placeholder flash and no host action (AC-3). The effectful room schedules
+				// a grace-expiry that vacates the slot if the guest never returns; graceGen advances so a
+				// stale expiry from an earlier disconnect can't vacate a later one. The occupant is removed
+				// from s.peers above, so it has no roster entry during the gap — the binding is invisible
+				// until the rejoin re-folds it.
+				st.disconnected = true
+				st.graceGen++
+			} else {
+				// Terminal teardown (kick/evict/rotation) of a cam occupant, or the screenshare slot in any
+				// case (a live action, not a persistent identity, D-21): vacate immediately — epoch bump +
+				// placeholder, no grace — so a reconnecting modified source can't resolve to the removed
+				// occupant (EN-3). pulledFromShare above already dropped screen preview-pool membership.
+				out = append(out, s.vacateSlot(sid)...)
+			}
 		}
 	}
 	if p != nil {
@@ -546,6 +575,7 @@ func (s *roomState) bindSlot(sid SlotID, occupant PeerID) []outbound {
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = occupant
+	st.disconnected = false // a (re)bind — incl. a rejoin's resume — clears any pending grace state (D-40)
 	st.onAir = OnAirUnknown
 	if st.source == "" {
 		return nil
@@ -647,6 +677,7 @@ func (s *roomState) vacateSlot(sid SlotID) []outbound {
 	s.degradeStaleOnAir(st)
 	st.epoch++
 	st.occupant = ""
+	st.disconnected = false // vacating clears any pending grace state (D-40); the slot is now free
 	st.onAir = OnAirUnknown
 	if st.source == "" {
 		return nil
@@ -670,6 +701,22 @@ func (s *roomState) vacateSlot(sid SlotID) []outbound {
 // unbindSlot clears a slot and re-broadcasts the roster so the freed occupant's folded on-air
 // degrades to status-unavailable (D-24). Used by the host {t:unbind} and by kick (PR-8).
 func (s *roomState) unbindSlot(sid SlotID) []outbound {
+	out := s.vacateSlot(sid)
+	return append(out, s.rebroadcastRoster()...)
+}
+
+// expireGrace vacates a cam slot whose occupant disconnected and never returned within the grace
+// window (D-40/D-M5.5-3). The effectful room schedules it (time.AfterFunc) per disconnect, gated on
+// the disconnect generation: it no-ops unless the slot is STILL bound to that occupant, STILL marked
+// disconnected, AND graceGen still matches — so it can't vacate a slot the guest rejoined (bindSlot
+// cleared disconnected), one a later disconnect re-armed (graceGen advanced), one the host rebound
+// to someone else, or one already vacated terminally (occupant cleared). When it does fire, it is
+// exactly today's leave behavior, just deferred by the grace window: slot-unbound + roster fold.
+func (s *roomState) expireGrace(sid SlotID, occupant PeerID, gen int) []outbound {
+	st := s.slots[sid]
+	if st == nil || st.occupant != occupant || !st.disconnected || st.graceGen != gen {
+		return nil
+	}
 	out := s.vacateSlot(sid)
 	return append(out, s.rebroadcastRoster()...)
 }

@@ -85,7 +85,7 @@ func TestHandAutoClearsOnPromoteAndLeave(t *testing.T) {
 	// And leaving removes the participant entirely (hand gone with it).
 	s.join("g2", "guest", "")
 	s.setHand("g2", "", true)
-	s.leave("g2")
+	s.leave("g2", false)
 	if _, ok := s.peers["g2"]; ok {
 		t.Fatalf("a left participant must be removed (its raised hand goes with it)")
 	}

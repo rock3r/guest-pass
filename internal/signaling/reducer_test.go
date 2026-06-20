@@ -180,7 +180,7 @@ func TestSourceLeaveResetsOnAirToUnavailable(t *testing.T) {
 		t.Fatalf("precondition: slot should be on-air, got %q", s.slots["cam-1"].onAir)
 	}
 
-	out := s.leave("src") // the OBS source disconnects
+	out := s.leave("src", false) // the OBS source disconnects
 
 	if st := s.slots["cam-1"]; st.onAir != OnAirUnknown {
 		t.Fatalf("on-air must degrade to %s when the source leaves, got %q", OnAirUnknown, st.onAir)
@@ -204,7 +204,7 @@ func TestSourceLeaveNotifiesOccupantConsumerLeft(t *testing.T) {
 	s.join("g2", "guest", "")
 	s.rebindSlot("cam-1", "g1") // g1 occupies cam-1, sourced by "src"
 
-	out := s.leave("src") // the OBS source disconnects
+	out := s.leave("src", false) // the OBS source disconnects
 
 	if cl, ok := firstFrameOfType(out, "g1", "consumer-left"); !ok || cl.PeerID != "src" {
 		t.Fatalf("occupant g1 must get consumer-left(src), got %+v", framesTo(out, "g1"))
@@ -226,7 +226,7 @@ func TestSourceLeaveUnoccupiedSlotNotifiesNoOne(t *testing.T) {
 	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src") // attached, but the slot has no occupant
 
-	out := s.leave("src")
+	out := s.leave("src", false)
 
 	for _, to := range []PeerID{"g1", "host"} {
 		if _, ok := firstFrameOfType(out, to, "consumer-left"); ok {
@@ -301,7 +301,7 @@ func TestOccupantLeaveDoesNotNotifyDepartedOccupant(t *testing.T) {
 	s.join("a", "guest", "")
 	s.rebindSlot("cam-1", "a")
 
-	out := s.leave("a") // the occupant disconnects
+	out := s.leave("a", false) // the occupant disconnects
 
 	if _, ok := firstFrameOfType(out, "a", "consumer-left"); ok {
 		t.Fatalf("a departed occupant must not be sent consumer-left, got %+v", framesTo(out, "a"))
@@ -702,7 +702,7 @@ func TestRelaySignalToKnownPeerOnly(t *testing.T) {
 		t.Fatalf("relay to unknown peer must drop, got %+v", got)
 	}
 
-	s.leave("b")
+	s.leave("b", false)
 	if got := s.relaySignal("a", Frame{T: "signal", To: "b"}); got != nil {
 		t.Fatalf("relay to a departed peer must drop, got %+v", got)
 	}
@@ -793,26 +793,173 @@ func TestRelaySignalRelaysPayloadVerbatim(t *testing.T) {
 	}
 }
 
-// Leaving while occupying a slot unbinds it (EN-3) so the source falls to placeholder.
-func TestLeaveUnbindsOccupiedSlot(t *testing.T) {
+// hasFrameType reports whether any outbound carries frame type t.
+func hasFrameType(out []outbound, t string) bool {
+	for _, o := range out {
+		if o.frame.T == t {
+			return true
+		}
+	}
+	return false
+}
+
+// A cam-slot occupant's transient drop RETAINS the binding for the grace window (D-40/AC-3): the
+// slot keeps its occupant, no slot-unbound reaches the source (no placeholder flash), and the epoch
+// is unchanged. The grace state is recorded for the effectful room's deferred expiry.
+func TestLeaveRetainsCamSlotBindingForGrace(t *testing.T) {
 	s := newRoomState()
 	s.join("src", "obs", "")
 	s.attachSource("cam-1", "src")
 	s.join("g1", "guest", "")
 	s.rebindSlot("cam-1", "g1")
+	epochBefore := s.slots["cam-1"].epoch
 
-	out := s.leave("g1")
+	out := s.leave("g1", false)
+
 	st := s.slots["cam-1"]
-	if st.occupant != "" || st.epoch != 2 {
-		t.Fatalf("leave should unbind the slot, got %+v", st)
+	if st.occupant != "g1" {
+		t.Fatalf("a transient drop must retain the binding, got occupant=%q", st.occupant)
 	}
-	found := false
-	for _, o := range out {
-		if o.frame.T == "slot-unbound" {
-			found = true
-		}
+	if !st.disconnected || st.graceGen != 1 {
+		t.Fatalf("the slot should be grace-pending (disconnected=true, graceGen=1), got %+v", st)
 	}
-	if !found {
-		t.Fatalf("leave should emit slot-unbound to the source, got %+v", out)
+	if st.epoch != epochBefore {
+		t.Fatalf("a grace-retained drop must not bump the epoch (got %d, want %d)", st.epoch, epochBefore)
+	}
+	if hasFrameType(out, "slot-unbound") {
+		t.Fatalf("a transient drop must NOT send slot-unbound (no placeholder flash), got %+v", out)
+	}
+}
+
+// After the grace window with no rejoin, expireGrace vacates the slot — exactly today's behavior,
+// just deferred: occupant cleared, epoch bumped, slot-unbound to the source (placeholder).
+func TestExpireGraceVacatesAfterWindow(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	epochBefore := s.slots["cam-1"].epoch
+	s.leave("g1", false)
+
+	out := s.expireGrace("cam-1", "g1", s.slots["cam-1"].graceGen)
+
+	st := s.slots["cam-1"]
+	if st.occupant != "" || st.disconnected || st.epoch != epochBefore+1 {
+		t.Fatalf("expireGrace should vacate (occupant cleared, epoch+1), got %+v", st)
+	}
+	if !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("expireGrace should emit slot-unbound to the source, got %+v", out)
+	}
+}
+
+// A rejoin within the grace window re-binds the slot (resumeBind → slot-rebind, new epoch) and
+// clears the grace state, so the later expireGrace for the original disconnect is a no-op.
+func TestRejoinWithinGraceResumesAndDefusesExpiry(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false)
+	gen := s.slots["cam-1"].graceGen
+
+	// The guest reconnects (re-registers) and the /ws join replays its persisted binding.
+	s.join("g1", "guest", "")
+	out := s.resumeBind("cam-1", "g1")
+
+	st := s.slots["cam-1"]
+	if st.occupant != "g1" || st.disconnected {
+		t.Fatalf("rejoin should resume the binding and clear grace, got %+v", st)
+	}
+	if !hasFrameType(out, "slot-rebind") {
+		t.Fatalf("rejoin should re-send slot-rebind so the source re-links, got %+v", out)
+	}
+	// The original disconnect's expiry must now no-op (the guest is back).
+	if exp := s.expireGrace("cam-1", "g1", gen); exp != nil {
+		t.Fatalf("expireGrace must no-op after a rejoin, got %+v", exp)
+	}
+	if s.slots["cam-1"].occupant != "g1" {
+		t.Fatal("a stale expiry must not vacate a resumed slot")
+	}
+}
+
+// A rejoin-then-redisconnect within the original window arms a NEW grace (graceGen advances); the
+// FIRST disconnect's expiry no-ops, and only the second disconnect's expiry can vacate.
+func TestGraceGenerationGuardsAgainstStaleExpiry(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false)
+	gen1 := s.slots["cam-1"].graceGen
+
+	s.join("g1", "guest", "")
+	s.resumeBind("cam-1", "g1")
+	s.leave("g1", false) // drops AGAIN within the original window
+	gen2 := s.slots["cam-1"].graceGen
+	if gen2 == gen1 {
+		t.Fatal("a second disconnect must advance graceGen")
+	}
+
+	// The first disconnect's stale expiry must not vacate the second grace.
+	if exp := s.expireGrace("cam-1", "g1", gen1); exp != nil {
+		t.Fatalf("a stale (gen1) expiry must no-op, got %+v", exp)
+	}
+	if s.slots["cam-1"].occupant != "g1" {
+		t.Fatal("the stale expiry vacated a still-grace-pending slot")
+	}
+	// The current disconnect's expiry vacates.
+	if exp := s.expireGrace("cam-1", "g1", gen2); !hasFrameType(exp, "slot-unbound") {
+		t.Fatalf("the current (gen2) expiry should vacate, got %+v", exp)
+	}
+}
+
+// A terminal vacate during the grace window (host unbind, kick, displacement) clears the binding
+// immediately, and the pending expiry no-ops (occupant changed/cleared).
+func TestTerminalVacateDuringGraceDefusesExpiry(t *testing.T) {
+	s := newRoomState()
+	s.join("src", "obs", "")
+	s.attachSource("cam-1", "src")
+	s.join("g1", "guest", "")
+	s.rebindSlot("cam-1", "g1")
+	s.leave("g1", false)
+	gen := s.slots["cam-1"].graceGen
+
+	// Host explicitly unbinds the slot while the guest is in its grace window.
+	if out := s.unbindSlot("cam-1"); !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("an explicit unbind during grace should vacate now, got %+v", out)
+	}
+	if s.slots["cam-1"].occupant != "" {
+		t.Fatal("unbind should clear the occupant immediately")
+	}
+	if exp := s.expireGrace("cam-1", "g1", gen); exp != nil {
+		t.Fatalf("expireGrace must no-op after a terminal vacate, got %+v", exp)
+	}
+}
+
+// The screenshare slot is a live action, not a persistent identity (D-21): a sharer's drop vacates
+// immediately (no grace) — only cam slots get the grace window.
+func TestLeaveVacatesScreenSlotImmediately(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "")
+	s.join("src", "obs_screen", "")
+	s.attachSource("screen", "src")
+	s.join("g1", "guest", "")
+	s.setScreenEligible("g1", true)
+	s.screenStart("g1")
+	s.screenSelect("host", "g1") // host promotes g1's share live into the screen slot
+
+	if s.slots["screen"].occupant != "g1" {
+		t.Fatalf("precondition: g1 should hold the live screen slot, got %+v", s.slots["screen"])
+	}
+	out := s.leave("g1", false)
+	st := s.slots["screen"]
+	if st.occupant != "" || st.disconnected {
+		t.Fatalf("a screen-slot occupant drop must vacate immediately (no grace), got %+v", st)
+	}
+	if !hasFrameType(out, "slot-unbound") {
+		t.Fatalf("the screen source should get slot-unbound on the sharer's drop, got %+v", out)
 	}
 }

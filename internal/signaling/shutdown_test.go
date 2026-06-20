@@ -75,7 +75,7 @@ func TestHubEndSession_RoomDiscoverableUntilTerminated(t *testing.T) {
 // the live stream, and both teardown paths hold the same Room — a second raw close(r.done) would
 // panic "close of closed channel" and crash the process instead of draining cleanly.
 func TestRoomClose_Idempotent(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	r.Close()
 	r.Close() // must be a no-op, not a panic
@@ -85,7 +85,7 @@ func TestRoomClose_Idempotent(t *testing.T) {
 // terminal session-ended, but the "wire OBS once" slot source pages get a recoverable reconnect so
 // they re-attach to the next session instead of sitting on a terminal error screen.
 func TestRoomTerminateSession_SourcesRecoverable(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 	guestOut := make(chan Frame, 8)
@@ -130,7 +130,7 @@ func TestHubShutdown_NoNewRoomsAfterClose(t *testing.T) {
 // out with no reader makes a non-blocking deliver drop; the budgeted blocking send must still land
 // once a reader appears.
 func TestRoomEvictPeers_DoesNotDropTerminate(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -159,7 +159,7 @@ func TestRoomEvictPeers_DoesNotDropTerminate(t *testing.T) {
 // A connection that resolved a room just before it started draining must not be admitted
 // after the terminate broadcast — Join refuses it so it can't strand itself.
 func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 
@@ -175,7 +175,7 @@ func TestRoomJoin_RefusedAfterTerminate(t *testing.T) {
 // can only proceed once a reader appears. The terminate frame is terminal (RF-16) and
 // must NOT be dropped: Terminate must block on the send rather than return immediately.
 func TestRoomTerminate_DoesNotDropTerminate(t *testing.T) {
-	r := newRoom("s", nil, nil)
+	r := newRoom("s", nil, nil, 0)
 	go r.run()
 	defer r.Close()
 

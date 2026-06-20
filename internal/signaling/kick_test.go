@@ -85,7 +85,7 @@ func TestKickPeerTearsDownAtomically(t *testing.T) {
 // AC-9/T-8: Room.Kick (authorized) runs the invalidate closure (token revocation) and then
 // evicts the target — it gets terminate:kicked and its out channel closes; the host sees it left.
 func TestRoomKickInvalidatesAndEvicts(t *testing.T) {
-	r := newRoom("h", nil, discardLogger())
+	r := newRoom("h", nil, discardLogger(), 0)
 	go r.run()
 	defer r.Close()
 
@@ -125,7 +125,7 @@ evicted:
 // AC-9/T-8: an unauthorized kick (a guest targeting the host) is a no-op — no token invalidation,
 // no teardown. A subsequent relayed signal (FIFO after the kick cmd) proves the kick already ran.
 func TestRoomKickUnauthorizedIsNoOp(t *testing.T) {
-	r := newRoom("h", nil, discardLogger())
+	r := newRoom("h", nil, discardLogger(), 0)
 	go r.run()
 	defer r.Close()
 

@@ -26,19 +26,23 @@ type roomCmd func(*roomState, map[PeerID]*peerConn)
 // table; every mutation arrives as a roomCmd. No locks on room state. A nil lockStore
 // disables suppression-lock persistence (AD-22) — used by the pure transport tests.
 type Room struct {
-	id        string
-	cmds      chan roomCmd
-	done      chan struct{}
-	closeOnce sync.Once // guards done against a double Close (drain racing an end-session, codex)
-	locks     LockPersistence
-	log       *slog.Logger
+	id          string
+	cmds        chan roomCmd
+	done        chan struct{}
+	closeOnce   sync.Once // guards done against a double Close (drain racing an end-session, codex)
+	locks       LockPersistence
+	log         *slog.Logger
+	graceWindow time.Duration // slot-binding grace on a transient guest drop (D-40); <=0 falls back to the default
 }
 
-func newRoom(id string, locks LockPersistence, log *slog.Logger) *Room {
+func newRoom(id string, locks LockPersistence, log *slog.Logger, graceWindow time.Duration) *Room {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log}
+	if graceWindow <= 0 {
+		graceWindow = defaultGraceWindow
+	}
+	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log, graceWindow: graceWindow}
 }
 
 // levelsTick is the audio-meter coalescing cadence (AD-13): every participant's last-reported
@@ -48,6 +52,24 @@ const levelsTick = 150 * time.Millisecond
 // lockIOTimeout bounds a single suppression-lock read/write so a wedged disk can't stall the
 // room goroutine indefinitely (AD-22 persistence is control-plane, not the per-frame hot path).
 const lockIOTimeout = 5 * time.Second
+
+// defaultGraceWindow is the slot-binding grace on a transient guest drop when none is configured
+// (D-40/D-M5.5-3). 45s comfortably covers a network blip / page reconnect while staying far below
+// ReapIdleAfter (15m) so the idle reaper still ends a truly-dead session; config overrides it.
+const defaultGraceWindow = 45 * time.Second
+
+// scheduleGraceExpiry arms a one-shot timer that vacates a cam slot if its disconnected occupant
+// never returns within the grace window (D-40). The timer fires on its own goroutine and hands the
+// vacate back to the room goroutine via post (race-free); expireGrace is gated on occupant+graceGen,
+// so a rejoin, host rebind, or terminal vacate before then makes it a no-op, and a post to an
+// already-torn-down room is dropped (post selects on done).
+func (r *Room) scheduleGraceExpiry(sid SlotID, occupant PeerID, gen int) {
+	time.AfterFunc(r.graceWindow, func() {
+		r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+			deliver(conns, st.expireGrace(sid, occupant, gen))
+		})
+	})
+}
 
 func (r *Room) run() {
 	state := newRoomState()
@@ -200,10 +222,18 @@ func (r *Room) Leave(id PeerID, out chan<- Frame) {
 		if c == nil || c.out != out {
 			return // not the current connection for this id; leave the live one alone
 		}
-		outs := st.leave(id)
+		outs := st.leave(id, false) // a socket close is TRANSIENT: a cam occupant's slot enters the grace window (D-40)
 		delete(conns, id)
 		deliver(conns, outs)
 		close(c.out)
+		// Schedule grace-expiry for any cam slot this peer left grace-pending: if it doesn't rejoin
+		// within the window, the slot vacates (today's behavior, just deferred). A rejoin / host rebind /
+		// terminal vacate before then defuses the expiry (gated on occupant + graceGen, see expireGrace).
+		for sid, slot := range st.slots {
+			if slot.occupant == id && slot.disconnected {
+				r.scheduleGraceExpiry(sid, id, slot.graceGen)
+			}
+		}
 	})
 }
 
@@ -275,7 +305,7 @@ func (r *Room) EvictPeers(reason string, targets []PeerID) {
 			}
 			// Tell the OTHERS the peer left (peer-left + roster, slot-unbound to a source); a slow
 			// RECIPIENT may drop one of those routine frames (AD-12) — non-terminal, so fine.
-			deliver(conns, st.leave(target))
+			deliver(conns, st.leave(target, true)) // terminal eviction: vacate the slot now (no grace)
 			delete(conns, target)
 			// The TERMINAL frame must NOT be dropped like a routine one: budgeted blocking send,
 			// concurrent across targets so the total wait is ~one budget rather than the sum.
@@ -483,7 +513,7 @@ func (r *Room) RotateSource(source PeerID) {
 			return
 		}
 		c := conns[source]
-		deliver(conns, st.leave(source)) // peer-left + roster to the OTHER peers (non-blocking, AD-12)
+		deliver(conns, st.leave(source, true)) // terminal source rotation; a source is never a slot occupant, so the flag is moot here
 		if c == nil {
 			return
 		}
