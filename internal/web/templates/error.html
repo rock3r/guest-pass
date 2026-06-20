@@ -1,0 +1,7 @@
+{{define "content"}}
+<section class="error-screen">
+<h1 class="error-heading">{{.Data.Heading}}</h1>
+{{range .Data.Body}}<p class="error-body">{{.}}</p>{{end}}
+{{with .Data.Action}}<p class="error-actions"><a class="btn" href="{{.Href}}">{{.Label}}</a></p>{{end}}
+</section>
+{{end}}

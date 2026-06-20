@@ -28,6 +28,7 @@ import (
 type appSeed struct {
 	store    *store.Store
 	ring     *auth.KeyRing
+	hub      *signaling.Hub
 	base     string
 	hostID   string
 	hostCkie string
@@ -56,9 +57,10 @@ func seedHostApp(t *testing.T) *appSeed {
 	if err != nil {
 		t.Fatalf("key ring: %v", err)
 	}
+	hub := signaling.NewHub(nil, nil)
 	handler, err := web.NewRouter(web.RouterConfig{
 		SourceURL: "https://github.com/rock3r/guest-pass/tree/test",
-		Hub:       signaling.NewHub(nil, nil),
+		Hub:       hub,
 		Auth:      auth.NewAuthenticator(ring, st, false),
 		Store:     st,
 		Hasher:    hasher,
@@ -74,7 +76,7 @@ func seedHostApp(t *testing.T) *appSeed {
 	if err != nil {
 		t.Fatalf("issue host session: %v", err)
 	}
-	return &appSeed{store: st, ring: ring, base: Serve(t, handler).URL, hostID: host.ID, hostCkie: sess}
+	return &appSeed{store: st, ring: ring, hub: hub, base: Serve(t, handler).URL, hostID: host.ID, hostCkie: sess}
 }
 
 // T-1 / AC-1: the host app shell round-trips through real Chrome — the dashboard lists
@@ -153,7 +155,8 @@ func TestHostApp_DashboardCRUDRoundTrip(t *testing.T) {
 }
 
 // T-1 / AC-1 (EN-6): a pending host's session verifies but is not active, so the dashboard
-// is gated — the host never reaches the stream UI.
+// is gated — the host never reaches the stream UI. M5.5: the gate is now an explanatory
+// "awaiting approval" screen (a rendered navigation), not a bare "forbidden" body.
 func TestHostApp_PendingHostGated(t *testing.T) {
 	s := seedHostApp(t)
 	pending, err := s.store.CreateHost(context.Background(), store.CreateHostParams{
@@ -185,8 +188,9 @@ func TestHostApp_PendingHostGated(t *testing.T) {
 		if strings.Contains(bodyText, "Your streams") || strings.Contains(bodyText, "Create a stream") {
 			t.Fatalf("pending host reached the dashboard; body = %q", bodyText)
 		}
-		if !strings.Contains(strings.ToLower(bodyText), "forbidden") {
-			t.Fatalf("pending host body = %q, want the forbidden gate", bodyText)
+		lower := strings.ToLower(bodyText)
+		if !strings.Contains(lower, "approval") && !strings.Contains(lower, "pending") {
+			t.Fatalf("pending host body = %q, want the awaiting-approval gate", bodyText)
 		}
 	})
 }

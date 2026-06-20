@@ -54,7 +54,10 @@ type renderer struct {
 // pageFiles are the public/guest server-rendered pages composed into base.html (each
 // defines a "content" template). The OBS source page is NOT one of these — it is a
 // standalone, chromeless, font-free page (EN-13) with its own template.
-var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html", "report.html"}
+// error.html (the denial/error screens, M5.5) is composed into base.html — the PUBLIC shell, NOT
+// appbase.html: a suspended/pending/non-admin host must not see a host nav whose every link would
+// itself 403. It still carries the AGPL §13 footer (EN-17).
+var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html", "report.html", "error.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
 // appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the
@@ -91,10 +94,16 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 	return &renderer{pages: pages, obsTmpl: obs, sourceURL: sourceURL, manifest: manifest, devLogin: devLogin}, nil
 }
 
-// render executes a base-composed page into a buffer first, so a template error never
-// writes a partial response, then flushes it as HTML. The per-build fields (source link,
-// SRI, dev flag, nonce) are filled here; callers supply page-specific fields in data.
+// render executes a base-composed page with a 200 OK status. See renderStatus.
 func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page string, data pageData) {
+	rd.renderStatus(w, r, page, http.StatusOK, data)
+}
+
+// renderStatus executes a base-composed page into a buffer first, so a template error never
+// writes a partial response, then flushes it as HTML with the given status. The per-build fields
+// (source link, SRI, dev flag, nonce) are filled here; callers supply page-specific fields in
+// data. Error screens (M5.5) use this with a 401/403/500 status.
+func (rd *renderer) renderStatus(w http.ResponseWriter, r *http.Request, page string, status int, data pageData) {
 	t, ok := rd.pages[page]
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -111,6 +120,7 @@ func (rd *renderer) render(w http.ResponseWriter, r *http.Request, page string, 
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	_, _ = buf.WriteTo(w)
 }
 

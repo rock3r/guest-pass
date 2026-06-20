@@ -5,10 +5,48 @@
 <h1>{{.Data.StreamTitle}}</h1>
 <div class="detail-actions">
 {{if .Data.SessionLive}}
+{{/* The "● Live" pill is computed once at render; this no-JS page would otherwise show it stale if
+     the session is force-ended out from under it (admin D-27 cascade, idle reaper, end from another
+     tab). A minimal READ-ONLY poll (M5.5) swaps this block for an "ended" notice IN PLACE — it never
+     reloads the page (no form disruption) and never submits anything. */}}
+<span class="session-state" id="session-state" data-stream-id="{{.Data.StreamID}}">
 <span class="live-pill" role="status">● Live</span>
 <form method="post" action="/app/streams/{{.Data.StreamID}}/session/end" class="inline-form">
 <button type="submit" class="btn btn-quiet">End session</button>
 </form>
+</span>
+<script nonce="{{.Nonce}}">
+(function () {
+  var el = document.getElementById("session-state");
+  if (!el || !window.fetch) return;
+  var url = "/api/streams/" + encodeURIComponent(el.getAttribute("data-stream-id")) + "/session";
+  var timer = setInterval(poll, window.__gpSessionPollMs || 20000);
+  function ended(msg) {
+    clearInterval(timer);
+    while (el.firstChild) el.removeChild(el.firstChild);
+    var note = document.createElement("span");
+    note.className = "live-note";
+    note.setAttribute("role", "status");
+    note.textContent = msg;
+    var refresh = document.createElement("a");
+    refresh.className = "btn btn-quiet";
+    refresh.href = location.pathname;
+    refresh.textContent = "Refresh";
+    el.appendChild(note);
+    el.appendChild(refresh);
+  }
+  function poll() {
+    fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) {
+        // 401/403 = the host's access changed (e.g. suspended) — the session is gone for them too.
+        if (r.status === 401 || r.status === 403) { ended("This session has ended. Refresh for details."); return; }
+        if (!r.ok) return; // transient error — keep polling
+        return r.json().then(function (d) { if (d && d.live === false) ended("This session has ended."); });
+      })
+      .catch(function () { /* network blip — keep polling */ });
+  }
+})();
+</script>
 {{else if .Data.OtherStreamLive}}
 <span class="live-note">You’re live on another stream. End it first to go live here.</span>
 {{else}}

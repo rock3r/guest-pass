@@ -250,6 +250,15 @@ a known root element.
 Server-side authz (EN-6/EN-8) is the guard; the frontend never touches the DB or
 PII directly.
 
+> **One exception (M5.5):** the host **stream-detail** page carries a *minimal,
+> read-only* liveness poll. It computes its "● Live" pill once at render, so when a
+> session is force-ended out from under the page (admin D-27 cascade, idle reaper,
+> or an end from another tab) the pill would otherwise go stale until a manual
+> refresh; the poll (`GET /api/streams/{id}/session` → `{"live":bool}`) swaps it for
+> an "ended" notice **in place**. It never mutates state (the page's forms stay
+> server-rendered POST), submits nothing, and reloads nothing — so the
+> no-interactive-JS posture holds, same spirit as the admin console's poll/refresh.
+
 ### 3.2 Authoring islands — plain JS + JSDoc (D-32)
 
 - Islands are authored in **plain JS with JSDoc type annotations** — **never

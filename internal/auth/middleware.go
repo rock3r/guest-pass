@@ -25,6 +25,39 @@ var (
 	ErrForbidden    = errors.New("auth: forbidden")
 )
 
+// DenialReason classifies an authz denial so the presentation layer can render the matching
+// screen while the authz DECISION stays here (EN-6). The HTTP status is fixed per reason (see
+// Status) and is never the renderer's choice — only the body/format is.
+type DenialReason int
+
+const (
+	DenyNone         DenialReason = iota // authorized — the zero value; not a denial
+	DenyUnauthorized                     // 401 — re-auth: missing/invalid/expired token, or unknown host
+	DenyInactive                         // 403 — the host exists but is not active (suspended/pending), read LIVE (EN-6)
+	DenyNotAdmin                         // 403 — the host is active but lacks the required authority (not an admin)
+	DenyError                            // 500 — infrastructure failure loading the host
+)
+
+// Status is the fixed HTTP status for a denial reason, shared by the plain-text fallback and any
+// installed DeniedHandler so the two can never disagree on the code (only on the body format).
+func (d DenialReason) Status() int {
+	switch d {
+	case DenyUnauthorized:
+		return http.StatusUnauthorized
+	case DenyError:
+		return http.StatusInternalServerError
+	default: // DenyInactive, DenyNotAdmin (and the unreachable DenyNone)
+		return http.StatusForbidden
+	}
+}
+
+// DeniedHandler renders the response for a denied request, owning the whole response (headers,
+// status, body). The web layer installs one that content-negotiates a rendered HTML error screen
+// for navigations; when none is installed, deny falls back to plain text — so internal/auth keeps
+// no dependency on internal/web. host is the LIVE host when one was loaded: non-nil for
+// DenyInactive (so the screen can tell suspended from pending) and DenyNotAdmin; nil otherwise.
+type DeniedHandler func(w http.ResponseWriter, r *http.Request, reason DenialReason, host *store.Host)
+
 // HostStore is the narrow slice of the store the authz middleware needs. *store.Store
 // satisfies it; tests pass a fake. Reading the host on every request is what makes
 // authz live (EN-6).
@@ -40,7 +73,8 @@ const hostCtxKey ctxKey = iota
 type Authenticator struct {
 	ring   *KeyRing
 	hosts  HostStore
-	secure bool // set the session cookie Secure flag (true in production HTTPS)
+	secure bool          // set the session cookie Secure flag (true in production HTTPS)
+	denied DeniedHandler // optional renderer for denials; nil falls back to plain http.Error
 }
 
 // NewAuthenticator builds an Authenticator from a key ring and a host store. secure
@@ -54,6 +88,30 @@ func NewAuthenticator(ring *KeyRing, hosts HostStore, secure bool) *Authenticato
 func HostFromContext(ctx context.Context) (*store.Host, bool) {
 	h, ok := ctx.Value(hostCtxKey).(*store.Host)
 	return h, ok
+}
+
+// SetDeniedHandler installs the renderer for denied requests (the web layer's HTML error
+// screens). With none installed, denials fall back to the plain-text bodies below. It is wired
+// once at startup, before the server serves traffic — not concurrency-safe with live requests.
+func (a *Authenticator) SetDeniedHandler(h DeniedHandler) { a.denied = h }
+
+// deny writes a denial response: the installed DeniedHandler when present (content-negotiated
+// HTML screens), else a terse plain-text body. Either way the status is reason.Status(), so the
+// two paths can never disagree on the code. host is forwarded so an HTML screen can specialize
+// (suspended vs pending).
+func (a *Authenticator) deny(w http.ResponseWriter, r *http.Request, reason DenialReason, host *store.Host) {
+	if a.denied != nil {
+		a.denied(w, r, reason, host)
+		return
+	}
+	switch reason {
+	case DenyUnauthorized:
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	case DenyError:
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	default: // DenyInactive, DenyNotAdmin
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}
 }
 
 // RequireHost authenticates the session cookie, loads the host LIVE from the DB, requires
@@ -75,7 +133,7 @@ func (a *Authenticator) RequireAdmin(next http.Handler) http.Handler {
 	return a.RequireHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _ := HostFromContext(r.Context())
 		if host == nil || !host.IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			a.deny(w, r, DenyNotAdmin, host)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -88,43 +146,56 @@ func (a *Authenticator) RequireAdmin(next http.Handler) http.Handler {
 // (invalid/expired token or unknown host), ErrForbidden (host not active), or a wrapped
 // store error on an infrastructure failure. The token is never logged (EN-16).
 func (a *Authenticator) AuthenticateSessionToken(ctx context.Context, raw string) (*store.Host, error) {
+	host, reason, err := a.resolveSession(ctx, raw)
+	switch reason {
+	case DenyUnauthorized:
+		return nil, ErrUnauthorized
+	case DenyInactive:
+		return nil, ErrForbidden
+	case DenyError:
+		return nil, err // wrapped infra error, preserved for callers that map it to 500
+	default:
+		return host, nil
+	}
+}
+
+// resolveSession is the shared authz core (EN-6): verify the session token and load the host
+// LIVE, classifying the outcome as a DenialReason. It returns the host whenever one was loaded —
+// INCLUDING the not-active case (DenyInactive), so the HTTP middleware can render a status-specific
+// screen (suspended vs pending) without a second read. err is non-nil only for DenyError (the
+// wrapped infra failure). AuthenticateSessionToken adapts this to the sentinel-error contract the
+// /ws handshake branches on; the HTTP middleware uses the (host, reason) form directly.
+func (a *Authenticator) resolveSession(ctx context.Context, raw string) (*store.Host, DenialReason, error) {
 	hostID, err := a.ring.Verify(raw)
 	if err != nil {
 		// Expired and otherwise-invalid sessions both route to re-auth.
-		return nil, ErrUnauthorized
+		return nil, DenyUnauthorized, nil
 	}
 	host, err := a.hosts.GetHost(ctx, hostID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, ErrUnauthorized
+		return nil, DenyUnauthorized, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, DenyError, err
 	}
 	if host.Status != store.HostActive { // live status read (EN-6): suspend/pending take effect now
-		return nil, ErrForbidden
+		return host, DenyInactive, nil
 	}
-	return host, nil
+	return host, DenyNone, nil
 }
 
 // authenticate validates the session cookie and loads the host live, enforcing
-// status=active. On any failure it writes the response and returns ok=false. The token
+// status=active. On any failure it writes the denial (via deny) and returns ok=false. The token
 // (cookie value) is never logged (EN-16).
 func (a *Authenticator) authenticate(w http.ResponseWriter, r *http.Request) (*store.Host, bool) {
 	cookie, err := r.Cookie(SessionCookie)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		a.deny(w, r, DenyUnauthorized, nil)
 		return nil, false
 	}
-	host, err := a.AuthenticateSessionToken(r.Context(), cookie.Value)
-	switch {
-	case errors.Is(err, ErrUnauthorized):
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return nil, false
-	case errors.Is(err, ErrForbidden):
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return nil, false
-	case err != nil:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	host, reason, _ := a.resolveSession(r.Context(), cookie.Value)
+	if reason != DenyNone {
+		a.deny(w, r, reason, host)
 		return nil, false
 	}
 	return host, true

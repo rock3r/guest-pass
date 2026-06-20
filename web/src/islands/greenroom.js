@@ -2,6 +2,7 @@ import "./greenroom.css";
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { Room } from "../rtc/room.js";
+import { isTerminal } from "../rtc/terminate.js";
 import { PeerLink } from "../rtc/peerlink.js";
 import { Tile, FORCE_FRAME } from "./grid-tile.js";
 
@@ -108,7 +109,9 @@ function ScreenTile({ tile, live, onSelect }) {
 function Greenroom() {
   /** @type {[Array<{id:string, entry:any, stream:MediaStream|null}>, Function]} */
   const [tiles, setTiles] = useState([]);
-  const [state, setState] = useState("connecting"); // connecting | live | error
+  // connecting | live | error (a recoverable drop) | ended (a TERMINAL session-ended teardown —
+  // the host ended the session, or an admin force-ended it via the D-27 cascade, EN-9).
+  const [state, setState] = useState("connecting");
   // viewerRole is this client's own rank (from its self roster entry), so the grid shows only the
   // moderation controls the viewer may use. The /greenroom host is "host"; the grid is reused for
   // a co-host in the guest-session (PR-11).
@@ -362,6 +365,13 @@ function Greenroom() {
         }
       }
     });
+    // Capture a TERMINAL {t:terminate} reason (EN-9) BEFORE the socket closes, so onClose can tell a
+    // session-ended teardown (the host ended it, or an admin force-ended it via D-27) apart from a
+    // recoverable drop. The server sends the frame, then closes — it is dispatched before onclose.
+    let endedReason = "";
+    room.on("terminate", (f) => {
+      endedReason = f.reason;
+    });
     room.ready.then(() => setState((s) => (s === "connecting" ? "live" : s))).catch(() => setState("error"));
     room.onClose(() => {
       for (const link of linksRef.current.values()) link.close();
@@ -376,7 +386,10 @@ function Greenroom() {
       setTiles([]);
       setScreenTiles([]);
       setScreenLive("");
-      setState("error");
+      // A terminal session-ended teardown routes to the "ended" screen (no reconnect); any other
+      // close (a bare drop) is a recoverable "error". The greenroom holds no reconnect loop, so
+      // either way it stops here — but the host sees WHY rather than a silently-empty grid.
+      setState(isTerminal(endedReason) ? "ended" : "error");
     });
 
     return () => {
@@ -608,6 +621,22 @@ function Greenroom() {
 
   return (
     <div class="greenroom" data-state={state}>
+      {/* Teardown banners (M5.5): a TERMINAL session-ended teardown — the host ended the session, or
+          an admin force-ended it (D-27) — shows a clear "ended" screen instead of a silently-empty
+          grid; a bare drop shows a recoverable "connection lost" notice. */}
+      {state === "ended" ? (
+        <div class="gr-ended" role="alert">
+          <h2 class="gr-ended-title">This session has ended</h2>
+          <p class="gr-ended-body">
+            Your live session was ended and everyone has been disconnected. This happens when you end
+            the session yourself, or when an administrator ends it.
+          </p>
+        </div>
+      ) : state === "error" ? (
+        <div class="gr-error" role="alert">
+          <p class="gr-error-body">The greenroom lost its connection. Reload the page to reconnect.</p>
+        </div>
+      ) : null}
       <div class="gr-toolbar">
         {/* Host-only "bump quality now" (AD-21/D-34): broadcasts {t:recover-quality} so every
             publisher recovers immediately, overriding the slow recover hysteresis. */}
