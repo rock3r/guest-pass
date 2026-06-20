@@ -70,3 +70,65 @@ func TestDevLogin_RejectsNonLoopbackClient(t *testing.T) {
 		t.Fatal("non-loopback dev login must not create a host or set a session")
 	}
 }
+
+// The secondary dev identity (/auth/dev?as=host2) exists ONLY to exercise cross-host
+// admin flows locally (the D-27 suspend-cascade, the §7.7 metadata-only boundary, and
+// the non-admin /admin 403) — none of which the single always-admin primary identity can
+// reach. It must be a DISTINCT, NON-admin, active host.
+func TestDevLogin_SecondIdentityIsDistinctNonAdmin(t *testing.T) {
+	ring := newRing(t, testCurrent)
+	a := NewAuthenticator(ring, &fakeHosts{byID: map[string]*store.Host{}}, false)
+	up := &fakeUpserter{}
+	h := a.DevLogin(up, "", "")
+
+	// Primary identity: the existing admin dev host.
+	recA := httptest.NewRecorder()
+	h(recA, loopbackReq())
+	if recA.Code != http.StatusFound {
+		t.Fatalf("primary dev login code = %d, want 302", recA.Code)
+	}
+
+	// Secondary identity.
+	req := httptest.NewRequest(http.MethodGet, "/auth/dev?as=host2", nil)
+	req.RemoteAddr = "127.0.0.1:50001"
+	recB := httptest.NewRecorder()
+	h(recB, req)
+	if recB.Code != http.StatusFound {
+		t.Fatalf("secondary dev login code = %d, want 302", recB.Code)
+	}
+
+	if len(up.created) != 2 {
+		t.Fatalf("expected two distinct dev hosts created, got %d", len(up.created))
+	}
+	primary, secondary := up.created[0], up.created[1]
+	if secondary.GoogleSub == primary.GoogleSub {
+		t.Errorf("secondary host reused the primary google_sub %q; want a distinct identity", secondary.GoogleSub)
+	}
+	if secondary.IsAdmin {
+		t.Error("secondary dev host = admin; want NON-admin (it must get 403 on /admin)")
+	}
+	if secondary.Status != store.HostActive {
+		t.Errorf("secondary dev host status = %q, want active", secondary.Status)
+	}
+
+	// The secondary session must resolve to the secondary host, not the admin.
+	c := sessionCookieFromRec(recB)
+	if c == nil {
+		t.Fatal("no session cookie set for the secondary dev login")
+	}
+	hid, err := ring.Verify(c.Value)
+	if err != nil || hid == "" {
+		t.Fatalf("secondary dev session does not verify: hid=%q err=%v", hid, err)
+	}
+	if hid != "new-"+secondary.GoogleSub {
+		t.Errorf("secondary session resolved to host %q, want the non-admin host new-%s", hid, secondary.GoogleSub)
+	}
+
+	// Re-login as the secondary reuses its host (no duplicate create).
+	req2 := httptest.NewRequest(http.MethodGet, "/auth/dev?as=host2", nil)
+	req2.RemoteAddr = "127.0.0.1:50002"
+	h(httptest.NewRecorder(), req2)
+	if len(up.created) != 2 {
+		t.Fatalf("secondary dev login should reuse its host, created = %d", len(up.created))
+	}
+}
