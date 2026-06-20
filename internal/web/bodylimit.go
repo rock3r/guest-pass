@@ -65,15 +65,20 @@ func RequestBodyLimit(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// isWebSocketUpgrade reports whether r is a WebSocket upgrade handshake: a GET carrying
-// `Connection: Upgrade` (a comma-listed, case-insensitive token) and `Upgrade: websocket`. This
-// mirrors the upgrade preconditions the /ws handler itself enforces, so the body-cap exemption
-// can't be reached by a non-streaming request that merely shares the path.
+// isWebSocketUpgrade reports whether r is a genuine WebSocket upgrade handshake (RFC 6455): a GET
+// carrying `Connection: Upgrade` (a comma-listed, case-insensitive token), `Upgrade: websocket`,
+// a non-empty `Sec-WebSocket-Key`, and `Sec-WebSocket-Version: 13`. Requiring the full handshake —
+// not just the Connection/Upgrade pair — means a malformed request that merely sets those two
+// headers (and would be rejected by websocket.Accept anyway) is NOT exempted, so it still goes
+// through the body cap rather than skipping it.
 func isWebSocketUpgrade(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	if r.Header.Get("Sec-WebSocket-Key") == "" || r.Header.Get("Sec-WebSocket-Version") != "13" {
 		return false
 	}
 	for _, tok := range strings.Split(r.Header.Get("Connection"), ",") {

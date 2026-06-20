@@ -60,17 +60,24 @@ func TestRequestBodyLimit_WithinCapPasses(t *testing.T) {
 	}
 }
 
+// wsUpgradeReq builds a GET /ws carrying a full RFC 6455 handshake plus an over-cap body.
+func wsUpgradeReq() *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+	req.Header.Set("Connection", "keep-alive, Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	return req
+}
+
 // A genuine WebSocket upgrade to /ws is exempt (the streaming signaling endpoint, D-M5.5-4): the
 // cap must not truncate the hijacked stream, so even an oversize declared body passes through.
 func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	next, called, _ := readEcho(t)
 	mw := RequestBodyLimit(16)(next)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws", strings.NewReader(strings.Repeat("x", 64)))
-	req.Header.Set("Connection", "keep-alive, Upgrade")
-	req.Header.Set("Upgrade", "websocket")
 	rec := httptest.NewRecorder()
-	mw.ServeHTTP(rec, req)
+	mw.ServeHTTP(rec, wsUpgradeReq())
 
 	if !*called {
 		t.Fatal("a genuine /ws upgrade must be exempt from the body cap")
@@ -80,21 +87,34 @@ func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	}
 }
 
-// A non-upgrade request to /ws (e.g. POST /ws, or a GET without the upgrade handshake) is NOT
-// exempt — the exemption is gated on the upgrade headers, not the path, so the cap still applies.
+// A non-upgrade request to /ws (POST /ws, or a GET missing the full handshake — e.g. only the
+// Connection/Upgrade pair without Sec-WebSocket-Key/Version) is NOT exempt: the exemption requires
+// the genuine handshake, not the path or a partial header set, so the cap still applies.
 func TestRequestBodyLimit_WSNonUpgradeCapped(t *testing.T) {
-	next, called, _ := readEcho(t)
-	mw := RequestBodyLimit(16)(next)
-
-	req := httptest.NewRequest(http.MethodPost, "/ws", strings.NewReader(strings.Repeat("x", 64)))
-	rec := httptest.NewRecorder()
-	mw.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("non-upgrade POST /ws = %d, want 413", rec.Code)
+	cases := map[string]func() *http.Request{
+		"POST /ws": func() *http.Request {
+			return httptest.NewRequest(http.MethodPost, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+		},
+		"partial handshake (no Sec-WebSocket-Key/Version)": func() *http.Request {
+			req := httptest.NewRequest(http.MethodGet, "/ws", strings.NewReader(strings.Repeat("x", 64)))
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Upgrade", "websocket")
+			return req
+		},
 	}
-	if *called {
-		t.Fatal("a non-upgrade /ws request must not bypass the cap")
+	for name, mk := range cases {
+		t.Run(name, func(t *testing.T) {
+			next, called, _ := readEcho(t)
+			mw := RequestBodyLimit(16)(next)
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, mk())
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("%s = %d, want 413", name, rec.Code)
+			}
+			if *called {
+				t.Fatalf("%s must not bypass the cap", name)
+			}
+		})
 	}
 }
 
