@@ -292,7 +292,18 @@ and JS is never required). The footer **toggle** is a plain form that POSTs
 `/theme` (cycles System → Light → Dark), sets/clears the SameSite-Lax cosmetic
 cookie, and PRG-redirects back to a path clamped same-origin. base.html (public)
 and appbase.html (host) both stamp + carry it; **OBS source pages are exempt** —
-they're transparent, theme-agnostic overlays rendered outside the base shell.
+they're transparent, theme-agnostic overlays rendered outside the base shell. The
+**Preact islands** carry the design too: `web/src/islands/greenroom.css` (M5.6 PR-6)
+restyles the greenroom monitoring grid — card-edged tiles, badge on-air pills,
+offset-shadow moderation buttons (force controls in danger, scoped under
+`.gr-controls` to outrank the base button rule), a panelled screenshare rail, and
+the design's notice banners — CSS-only against the `.gr-*` class names; the page
+wrapper is scoped to `section.greenroom` (the island root inside `#greenroom` is also
+`<div class="greenroom">`). Two AA-fill tokens back the white-text chips app-wide:
+force-button labels use `--danger` not the lighter chip `--bad` (~3.8:1 on
+`--bad-soft`), and every white-on-live badge (`.badge-live`, the host live-pill,
+on-air pills, the calendar live event, the greenroom on-air + screenshare-live
+badges) fills from `--live-fill`, since white on the bright `--live` is only ~4.0:1.
 
 > **One exception (M5.5):** the host **stream-detail** page carries a *minimal,
 > read-only* liveness poll. It computes its "● Live" pill once at render, so when a

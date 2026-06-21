@@ -40,6 +40,12 @@
   --accent-press: color-mix(in srgb, var(--accent), var(--ink) 42%);
   --accent-soft: color-mix(in srgb, var(--accent) 26%, var(--surface));
 
+  /* Live/on-air FILL with white text on top (badge-live, live-pill, on-air pills). The bright --live
+     red (#e8402e / #ff5240) only gives white ~4.0:1 (light) / ~3.2:1 (dark) — fails AA for the small
+     badge text. This deeper red gives white 5.36:1; theme-constant since the white-on-fill pair is
+     independent of the page. --live stays the bright accent for dots/borders/animation (M5.6 PR-6). */
+  --live-fill: #cc2a1e;
+
   --r-base: 10px;
   --r-xs: calc(var(--r-base) * 0.4);
   --r-sm: calc(var(--r-base) * 0.7);
