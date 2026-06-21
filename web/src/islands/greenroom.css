@@ -1,28 +1,60 @@
-/* Greenroom grid — functional-first styling (D-B). Pixel-fidelity to the v2 prototype is a
-   deferred polish pass (DEF-2); this is clean, on-brand layout using the design tokens. */
+/* Greenroom monitoring grid — restyled to the v2 design (M5.6 PR-6, AC-7), ported from
+   screens-greenroom.jsx. The greenroom page renders in the PUBLIC base shell (logo header + footer);
+   this island fills the content. CSS-only against the Preact `.gr-*` class names (coupled to
+   greenroom.js + the moderation/on-air/grid/screenshare/reconnect browser tests), so no class moves —
+   only the design treatment: card-edged tiles, badge-style on-air pills, the small button treatment
+   on moderation controls, a panelled screenshare rail, and the design's notice banners. Tokens +
+   components from tokens.css/components.css. */
+
+/* Page wrapper — the greenroom wants to be WIDE (a monitoring grid), unlike the centred public
+   pages, so widen its column past the shell's narrow defaults. */
+.greenroom {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+  box-sizing: border-box;
+}
+.greenroom > h1 {
+  font-size: clamp(26px, 4vw, 32px);
+  margin-bottom: 8px;
+}
+.greenroom > p {
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0 0 8px;
+  max-width: 70ch;
+}
+.gr-privacy-note {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin: 0 0 20px;
+}
 
 .greenroom-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
 }
 
 .gr-empty {
-  color: var(--ink);
-  opacity: 0.7;
+  color: var(--ink-2);
+  padding: 24px 0;
 }
 
+/* ============ Video tiles — card-edged, design treatment ============ */
 .gr-tile {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 8px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
-/* The video sits in a relative wrapper so the audio-only placeholder (PD-12) can overlay it. */
 .gr-video-wrap {
   position: relative;
   width: 100%;
@@ -32,12 +64,13 @@
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 8px;
+  background: var(--tile);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   object-fit: cover;
 }
 
-/* Connected-with-audio placeholder over the black tile when a guest joined audio-only (PD-12). */
+/* Connected-with-audio placeholder (PD-12). */
 .gr-novideo {
   position: absolute;
   inset: 0;
@@ -48,16 +81,14 @@
   justify-content: center;
   text-align: center;
   padding: 8px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--ink) 14%, #000);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ink) 16%, #000);
   color: #fff;
 }
-
 .gr-novideo-icon {
   font-size: 1.6em;
   line-height: 1;
 }
-
 .gr-novideo-text {
   font-size: 0.85rem;
   font-weight: 600;
@@ -66,336 +97,360 @@
 .gr-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 2px;
 }
-
 .gr-name {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 14px;
   margin-right: auto;
+  color: var(--ink);
+}
+.gr-role {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
 }
 
-/* Three-state on-air pill (D-24). */
+/* Three-state on-air pill (D-24) — badge style. */
 .gr-pill {
-  font-size: 0.8rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 .gr-pill[data-onair="on-air"] {
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--live);
+  color: #fff;
+  border-color: var(--edge);
 }
 .gr-pill[data-onair="not-on-air"] {
-  background: transparent;
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 .gr-pill[data-onair="status-unavailable"] {
-  opacity: 0.6;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
-/* Signal bars — a simple meter (driven by entry.signal once degradation lands, PR-13). */
+/* Signal meter (driven by entry.signal). */
 .gr-signal {
   width: 18px;
   height: 12px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--line-2);
   border-radius: 2px;
-  opacity: 0.4;
+  background: var(--surface-2);
+  opacity: 0.5;
 }
 .gr-signal[data-signal="3"],
 .gr-signal[data-signal="4"],
 .gr-signal[data-signal="5"] {
   opacity: 1;
+  border-color: var(--good);
+  background: color-mix(in srgb, var(--good) 30%, var(--surface));
 }
 
-/* Force-lock notice (D-13), always shown when a lock is active, separate from the pill. */
+/* Force-lock notice (D-13), separate from the pill. */
 .gr-lock {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--danger);
 }
-
 .gr-hand {
-  font-size: 0.8rem;
+  font-size: 12.5px;
+  color: var(--warn);
+  font-weight: 600;
 }
 
-.gr-reconnect {
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 2px 8px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  cursor: pointer;
-}
-
-/* Per-tile moderation controls (D-13/D-15). */
+/* ============ Per-tile moderation controls + small buttons ============ */
 .gr-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding: 0 2px 2px;
 }
-
-.gr-controls button {
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 2px 8px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
+.gr-controls button,
+.gr-reconnect,
+.gr-recover,
+.gr-ceiling-apply,
+.gr-nameedit-set,
+.gr-screen-off,
+.gr-screen-select {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 1.5px 1.5px 0 var(--edge);
   cursor: pointer;
+  transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s;
+  line-height: 1;
 }
-
-.gr-release {
+.gr-controls button:hover,
+.gr-reconnect:hover,
+.gr-recover:hover,
+.gr-ceiling-apply:hover,
+.gr-nameedit-set:hover,
+.gr-screen-off:hover,
+.gr-screen-select:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 2.5px 2.5px 0 var(--edge);
+  background: var(--surface-2);
+}
+.gr-controls button:active,
+.gr-reconnect:active,
+.gr-recover:active,
+.gr-ceiling-apply:active,
+.gr-nameedit-set:active,
+.gr-screen-off:active,
+.gr-screen-select:active {
+  transform: translate(1.5px, 1.5px);
+  box-shadow: 0 0 0 var(--edge);
+}
+/* Force / destructive controls read as danger. Scoped under .gr-controls so they outrank the
+   `.gr-controls button` base treatment above (which is more specific than a bare `.gr-force`). */
+.gr-controls .gr-force {
+  background: var(--bad-soft);
+  /* --danger (the AA-readable darker red), NOT the lighter chip-fill --bad: --bad on --bad-soft is
+     only ~3.8:1 in light, below AA for this 12.5px button label. --danger clears it in both themes. */
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--bad) 38%, transparent);
+  box-shadow: none;
+}
+.gr-controls .gr-force:hover {
+  filter: brightness(0.97);
+  transform: none;
+  box-shadow: none;
+  background: var(--bad-soft);
+}
+/* Release / accept controls read as accent. */
+.gr-controls .gr-release {
   background: var(--accent);
   color: var(--accent-ink);
+  border-color: var(--edge);
+}
+.gr-controls .gr-release:hover {
+  background: var(--accent);
 }
 
-/* Degradation transparency (AD-21/AC-15): per-tile degrading/recovering badge + the host's
-   room-level "bump quality now" control. Functional-first (D-B). */
+/* ============ Room toolbar (degradation + ceiling) ============ */
 .gr-toolbar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
 }
-/* Surfaced slot (re)bind failure (AC-6): e.g. binding to an unprovisioned cam slot. */
 .gr-binderr {
   margin: 0;
   margin-right: auto;
-  font-size: 0.8rem;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--danger);
 }
-.gr-recover {
-  font: inherit;
-  padding: 6px 12px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
-  cursor: pointer;
-}
 
-/* Host-only stream-wide program quality ceiling control (D-19/AC-8). */
 .gr-ceiling {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8rem;
+  font-size: 13px;
 }
 .gr-ceiling-label {
   font-weight: 600;
-  opacity: 0.8;
+  color: var(--ink-2);
 }
 .gr-ceiling-field {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
+}
+.gr-ceiling-field input,
+.gr-ceiling-res,
+.gr-slot,
+.gr-nameedit-input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-sizing: border-box;
 }
 .gr-ceiling-field input {
-  font: inherit;
-  width: 5ch;
-  padding: 3px 5px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
+  width: 6ch;
 }
 .gr-ceiling-unit {
-  opacity: 0.7;
-}
-.gr-ceiling-apply {
-  font: inherit;
-  padding: 4px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
-  cursor: pointer;
+  color: var(--ink-2);
 }
 .gr-degraded {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 13px;
   color: var(--warn);
 }
 .gr-degraded[data-degraded^="recovering"] {
   color: var(--good);
 }
 
-/* Host-only slot picker (People controls, AC-6/D-20): (re)assign a guest to a cam slot. */
-.gr-slotbind {
+/* Slot picker / nameplate / screenshare-eligibility (People controls). */
+.gr-slotbind,
+.gr-nameedit,
+.gr-screenelig {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
+  gap: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
-
-.gr-slotbind-label {
+.gr-slotbind-label,
+.gr-nameedit-text {
   font-weight: 600;
-  opacity: 0.8;
+  color: var(--ink-2);
 }
-
-.gr-slot {
-  font: inherit;
-  padding: 3px 6px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
+.gr-screenelig {
+  cursor: pointer;
 }
-
-/* Host-only nameplate override (D-16/AC-7): a small inline edit-and-Set form on the tile. */
-.gr-nameedit {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
+.gr-screenelig-input {
+  cursor: pointer;
 }
-
 .gr-nameedit-label {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: 1;
 }
-
-.gr-nameedit-text {
-  font-weight: 600;
-  opacity: 0.8;
-}
-
 .gr-nameedit-input {
-  font: inherit;
   flex: 1;
   min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
 }
 
-.gr-nameedit-set {
-  font: inherit;
-  padding: 3px 8px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-/* Host-only screenshare eligibility toggle (EN-23/AC-9). */
-.gr-screenelig {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.gr-screenelig-input {
-  cursor: pointer;
-}
-
-/* Screenshare preview-switcher rail (D-21/AC-11): a host-only row of every active sharer's screen,
-   with select-live controls. The live tile is highlighted; the live render is this badged thumbnail. */
+/* ============ Screenshare preview rail (D-21) ============ */
 .gr-screen {
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  padding: 10px;
-  margin: 0 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  margin: 0 0 18px;
 }
 .gr-screen-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 .gr-screen-label {
-  font-weight: 600;
-}
-.gr-screen-off {
-  font: inherit;
-  padding: 3px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
-  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
 }
 .gr-screen-rail {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 .gr-screen-tile {
   margin: 0;
   width: 220px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   overflow: hidden;
-  background: #000;
+  background: var(--surface-2);
 }
 .gr-screen-tile[data-live="1"] {
-  outline: 3px solid var(--accent);
+  outline: 2.5px solid var(--accent);
+  border-color: transparent;
 }
 .gr-screen-video {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
-  background: #000;
+  background: var(--tile);
 }
 .gr-screen-cap {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
-  background: var(--paper);
+  padding: 7px 9px;
+  background: var(--surface);
   color: var(--ink);
 }
 .gr-screen-name {
-  font-size: 0.85rem;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gr-screen-select {
-  font: inherit;
-  padding: 3px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  color: var(--ink);
-  cursor: pointer;
-}
 .gr-screen-livebadge {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--danger);
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--live);
+  border-radius: var(--r-xs);
+  padding: 3px 7px;
   white-space: nowrap;
 }
-/* Teardown banners (M5.5). The "ended" screen marks a terminal session end (host/admin, D-27); the
-   "error" notice marks a recoverable drop. Both replace a previously-silent empty grid. */
+
+/* ============ Teardown / reconnect banners (M5.5) ============ */
 .gr-ended,
 .gr-error,
 .gr-reconnecting {
-  margin-bottom: 12px;
-  padding: 12px 16px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
   color: var(--ink);
+  box-shadow: var(--shadow-sm);
 }
 .gr-ended {
-  border-color: var(--danger);
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line-2));
+  background: var(--bad-soft);
+}
+.gr-error {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line-2));
+  background: var(--warn-soft);
 }
 .gr-reconnecting {
   /* A recoverable, non-error state (AC-4): the live session keeps running while it reconnects. */
-  border-color: var(--accent-ink, #8a6d1f);
+  border-color: color-mix(in srgb, var(--accent-press) 45%, var(--line-2));
+  background: var(--accent-soft);
 }
 .gr-ended-title {
   margin: 0 0 4px;
-  font-size: 1rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
   color: var(--danger);
 }
 .gr-ended-body,
@@ -403,4 +458,5 @@
 .gr-reconnecting-body {
   margin: 0;
   font-size: 0.9rem;
+  color: var(--ink-2);
 }
