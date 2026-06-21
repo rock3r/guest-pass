@@ -68,6 +68,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
+	// Unmatched routes render the 404 state screen for a navigation, a terse body for fetch/XHR
+	// (M5.5/AC-2, DESIGN §6 `notfound`) — instead of chi's bare "404 page not found" text.
+	r.NotFound(rd.notFound)
 
 	// Global request-body cap (D-M5.5-4 / AC-8): reject an oversized body instance-wide with 413,
 	// before any handler reads it. /ws is exempt (streaming signaling). Always on — a zero/negative
@@ -267,6 +270,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			}
 			pr.Get("/p/{token}", api.passLanding)
 			pr.Post("/p/{token}/enter", api.passEnter)
+			// Voluntary leave (DESIGN §6 guest-left): vacate the guest's own cam slot out-of-band, so it
+			// works even when the signaling socket is down (a leave during a reconnect) — when the WS
+			// can't carry the signal. Token-authed like /enter; idempotent.
+			pr.Post("/p/{token}/leave", api.passLeave)
 			// Public abuse-report form (D-42/EN-24): the reporter is the invited guest, resolved from
 			// the token server-side; only category + message come from the form. Same rate limiter.
 			pr.Get("/p/{token}/report", api.reportForm)

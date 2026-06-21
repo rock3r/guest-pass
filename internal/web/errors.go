@@ -62,6 +62,63 @@ func denialPlainText(reason auth.DenialReason) string {
 	}
 }
 
+// renderErrorScreen content-negotiates a state/error screen (M5.5/AC-2, DESIGN §6): a top-level
+// browser navigation (Accept: text/html) gets the rendered error.html screen; a fetch/XHR keeps the
+// terse plain-text body. It is the shared presentation for the static state screens (404, the
+// pass-expired / link-off landing states) — the same shape as authDenied, so the status code and
+// the API plain-text contract are unchanged. base.html is the public shell (no host nav).
+func (rd *renderer) renderErrorScreen(w http.ResponseWriter, r *http.Request, status int, plainBody, title string, page errorPage) {
+	if !wantsHTML(r) {
+		http.Error(w, plainBody, status)
+		return
+	}
+	rd.renderStatus(w, r, "error.html", status, pageData{Title: title, Data: page})
+}
+
+// notFound is the router's 404 handler: it renders the not-found state screen for a navigation and
+// a terse body for a fetch/XHR (DESIGN §6 `notfound`).
+func (rd *renderer) notFound(w http.ResponseWriter, r *http.Request) {
+	title, page := notFoundContent()
+	rd.renderErrorScreen(w, r, http.StatusNotFound, "not found", title, page)
+}
+
+// notFoundContent is the 404 state screen (DESIGN §6 `notfound`).
+func notFoundContent() (title string, page errorPage) {
+	return "Page not found", errorPage{
+		Heading: "We couldn't find that page",
+		Body: []string{
+			"The link may be broken, or the page may have moved.",
+			"If you followed a guest invite, check that you copied the whole link.",
+		},
+		Action: &errorAction{Href: "/", Label: "Back to home"},
+	}
+}
+
+// passExpiredContent is the expired-pass state screen (DESIGN §6 `pass-expired`): the guest's link
+// is past its window. Copy notes the 30-minute grace after the scheduled end (D-5).
+func passExpiredContent() (title string, page errorPage) {
+	return "Invite expired", errorPage{
+		Heading: "This invite has expired",
+		Body: []string{
+			"Guest invites are valid until a little after the stream's scheduled end (about 30 minutes), then they stop working.",
+			"Ask the host to send you a fresh link if the stream is still going.",
+		},
+	}
+}
+
+// passRevokedContent is the revoked / "link turned off" state screen (DESIGN §6 `pass-revoked` /
+// link-off, PD-2). It is intentionally the same opaque copy a suspended/pending host's guests see,
+// so the guest is never told whether the link, the pass, or the host's account was the cause.
+func passRevokedContent() (title string, page errorPage) {
+	return "Link turned off", errorPage{
+		Heading: "This invite link has been turned off",
+		Body: []string{
+			"This guest link is no longer active.",
+			"Ask the host to send you a new invite if you were expecting to join.",
+		},
+	}
+}
+
 // errorContent maps a denial reason (and the live host, when known) to the screen title + body.
 // DenyInactive splits on the live status so a suspended host and a pending host get accurate copy.
 // Copy is intentionally instance-neutral — this is self-hostable OSS, so there is no central

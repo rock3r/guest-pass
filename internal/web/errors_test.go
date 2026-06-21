@@ -1,13 +1,88 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/rock3r/guest-pass/internal/store"
+	"github.com/rock3r/guest-pass/internal/token"
 )
+
+// M5.5 / AC-2 (DESIGN §6 `notfound`): an unmatched route renders the 404 state screen for a
+// navigation, and a terse body for a fetch/XHR — not chi's bare "404 page not found".
+func TestErrorScreens_NotFoundRendersScreen(t *testing.T) {
+	a := newAPIHarness(t)
+
+	rec := a.navReq(t, "/no-such-page", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown route nav = %d, want 404", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("404 nav Content-Type = %q, want text/html", ct)
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "find that page") {
+		t.Fatalf("404 screen missing the not-found copy:\n%s", rec.Body.String())
+	}
+
+	// A fetch/XHR (no Accept: text/html) keeps the terse body — no screen.
+	rec = a.req(t, http.MethodGet, "/no-such-page", "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("fetch 404 = %d, want 404", rec.Code)
+	}
+	if strings.Contains(strings.ToLower(rec.Body.String()), "find that page") {
+		t.Fatalf("fetch 404 should get the terse body, not the screen:\n%s", rec.Body.String())
+	}
+}
+
+// M5.5 / AC-2 (DESIGN §6 pass-expired / link-off): the /p/{token} landing renders the designed
+// state screen for a revoked, expired, or unknown/rotated link (navigation), distinguishing the
+// expired screen (D-5 grace copy) from the opaque link-off screen.
+func TestErrorScreens_PassLandingStates(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "passhost")
+	streamID := a.createStream(t, cookie, "Show")
+
+	mk := func(status string) string {
+		raw, err := token.Mint()
+		if err != nil {
+			t.Fatalf("mint: %v", err)
+		}
+		if _, err := a.store.CreatePass(context.Background(), store.CreatePassParams{
+			StreamID: streamID, Role: store.RoleGuest, TokenHash: a.hasher.Hash(raw), Status: status,
+		}); err != nil {
+			t.Fatalf("CreatePass(%s): %v", status, err)
+		}
+		return raw
+	}
+
+	// Unknown/rotated tokens keep the 404 contract (indistinguishable from never-existed) but still
+	// render the friendly link-off screen; revoked/expired passes are 410 Gone with distinct copy.
+	cases := []struct {
+		name, token, want string
+		status            int
+	}{
+		{"revoked → link-off", mk(store.PassRevoked), "turned off", http.StatusGone},
+		{"expired → expired screen", mk(store.PassExpired), "expired", http.StatusGone},
+		{"unknown/rotated → link-off", "totally-unknown-token", "turned off", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := a.navReq(t, "/p/"+tc.token, nil)
+			if rec.Code != tc.status {
+				t.Fatalf("%s = %d, want %d", tc.name, rec.Code, tc.status)
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+				t.Fatalf("%s Content-Type = %q, want text/html", tc.name, ct)
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), tc.want) {
+				t.Fatalf("%s screen missing %q:\n%s", tc.name, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
 
 // navReq issues a GET that looks like a top-level browser navigation (Accept: text/html), so
 // the auth middleware renders the server HTML error screen rather than the plain-text denial

@@ -93,6 +93,14 @@ function DeviceCheck() {
   // precedence over the in-session view so the guest gets a clear screen instead of a false
   // "you're live" silent hang. Cleared on recovery (a pc connects after) or the Retry action.
   const [netBlocked, setNetBlocked] = useState(false);
+  // The guest LEFT voluntarily (M5.5/AC-2, DESIGN §6 guest-left). Distinct from a terminal terminate
+  // (the host/system ended it) — the guest chose to go, and can rejoin while the stream is still live
+  // (D-40). Wins over the in-session view; the rejoin path returns to the device-check preview.
+  const [left, setLeft] = useState(false);
+  // True while the out-of-band leave POST is in flight. Rejoin is gated on it: a rejoin that re-binds
+  // the slot before the vacate lands would be undone by the late VacateOccupant — so we wait for the
+  // POST to settle before re-entry (codex).
+  const [leaving, setLeaving] = useState(false);
   // lockedMods are this guest's currently force-suppressed modalities (mic|cam|share), read from
   // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
   // (RF-8); the guest-session renders the visible "muted/hidden by host" notice from these.
@@ -126,6 +134,11 @@ function DeviceCheck() {
   // learns the live sharer from the roster's screenShare:"live" fold (the screen-roster is host-only).
   const [liveScreen, setLiveScreen] = useState(/** @type {{id:string,name:string,stream:MediaStream}|null} */ (null));
   const [error, setError] = useState("");
+  // Which KIND of device-check failure to render (M5.5/AC-2, DESIGN §6): "blocked" (camera/mic
+  // permission denied — cam-blocked), "no-devices" (none attached), "unsupported" (no WebRTC /
+  // in-app webview), or "" (a generic, retryable failure). Drives distinct copy on the error screen;
+  // "unsupported" is the only one with no "Try again" (a retry can't fix a missing API).
+  const [errorKind, setErrorKind] = useState(/** @type {""|"blocked"|"no-devices"|"unsupported"} */ (""));
   // Pre-join device picker (M5.5/AC-5): the guest chooses a camera + microphone before going live,
   // and the choice persists into the published stream — they never re-pick once in session. The
   // chosen ids drive getUserMedia's deviceId constraint. Refs are the source of truth for the async
@@ -302,9 +315,36 @@ function DeviceCheck() {
     setDevices({ cams, mics });
   }
 
+  // mediaErrorKind maps a getUserMedia rejection to the device-check error variant (DESIGN §6). A
+  // permission denial → cam-blocked; no attached devices → no-devices; everything else → generic.
+  function mediaErrorKind(e) {
+    const name = (e && /** @type {Error} */ (e).name) || "";
+    if (name === "NotAllowedError" || name === "SecurityError") return "blocked";
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") return "no-devices";
+    return "";
+  }
+
+  // webrtcSupported reports whether this browser can capture media AND open a peer connection. A
+  // missing API (old browser, or an in-app webview that strips WebRTC) → the unsupported screen,
+  // surfaced up front so the guest isn't sent into a permission prompt that can never succeed.
+  function webrtcSupported() {
+    return !!(
+      navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      typeof window.RTCPeerConnection !== "undefined"
+    );
+  }
+
   async function startCheck() {
     if (requestingRef.current) return; // a getUserMedia is already in flight
     enteringRef.current = false; // a fresh check (incl. a retry) is back to a switchable preview
+    setErrorKind(""); // a fresh attempt clears any prior failure kind (so a later generic failure
+    //                    can't inherit a stale "blocked"/"no-devices" screen)
+    if (!webrtcSupported()) {
+      setErrorKind("unsupported");
+      setPhase("error");
+      return;
+    }
     requestingRef.current = true;
     stopStream(); // release any previous stream (e.g. on retry) before requesting a new one
     setPhase("requesting");
@@ -320,6 +360,7 @@ function DeviceCheck() {
       await refreshDevices(); // labels resolve only post-permission — list the choices now
       setPhase("preview");
     } catch (e) {
+      setErrorKind(mediaErrorKind(e));
       setError((e && /** @type {Error} */ (e).name) || String(e));
       setPhase("error");
     } finally {
@@ -823,6 +864,9 @@ function DeviceCheck() {
       // resets it. Holding it through the error phase makes a still-in-flight switch bail (it can't
       // install behind the error UI), and the picker isn't rendered here so no new switch can start.
       stopStream(); // entry failed — don't leave the camera running behind the error UI
+      setErrorKind(""); // a POST /enter failure (expired link, inactive host) is NOT a media-permission
+      //                   problem — clear any prior cam-blocked/no-devices kind so the generic screen
+      //                   shows, not "unblock your camera" guidance for a pass/server error (codex).
       setError(String((e && /** @type {Error} */ (e).message) || e));
       setPhase("error");
     }
@@ -1051,6 +1095,59 @@ function DeviceCheck() {
     setPhase("preview");
   }
 
+  // leave is the in-session "Leave the greenroom" action (DESIGN §6 guest-left): tear down the
+  // publishing session and release the camera + any screen capture (the guest is done, so the device
+  // lights go off), then show the guest-left screen. Voluntary — NOT a terminate; the guest can rejoin
+  // while the stream is live (D-40). Mirrors retryNetwork's teardown, but stops the camera too.
+  function leave() {
+    // Tell the server this is a DELIBERATE leave so it vacates our cam slot NOW (terminal), instead of
+    // grace-holding it — and the OBS source's frozen frame — for the whole window after a bare close
+    // (D-40). Sent OUT-OF-BAND over HTTP, not the WS, so it works in EVERY state — including a leave
+    // during a reconnect, when the socket is down and an in-band frame couldn't be sent (codex).
+    // Best-effort + keepalive (it may outlive this view); the server no-ops if nothing is bound.
+    // Gate Rejoin on it settling (setLeaving) so a quick rejoin can't re-bind before the vacate lands.
+    setLeaving(true);
+    fetch(`/p/${encodeURIComponent(passTokenFromPath())}/leave`, { method: "POST", keepalive: true })
+      .catch(() => {})
+      .finally(() => setLeaving(false));
+    if (sessionRef.current) {
+      sessionRef.current.close();
+      sessionRef.current = null;
+    }
+    stopScreenCapture();
+    stopStream(); // the guest is leaving — release the camera/mic so the capture indicator goes off
+    enteringRef.current = false;
+    setLeft(true);
+  }
+
+  // rejoin returns from the guest-left screen to the device-check preview so the guest can re-check
+  // their camera and re-enter (POST /enter is idempotent → re-publishes). Re-acquires the camera that
+  // leave() released. Rejoin only succeeds while the stream is live; otherwise the re-entry surfaces
+  // the matching state (host-waiting / link-off) like any fresh entry.
+  function rejoin() {
+    if (leaving) return; // wait for the vacate to land, else this re-bind races the late VacateOccupant
+    setLeft(false);
+    startCheck();
+  }
+
+  // The guest LEFT voluntarily — a clear, recoverable screen with a rejoin path (DESIGN §6 guest-left).
+  // Checked before the in-session/phase screens so the leave action wins immediately.
+  if (left) {
+    return (
+      <div class="dc-left" data-state="guest-left">
+        <p class="dc-left-title">You've left the greenroom</p>
+        <p>You can rejoin while the stream is still live.</p>
+        <button type="button" class="dc-rejoin" onClick={rejoin} disabled={leaving}>
+          {leaving ? "Leaving…" : "Rejoin"}
+        </button>
+        {/* GDPR purge notice (D-37 §8 / AC-6), the same reassurance the terminal screens carry. */}
+        <p class="dc-left-privacy" data-privacy="purge">
+          Your name and email will be deleted within 24 hours of the stream ending.
+        </p>
+      </div>
+    );
+  }
+
   // A TERMINAL terminate (EN-9) ends the session for good — route to the matching error screen and
   // never reconnect. Checked before the phase screens so it wins over the in-session view.
   if (terminated) {
@@ -1101,6 +1198,7 @@ function DeviceCheck() {
     return (
       <GuestSession
         pubState={pubState}
+        onLeave={leave}
         onAir={onAir}
         streaming={streaming}
         lockedMods={lockedMods}
@@ -1126,8 +1224,50 @@ function DeviceCheck() {
     );
   }
   if (phase === "error") {
+    // Distinct copy per failure kind (DESIGN §6 cam-blocked / unsupported), so the guest gets an
+    // actionable next step instead of a raw error name. "unsupported" is terminal (no retry).
+    if (errorKind === "unsupported") {
+      return (
+        <div class="dc-error" data-error-kind="unsupported">
+          <p class="dc-error-title">This browser can't join the stream</p>
+          <p>
+            Joining needs camera, microphone, and peer-to-peer video support. Your browser doesn't
+            offer it — this often happens in an app's built-in browser.
+          </p>
+          <p>Open this link in the latest Chrome, Edge, Firefox, or Safari and try again.</p>
+        </div>
+      );
+    }
+    if (errorKind === "blocked") {
+      return (
+        <div class="dc-error" data-error-kind="blocked">
+          <p class="dc-error-title">Camera and microphone are blocked</p>
+          <p>
+            Your browser is blocking access to your camera and mic. Allow them for this site — use
+            the camera icon in the address bar, or your browser's site settings — then try again.
+          </p>
+          <button type="button" class="dc-retry" onClick={startCheck}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    if (errorKind === "no-devices") {
+      return (
+        <div class="dc-error" data-error-kind="no-devices">
+          <p class="dc-error-title">No camera or microphone found</p>
+          <p>
+            We couldn't find a camera or microphone to use. Connect one, close any other app that
+            might be using it, then try again.
+          </p>
+          <button type="button" class="dc-retry" onClick={startCheck}>
+            Try again
+          </button>
+        </div>
+      );
+    }
     return (
-      <div class="dc-error">
+      <div class="dc-error" data-error-kind="generic">
         <p>Couldn't continue: {error}. Check that your browser can access the camera and mic.</p>
         <button type="button" class="dc-retry" onClick={startCheck}>
           Try again

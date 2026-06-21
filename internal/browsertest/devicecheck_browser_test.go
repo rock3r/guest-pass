@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,6 +195,153 @@ func TestDeviceCheck_PreviewAndExplicitEntry(t *testing.T) {
 		}
 		if p.Status != store.PassOpened || p.OpenedAt == nil {
 			t.Fatalf("after entry, status=%q openedAt=%v, want opened + stamped", p.Status, p.OpenedAt)
+		}
+	})
+}
+
+// M5.5/AC-2 (DESIGN §6 guest-left): a guest who clicks "Leave the greenroom" gets the voluntary
+// guest-left screen — a rejoin path (D-40, rejoin-while-live) and the 24h purge notice (D-37) — NOT
+// a terminal error. Rejoin returns to the device-check so they can re-enter.
+func TestDeviceCheck_LeaveShowsGuestLeftThenRejoins(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 90*time.Second, func(cctx context.Context) {
+		var leftTxt string
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-entered="1"]`, chromedp.ByQuery),
+			// Leave voluntarily → the guest-left screen.
+			chromedp.Click(`.gs-leave`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-state="guest-left"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-rejoin`, chromedp.ByQuery),
+			chromedp.Text(`[data-state="guest-left"]`, &leftTxt, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("leave → guest-left screen failed: %v", err)
+		}
+		if !strings.Contains(strings.ToLower(leftTxt), "left the greenroom") {
+			t.Fatalf("guest-left screen missing the left copy:\n%s", leftTxt)
+		}
+		// The GDPR purge reassurance must be present (D-37 / AC-6).
+		if !strings.Contains(strings.ToLower(leftTxt), "deleted within 24 hours") {
+			t.Fatalf("guest-left screen missing the 24h purge notice:\n%s", leftTxt)
+		}
+
+		// Rejoin returns to the device-check preview (re-capture → re-enter). It is gated until the
+		// out-of-band leave POST settles (so a rejoin can't race the vacate), so wait for it to enable.
+		if err := chromedp.Run(cctx,
+			chromedp.WaitEnabled(`.dc-rejoin`, chromedp.ByQuery),
+			chromedp.Click(`.dc-rejoin`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+		); err != nil {
+			t.Fatalf("rejoin did not return to the preview: %v", err)
+		}
+	})
+}
+
+// M5.5/AC-2 (DESIGN §6 host-waiting): a guest connects to the greenroom room immediately (it exists
+// before the host opens it, D-40), so an early guest is genuinely LIVE but alone. The status reads
+// "waiting for the host" — not the bare "you're live" — until a host appears in the roster. The seed
+// has an active host account but never opens a host /ws, so no host is present in the room.
+func TestDeviceCheck_NoHostYetShowsWaiting(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 90*time.Second, func(cctx context.Context) {
+		var txt string
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
+			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,
+				nil, chromedp.WithPollingTimeout(30*time.Second)),
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			// Live in the greenroom, but with no host present → host-waiting (NOT the bare "you're live").
+			chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-state="host-waiting"]`, chromedp.ByQuery),
+			chromedp.Text(`[data-state="host-waiting"]`, &txt, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("host-waiting did not render: %v", err)
+		}
+		if !strings.Contains(strings.ToLower(txt), "waiting for the host") {
+			t.Fatalf("host-waiting copy missing the waiting message:\n%s", txt)
+		}
+	})
+}
+
+// M5.5/AC-2 (DESIGN §6 cam-blocked): when the guest denies the camera/mic permission, the device
+// check shows a distinct "blocked" screen — actionable unblock copy + a Try-again — not a raw error
+// name. getUserMedia is overridden to reject with NotAllowedError (the permission-denied signal).
+func TestDeviceCheck_PermissionDeniedShowsBlockedScreen(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 90*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			// Make the capture reject as if the guest dismissed/blocked the permission prompt.
+			chromedp.Evaluate(`Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+				configurable: true, writable: true,
+				value: () => Promise.reject(new DOMException('denied', 'NotAllowedError')),
+			})`, nil),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-error[data-error-kind="blocked"]`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("blocked screen did not render: %v", err)
+		}
+
+		var txt string
+		var hasRetry bool
+		if err := chromedp.Run(cctx,
+			chromedp.Text(`.dc-error[data-error-kind="blocked"]`, &txt, chromedp.ByQuery),
+			chromedp.Evaluate(`!!document.querySelector('.dc-error[data-error-kind="blocked"] .dc-retry')`, &hasRetry),
+		); err != nil {
+			t.Fatalf("read blocked screen: %v", err)
+		}
+		if !strings.Contains(strings.ToLower(txt), "blocked") {
+			t.Fatalf("blocked screen copy missing the unblock guidance:\n%s", txt)
+		}
+		if !hasRetry {
+			t.Fatal("blocked screen must offer a Try-again (re-granting permission can recover)")
+		}
+	})
+}
+
+// M5.5/AC-2 (DESIGN §6 unsupported): a browser with no WebRTC (old engine, or an in-app webview
+// that strips it) gets a terminal "can't join" screen up front — before any permission prompt — and
+// NO Try-again, since a retry can't add the missing API. getUserMedia is removed to simulate it.
+func TestDeviceCheck_NoWebRTCShowsUnsupportedScreen(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 90*time.Second, func(cctx context.Context) {
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			// Strip media capture so the up-front WebRTC-support check fails.
+			chromedp.Evaluate(`Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+				configurable: true, writable: true, value: undefined,
+			})`, nil),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-error[data-error-kind="unsupported"]`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("unsupported screen did not render: %v", err)
+		}
+
+		var hasRetry bool
+		if err := chromedp.Run(cctx,
+			chromedp.Evaluate(`!!document.querySelector('.dc-error[data-error-kind="unsupported"] .dc-retry')`, &hasRetry),
+		); err != nil {
+			t.Fatalf("read unsupported screen: %v", err)
+		}
+		if hasRetry {
+			t.Fatal("unsupported screen must NOT offer a retry — a retry can't add WebRTC")
 		}
 	})
 }

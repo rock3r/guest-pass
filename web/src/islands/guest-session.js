@@ -44,7 +44,7 @@ function onAirLabel(onAir) {
 /**
  * GuestSession renders the guest's in-session view.
  * @param {{
- *   pubState: string, onAir: string, streaming: boolean, lockedMods: string[],
+ *   pubState: string, onLeave: ()=>void, onAir: string, streaming: boolean, lockedMods: string[],
  *   selfStream: MediaStream|null, peers: any[], selfId: string,
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
@@ -60,6 +60,7 @@ function onAirLabel(onAir) {
  */
 export function GuestSession({
   pubState,
+  onLeave,
   onAir,
   streaming,
   lockedMods,
@@ -121,6 +122,18 @@ export function GuestSession({
   // CONNECTING (and is dead once disconnected) — so they are disabled until the room is live.
   const live = pubState === "live";
 
+  // host-waiting (M5.5/AC-2, DESIGN §6): a guest connects to the greenroom room IMMEDIATELY — it
+  // exists before the host opens it (D-40) — so an early guest is genuinely LIVE but alone. Surface
+  // that as "waiting for the host" rather than the bare "you're live" until a host appears in the
+  // roster. hostSeen latches on the FIRST host so a later host blip (the host's own 45 s reconnect
+  // grace removes their roster entry) doesn't bounce every guest back to a false "host not arrived".
+  const hostPresent = (peers || []).some((p) => p.role === "host");
+  const hostSeenRef = useRef(false);
+  useEffect(() => {
+    if (hostPresent) hostSeenRef.current = true;
+  }, [hostPresent]);
+  const hostArrived = hostPresent || hostSeenRef.current;
+
   const submit = (e) => {
     e.preventDefault();
     if (!live) return;
@@ -151,7 +164,15 @@ export function GuestSession({
         ) : null}
         <div class="gs-status">
           {pubState === "live" ? (
-            <p>You're in — your camera is live in the greenroom.</p>
+            hostArrived ? (
+              <p>You're in — your camera is live in the greenroom.</p>
+            ) : (
+              // Live, but no host has arrived yet (D-40) → host-waiting. The guest is already
+              // connected; the host will see them the moment they open the greenroom.
+              <p class="gs-host-waiting" data-state="host-waiting" role="status">
+                You're in — waiting for the host to start. They'll see you as soon as they arrive.
+              </p>
+            )
           ) : pubState === "reconnecting" ? (
             <p class="gs-reconnecting">Connection dropped — reconnecting to the greenroom…</p>
           ) : (
@@ -218,6 +239,11 @@ export function GuestSession({
             onClick={onToggleHand}
           >
             {handRaised ? "Lower hand" : "Raise hand"}
+          </button>
+          {/* Voluntary leave (DESIGN §6 guest-left): always enabled — the guest must be able to step
+              out even while connecting/reconnecting. Routes to the guest-left screen with a rejoin. */}
+          <button type="button" class="gs-leave" onClick={onLeave}>
+            Leave the greenroom
           </button>
         </div>
       </div>

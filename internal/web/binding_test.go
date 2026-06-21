@@ -170,6 +170,67 @@ func TestBinding_LiveRebindReachesSource(t *testing.T) {
 	}
 }
 
+// M5.5/AC-2 (DESIGN §6 guest-left): a DELIBERATE leave — the guest clicks "Leave the greenroom" —
+// vacates the bound cam slot IMMEDIATELY via the out-of-band POST /p/{token}/leave, so the OBS source
+// re-routes to empty at once instead of the transient grace-retain a bare socket drop gets (D-40).
+// Exercised in the HARDEST case (codex): the guest's signaling socket has already DROPPED (a
+// reconnect), so an in-band WS frame could not be sent — the slot is grace-held — yet the deliberate
+// leave must still vacate it now, not hold the departed guest's frozen frame for the whole window.
+func TestBinding_DeliberateLeaveVacatesSlotImmediately(t *testing.T) {
+	h := newWSHarness(t, wsHarnessOpts{})
+	host, cookie := h.seedHost(t, "leaver", store.HostActive)
+	stream := h.seedStream(t, host.ID)
+	passRaw, pass := h.seedPass(t, stream.ID, store.RoleGuest, store.PassSent, nil)
+	srcRaw, _ := h.seedCamSlot(t, host.ID, 1)
+	if _, err := h.store.StartSession(context.Background(), stream.ID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	gc := h.dialOK(t, "pass="+passRaw, nil)
+	defer gc.CloseNow()
+	_ = wsReadFrame(t, gc) // the guest's roster, confirming its join completed
+
+	sc := h.dialOK(t, "src="+srcRaw, http.Header{"Origin": {"null"}})
+	defer sc.CloseNow()
+	if f := wsReadFrame(t, sc); f.T != "slot-unbound" {
+		t.Fatalf("source first frame = %q, want slot-unbound", f.T)
+	}
+
+	// Bind the guest live → the source renders the guest.
+	req, _ := http.NewRequest(http.MethodPut, h.srv.URL+"/api/passes/"+pass.ID+"/slot", strings.NewReader(`{"slot":"cam-1"}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	_ = resp.Body.Close()
+	if f := readFrameOfType(t, sc, "slot-rebind"); f.OccupantPeerID != pass.ID {
+		t.Fatalf("slot-rebind occupant = %q, want the guest %q", f.OccupantPeerID, pass.ID)
+	}
+
+	// The guest's socket DROPS (transient) — the slot is now grace-held; the source keeps the frozen
+	// frame and gets no vacate frame yet.
+	_ = gc.Close(websocket.StatusNormalClosure, "drop")
+
+	// The guest deliberately leaves DURING the reconnect, out-of-band. The slot must vacate now: the
+	// source re-routes to empty. If the leave couldn't reach the server while the socket is down, the
+	// slot would stay grace-bound and no unbound would arrive within the read deadline (≪ the grace
+	// window) — failing this read.
+	lreq, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/p/"+passRaw+"/leave", nil)
+	lresp, err := http.DefaultClient.Do(lreq)
+	if err != nil {
+		t.Fatalf("POST leave: %v", err)
+	}
+	_ = lresp.Body.Close()
+	if lresp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST leave = %d, want 204", lresp.StatusCode)
+	}
+	if f := readFrameOfType(t, sc, "slot-unbound"); f.T != "slot-unbound" {
+		t.Fatalf("after a deliberate leave during a reconnect, source frame = %q, want slot-unbound", f.T)
+	}
+}
+
 // codex/AC-6 (D-40): a slot binding persisted BEFORE the guest connects (or surviving a
 // reconnect) is replayed as a live rebind when the guest joins — so /s/{slot} re-routes to it
 // without the host re-binding. The OBS source can connect first and still pick up the occupant.

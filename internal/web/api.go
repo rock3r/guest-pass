@@ -275,8 +275,12 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 	raw := chi.URLParam(r, "token")
 	pass, err := a.store.GetPassByTokenHash(r.Context(), a.hasher.Hash(raw))
 	if errors.Is(err, store.ErrNotFound) {
-		// Unknown or rotated token. Constant-time compare upstream means no timing oracle.
-		http.Error(w, "pass not found", http.StatusNotFound)
+		// Unknown or ROTATED token (constant-time compare upstream → no timing oracle, and the two are
+		// indistinguishable). The status stays 404 — an unknown link is not-found, the long-standing
+		// contract — but a navigation gets the friendly link-off screen instead of a bare 404: to a
+		// guest a dead /p/ link reads as "turned off", not "page missing" (DESIGN §6 link-off).
+		title, page := passRevokedContent()
+		a.rd.renderErrorScreen(w, r, http.StatusNotFound, "pass not found", title, page)
 		return
 	}
 	if err != nil {
@@ -284,7 +288,15 @@ func (a *apiServer) passLanding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if passRetired(pass) {
-		http.Error(w, "this invite link has been turned off", http.StatusGone)
+		// Distinguish the designed states (DESIGN §6): a REVOKED pass → link-off; an expired/past-
+		// deadline pass → the expired screen (with the D-5 grace copy). Both are 410 Gone.
+		if pass.Status == store.PassRevoked {
+			title, page := passRevokedContent()
+			a.rd.renderErrorScreen(w, r, http.StatusGone, "this invite link has been turned off", title, page)
+		} else {
+			title, page := passExpiredContent()
+			a.rd.renderErrorScreen(w, r, http.StatusGone, "this invite has expired", title, page)
+		}
 		return
 	}
 	stream, err := a.store.GetStream(r.Context(), pass.StreamID)
@@ -347,6 +359,37 @@ func (a *apiServer) passEnter(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrNotFound) || (err == nil && passRetired(cur)) {
 			http.Error(w, "this invite link has been turned off", http.StatusGone)
 			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// passLeave handles POST /p/{token}/leave — the guest's voluntary "Leave the greenroom" (DESIGN §6
+// guest-left). It vacates the guest's OWN cam slot in the live room OUT-OF-BAND, so a deliberate
+// leave is honoured even when the signaling socket is down (a leave during a reconnect): the WS-close
+// path alone looks like a transient drop and would grace-hold the slot — and the OBS source's frozen
+// frame — for the whole window (D-40). Token-authed (no host session), idempotent, and opaque: an
+// unknown/retired token or an offline host is a quiet 204 no-op, never revealing room state.
+func (a *apiServer) passLeave(w http.ResponseWriter, r *http.Request) {
+	raw := chi.URLParam(r, "token")
+	pass, err := a.store.GetPassByTokenHash(r.Context(), a.hasher.Hash(raw))
+	if errors.Is(err, store.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent) // nothing to vacate; don't reveal whether the token exists
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pass")
+		return
+	}
+	if a.hub != nil {
+		if stream, err := a.store.GetStream(r.Context(), pass.StreamID); err == nil {
+			// Serialize the vacate with the /ws join-replay + host rebinds (D-20), exactly as the
+			// host-side revoke does, so a leave racing a concurrent rejoin can't leave a stale binding.
+			unlock := a.binds.lock(stream.HostID)
+			if room := a.hub.RoomIfLive(stream.HostID); room != nil {
+				room.VacateOccupant(signaling.PeerID(pass.ID))
+			}
+			unlock()
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
