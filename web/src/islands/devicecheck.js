@@ -334,6 +334,8 @@ function DeviceCheck() {
   async function startCheck() {
     if (requestingRef.current) return; // a getUserMedia is already in flight
     enteringRef.current = false; // a fresh check (incl. a retry) is back to a switchable preview
+    setErrorKind(""); // a fresh attempt clears any prior failure kind (so a later generic failure
+    //                    can't inherit a stale "blocked"/"no-devices" screen)
     if (!webrtcSupported()) {
       setErrorKind("unsupported");
       setPhase("error");
@@ -1092,6 +1094,17 @@ function DeviceCheck() {
   // while the stream is live (D-40). Mirrors retryNetwork's teardown, but stops the camera too.
   function leave() {
     if (sessionRef.current) {
+      // Tell the server this is a DELIBERATE leave so it vacates our cam slot NOW (terminal), instead
+      // of grace-holding it — and the OBS source frozen frame — for the whole window after a bare
+      // close (D-40). Best-effort: only a live socket can carry it; otherwise the grace timer reclaims
+      // the slot. WebSocket flushes this queued frame before the close handshake, so it lands first.
+      if (pubStateRef.current === "live") {
+        try {
+          sessionRef.current.send({ t: "leave" });
+        } catch {
+          /* socket already gone — the server's grace timer vacates the slot */
+        }
+      }
       sessionRef.current.close();
       sessionRef.current = null;
     }

@@ -295,6 +295,15 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		if id.role == "host" {
 			room.Unbind(signaling.SlotID(f.Slot))
 		}
+	case "leave":
+		// Voluntary departure (DESIGN §6 guest-left): the participant chose to go, so vacate any cam
+		// slot they hold IMMEDIATELY — a TERMINAL leave, not the transient grace-retain a bare socket
+		// drop gets (D-40). Without it the OBS source would hold their frozen frame for the whole grace
+		// window after they deliberately left. VacateOccupant keys off the AUTHENTICATED id, so a peer
+		// can only ever vacate ITSELF. The socket close that follows runs the normal (now no-op) Leave.
+		if !id.isSource() {
+			room.VacateOccupant(id.peer)
+		}
 	case "obs":
 		// On-air/broadcast reflection (D-24) comes from OBS source pages only (EN-7).
 		if !id.isSource() {
