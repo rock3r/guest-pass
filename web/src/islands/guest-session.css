@@ -10,7 +10,7 @@
 /* Reconnecting overlay (AC-13): shown while a dropped signaling socket auto-retries. */
 .gs-reconnecting {
   font-weight: 600;
-  color: #8a5a1f;
+  color: var(--warn);
 }
 
 /* Terminal terminate-routed error screen (AC-13/EN-9): kicked / expired / revoked / … */
@@ -63,7 +63,7 @@
 .gs-lock {
   margin: 0;
   font-weight: 600;
-  color: #8a1f1f;
+  color: var(--danger);
 }
 
 /* Screenshare control (EN-23/AC-9/AC-13): shown when the host grants can_screen. The button drives
@@ -95,10 +95,10 @@
 .gs-screen-status {
   margin: 0;
   font-weight: 600;
-  color: #1f6b3a;
+  color: var(--good);
 }
 .gs-screen[data-screen-state="live"] .gs-screen-status {
-  color: #8a1f1f;
+  color: var(--danger);
 }
 
 .gs-hand {

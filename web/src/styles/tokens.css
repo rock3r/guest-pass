@@ -3,12 +3,63 @@
    down-level path so the SPIKE-1 manual Safari check has something to validate
    (esbuild's color-mix() lowering has known Safari bugs, EN-13). */
 :root {
-  --paper: #eef0e6;
-  --ink: #1d2218;
+  --paper: #eef0e6; /* page surface */
+  --surface: #fafbf4; /* card/panel surface, a touch lighter than the page */
+  --line: #d4d9c2; /* hairline borders on cards + inputs */
+  --ink: #1d2218; /* primary text */
+  --muted: #59614c; /* secondary text */
   --accent: #b8e03a;
   /* STATIC inputs so esbuild actually computes + down-levels this (it can't lower a
      color-mix through var()); this is the output the manual Safari check inspects. */
   --accent-ink: color-mix(in srgb, #b8e03a 70%, #1d2218);
+  /* Semantic status text, readable on the page surface in each theme. */
+  --danger: #a3261c;
+  --warn: #8a5a1f;
+  --good: #1f6a3a;
+  color-scheme: light;
+}
+
+/* The page itself consumes the tokens, so flipping them themes EVERY base-shell page — public
+   (base.html) and host (appbase.html) alike. Without this the tokens would be defined but unused on
+   pages whose <body> has no themed background/text (codex). OBS pages don't load this bundle. */
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Dark mode (D-9). The accent stays the same bright celadon green and --accent-ink stays the dark
+   on-accent text (every --accent-ink use sits on an --accent background), so buttons/badges read
+   identically; the surface/text/line/status tokens flip to the v2 design's control-room green-black
+   palette. Two triggers:
+     1. an explicit choice — the server stamps <html data-theme="dark"> from the gp_theme cookie
+        (no-FOUC, applied before first paint), which always wins;
+     2. the OS preference — prefers-color-scheme, but ONLY when the user hasn't explicitly chosen
+        light (:not([data-theme="light"])), so an explicit light choice survives an OS-dark setting.
+   OBS source pages (obs.html) are exempt — they are transparent, theme-agnostic overlays. */
+:root[data-theme="dark"] {
+  --paper: #15180f;
+  --surface: #1d2115;
+  --line: #2e3420;
+  --ink: #eef1df;
+  --muted: #b4bb9e;
+  --danger: #f0654f;
+  --warn: #dca62f;
+  --good: #58c084;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15180f;
+    --surface: #1d2115;
+    --line: #2e3420;
+    --ink: #eef1df;
+    --muted: #b4bb9e;
+    --danger: #f0654f;
+    --warn: #dca62f;
+    --good: #58c084;
+    color-scheme: dark;
+  }
 }
 
 .gp-probe {
@@ -19,4 +70,24 @@
   padding: 8px 14px;
   font: inherit;
   cursor: pointer;
+}
+
+/* Dark-mode toggle (D-9). Styled from the theme tokens so it reads correctly in both modes. */
+.theme-toggle {
+  margin-top: 8px;
+}
+.theme-btn {
+  font: inherit;
+  font-size: 0.85em;
+  padding: 4px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.theme-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
 }

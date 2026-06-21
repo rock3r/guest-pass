@@ -93,8 +93,8 @@ body.app {
 }
 
 .btn-danger {
-  border-color: #a3261c;
-  color: #a3261c;
+  border-color: var(--danger);
+  color: var(--danger);
   background: transparent;
 }
 
@@ -122,7 +122,7 @@ body.app {
   padding: 12px 14px;
   border: 1px solid var(--ink);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .stream-meta {
@@ -187,7 +187,7 @@ body.app {
   padding: 8px 10px;
   border: 1px solid var(--ink);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -211,7 +211,7 @@ body.app {
 }
 
 .form-error {
-  color: #a3261c;
+  color: var(--danger);
   font-weight: 600;
 }
 
@@ -256,7 +256,7 @@ body.app {
   border: 1px solid var(--ink);
   border-radius: 8px;
   padding: 4px 6px;
-  background: #fff;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -341,7 +341,7 @@ body.app {
 .live-pill {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #a3271f;
+  color: var(--danger);
   white-space: nowrap;
 }
 .live-note {
@@ -370,13 +370,13 @@ body.app {
   opacity: 1;
   font-weight: 600;
   border-color: var(--ink);
-  background: #fff;
+  background: var(--surface);
 }
 
 .issued {
   border: 1px solid var(--ink);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   padding: 12px 14px;
   margin-bottom: 20px;
 }
@@ -426,7 +426,7 @@ body.app {
   padding: 6px 8px;
   border: 1px solid var(--ink);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -468,7 +468,7 @@ body.app {
 .slot-card {
   border: 1px solid var(--ink);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -499,7 +499,7 @@ body.app {
 .slot-onair[data-onair="on-air"] {
   background: #a3261c;
   color: #fff;
-  border-color: #a3261c;
+  border-color: var(--danger);
   opacity: 1;
 }
 
