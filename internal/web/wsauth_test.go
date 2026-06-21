@@ -766,7 +766,9 @@ func TestWS_OneConnPerIdentityEviction(t *testing.T) {
 	second := h.dialOK(t, "pass="+raw, nil)
 	defer second.CloseNow()
 
-	// The first connection receives terminate:reconnect before its socket closes.
+	// The first (displaced) connection receives the TERMINAL terminate:displaced before its socket
+	// closes — NOT a transient reconnect — so an auto-reconnecting client stops instead of
+	// ping-ponging with the newcomer (the older tab yields; the active tab stays).
 	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
 	defer cancel()
 	for {
@@ -775,8 +777,8 @@ func TestWS_OneConnPerIdentityEviction(t *testing.T) {
 			t.Fatalf("evicted conn closed before a terminate frame: %v", err)
 		}
 		if f.T == "terminate" {
-			if f.Reason != "reconnect" {
-				t.Fatalf("terminate reason = %q, want reconnect", f.Reason)
+			if f.Reason != signaling.TerminateDisplaced {
+				t.Fatalf("terminate reason = %q, want %q", f.Reason, signaling.TerminateDisplaced)
 			}
 			return
 		}

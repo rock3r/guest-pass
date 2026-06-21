@@ -14,6 +14,7 @@
  * @type {Record<string,{title:string, body:string}>}
  */
 export const TERMINAL_REASONS = {
+  displaced: { title: "Opened in another tab", body: "This page is now open in another tab or window. This one has been disconnected — close it and use the other." },
   kicked: { title: "You were removed", body: "The host removed you from the greenroom." },
   expired: { title: "Your pass has expired", body: "This guest pass is past its window. Ask the host for a new link." },
   revoked: { title: "Your pass was revoked", body: "This guest pass is no longer valid. Ask the host for a new link." },

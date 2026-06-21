@@ -307,7 +307,15 @@ not universal (EN-19).
   (exponential-backoff) signaling WS.
 - Peers are keyed by **stable `pass_id`**, so an OBS slot source reattaches to the
   same occupant automatically — the host never edits OBS mid-show (EN-3). The room
-  persists through host disconnects; the host auto-reconnects and resumes (D-40).
+  persists through host disconnects; the host **greenroom auto-reconnects and resumes**
+  (D-40/AC-4) — it runs on the same `ReconnectingSession` (exponential-backoff retry,
+  terminal-vs-transient routing) as the guest, showing a recoverable "reconnecting"
+  banner on a drop rather than an error screen, and rebuilding the grid from the fresh
+  roster on recovery. Co-hosts have their own sockets (they keep moderating during the
+  host's gap) and can never assume host — the room is keyed to the host id server-side,
+  so there is no host-handoff path. Only a terminal `session-ended` (the host ended it,
+  or an admin force-ended it, D-27) routes the greenroom to the "ended" screen;
+  exhausted reconnects (RF-22 cap) route to the error screen.
 - **Slot-binding grace across a transient guest drop (D-40/D-M5.5-3).** A guest's
   socket close is treated as transient: the room **retains** its cam-slot binding
   for a grace window (`SLOT_GRACE_WINDOW`, default 45s) instead of vacating — **no
@@ -1140,7 +1148,7 @@ flat `Frame` envelope can carry either without a string-vs-object collision.
 // Terminate-reason taxonomy (EN-9) — sent BEFORE close so the client routes correctly
 {"t":"terminate","reason":"reconnect"}                    // TRANSIENT → retry with backoff (keyed by pass_id)
 {"t":"terminate","reason":
-   "kicked"|"expired"|"revoked"|"session-ended"|"token-rotated"}   // TERMINAL → stop, route to error screen
+   "displaced"|"kicked"|"expired"|"revoked"|"session-ended"|"token-rotated"}   // TERMINAL → stop, route to error screen
 ```
 
 ### Roster projection (EN-8)
@@ -1237,8 +1245,8 @@ The server emits `terminate` with a reason, **then closes**.
 
 | Class | Reasons | Client action |
 |---|---|---|
-| **Transient** | `reconnect` (and network blips) | Reconnect with exponential backoff, re-keyed by stable `pass_id` (D-40) so OBS sources auto-reattach. |
-| **Terminal** | `kicked`, `expired`, `revoked`, `session-ended`, `token-rotated` | Stop reconnection; route to the matching error screen — `kicked` → "removed by host", `expired`/`revoked` → pass error screens, `session-ended` → "stream ended", `token-rotated` → re-auth (e.g. after D-22 slot-token rotation). |
+| **Transient** | `reconnect` (server drain) and network blips | Reconnect with exponential backoff, re-keyed by stable `pass_id` (D-40) so OBS sources auto-reattach. |
+| **Terminal** | `displaced`, `kicked`, `expired`, `revoked`, `session-ended`, `token-rotated` | Stop reconnection; route to the matching error screen — `displaced` → "opened in another tab" (a SECOND live connection for this identity took over, EN-16; the older tab stops so the two don't reconnect-war — only the duplicate-identity handoff, never a genuine reconnect, sends this), `kicked` → "removed by host", `expired`/`revoked` → pass error screens, `session-ended` → "stream ended", `token-rotated` → re-auth (e.g. after D-22 slot-token rotation). |
 
 **No-frame fallback (RF-22).** Real WS failures often close without a final frame.
 Define close-code conventions; **absence of a `terminate` frame ⇒ treat as transient**

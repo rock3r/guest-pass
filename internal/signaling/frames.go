@@ -163,7 +163,8 @@ const (
 // pass_id); a TERMINAL reason stops and routes to the matching error screen. An ABSENT terminate
 // frame is treated as transient unless reconnect-time validation is terminal (RF-22).
 const (
-	TerminateReconnect    = "reconnect"     // TRANSIENT — server drain / eviction / network blip
+	TerminateReconnect    = "reconnect"     // TRANSIENT — server drain / network blip (reconnect, keyed by pass_id)
+	TerminateDisplaced    = "displaced"     // TERMINAL — a SECOND live connection for this identity took over (one-conn-per-identity, EN-16): the older tab/window stops instead of reconnect-warring with the newer one
 	TerminateKicked       = "kicked"        // TERMINAL — removed by host (D-25)
 	TerminateExpired      = "expired"       // TERMINAL — pass past its deadline
 	TerminateRevoked      = "revoked"       // TERMINAL — pass revoked

@@ -1,8 +1,7 @@
 import "./greenroom.css";
 import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
-import { Room } from "../rtc/room.js";
-import { isTerminal } from "../rtc/terminate.js";
+import { ReconnectingSession } from "../rtc/session.js";
 import { PeerLink } from "../rtc/peerlink.js";
 import { Tile, FORCE_FRAME } from "./grid-tile.js";
 
@@ -168,8 +167,6 @@ function Greenroom() {
   const bindSeqRef = useRef({ g: 0, pass: {}, slot: {} });
 
   useEffect(() => {
-    const room = new Room(""); // host: the session cookie authenticates the WS
-    roomRef.current = room;
     fetchCeiling(); // populate the quality-ceiling control if a session is already live
 
     // syncTiles rebuilds the rendered tiles from the current entries + streams, in a stable id
@@ -187,6 +184,7 @@ function Greenroom() {
 
     function ensureLink(id) {
       if (linksRef.current.has(id)) return; // keep the live link across roster updates
+      const room = roomRef.current; // the CURRENT room (re-pointed on every reconnect, D-40)
       const link = new PeerLink(room, id, room.iceServers);
       linksRef.current.set(id, link);
       link.pc.ontrack = (e) => {
@@ -250,6 +248,7 @@ function Greenroom() {
     // live render both read its track). Kept across roster updates so a re-select doesn't churn links.
     function ensureScreenLink(id) {
       if (screenLinksRef.current.has(id)) return;
+      const room = roomRef.current; // the CURRENT room (re-pointed on every reconnect, D-40)
       const link = new PeerLink(room, id, room.iceServers, "screen");
       screenLinksRef.current.set(id, link);
       link.pc.ontrack = (e) => {
@@ -269,10 +268,19 @@ function Greenroom() {
       screenStreamsRef.current.delete(id);
     }
 
-    // The host-only screenshare roster (D-21): a FULL snapshot of the preview pool + the live sharer.
-    // Open a screen link to every sharer (pool ∪ live), drop links for sharers that left, and rebuild
-    // the rail. An omitted previews/live means "empty"/"none" (full-state snapshot, not a delta).
-    room.on("screen-roster", (f) => {
+    // setup wires this room's signaling handlers onto a (re)connected socket. ReconnectingSession
+    // calls it on every (re)connect with a fresh Room (D-40), so roomRef + the PeerLinks always
+    // speak to the CURRENT socket. The host's live room persists server-side across the drop, so a
+    // reconnect resumes the same session and the roster rebuilds the grid. Co-hosts have their OWN
+    // sockets — they keep moderating in the gap — and can never assume host: the room is keyed to
+    // the host id server-side, so there is no host-handoff path.
+    function setup(room) {
+      roomRef.current = room;
+
+      // The host-only screenshare roster (D-21): a FULL snapshot of the preview pool + the live sharer.
+      // Open a screen link to every sharer (pool ∪ live), drop links for sharers that left, and rebuild
+      // the rail. An omitted previews/live means "empty"/"none" (full-state snapshot, not a delta).
+      room.on("screen-roster", (f) => {
       const pool = f.previews || [];
       const live = f.live || "";
       screenPoolRef.current = pool;
@@ -365,15 +373,12 @@ function Greenroom() {
         }
       }
     });
-    // Capture a TERMINAL {t:terminate} reason (EN-9) BEFORE the socket closes, so onClose can tell a
-    // session-ended teardown (the host ended it, or an admin force-ended it via D-27) apart from a
-    // recoverable drop. The server sends the frame, then closes — it is dispatched before onclose.
-    let endedReason = "";
-    room.on("terminate", (f) => {
-      endedReason = f.reason;
-    });
-    room.ready.then(() => setState((s) => (s === "connecting" ? "live" : s))).catch(() => setState("error"));
-    room.onClose(() => {
+    } // end setup(room)
+
+    // teardown closes the per-room PeerLinks and clears the rendered grid so the next (re)connect
+    // rebuilds it from the fresh roster. ReconnectingSession runs it before every reconnect and on
+    // close/unmount, so no dead pc or stale tile survives a drop.
+    function teardown() {
       for (const link of linksRef.current.values()) link.close();
       for (const link of screenLinksRef.current.values()) link.close();
       linksRef.current.clear();
@@ -386,17 +391,27 @@ function Greenroom() {
       setTiles([]);
       setScreenTiles([]);
       setScreenLive("");
-      // A terminal session-ended teardown routes to the "ended" screen (no reconnect); any other
-      // close (a bare drop) is a recoverable "error". The greenroom holds no reconnect loop, so
-      // either way it stops here — but the host sees WHY rather than a silently-empty grid.
-      setState(isTerminal(endedReason) ? "ended" : "error");
-    });
+    }
 
-    return () => {
-      for (const link of linksRef.current.values()) link.close();
-      for (const link of screenLinksRef.current.values()) link.close();
-      room.close();
-    };
+    // A transient drop AUTO-RECONNECTS (D-40/AC-4): show the reconnecting banner, not an error, and
+    // resume the same live session on recovery. Only a TERMINAL end stops for good — a session-ended
+    // teardown (the host ended it, or an admin force-ended it via D-27) shows the "ended" screen, and
+    // exhausted reconnects ("unreachable", the RF-22 cap) show the error screen. The host is never
+    // kicked/expired/revoked, so those reasons never reach its own connection.
+    const session = new ReconnectingSession({
+      query: "", // the host session cookie authenticates the WS
+      setup,
+      teardown,
+      onState: (s) =>
+        setState((prev) =>
+          prev === "ended" || prev === "error" || prev === "displaced" ? prev : s === "live" ? "live" : "reconnecting",
+        ),
+      // displaced (a second greenroom tab took over, EN-16) stops THIS tab so the two don't
+      // reconnect-war; unreachable (RF-22 cap) shows the error screen; any other terminal end
+      // (session-ended) shows the "ended" screen.
+      onTerminal: (reason) => setState(reason === "displaced" ? "displaced" : reason === "unreachable" ? "error" : "ended"),
+    });
+    return () => session.close();
   }, []);
 
   // Seed picker overrides from the host's PERSISTED bindings on load (codex): a pre-live bind is
@@ -621,9 +636,10 @@ function Greenroom() {
 
   return (
     <div class="greenroom" data-state={state}>
-      {/* Teardown banners (M5.5): a TERMINAL session-ended teardown — the host ended the session, or
-          an admin force-ended it (D-27) — shows a clear "ended" screen instead of a silently-empty
-          grid; a bare drop shows a recoverable "connection lost" notice. */}
+      {/* Connection banners (M5.5/AC-4): a transient drop AUTO-RECONNECTS, showing a recoverable
+          "reconnecting" notice while the live session keeps running server-side (D-40); a TERMINAL
+          session-ended teardown — the host ended the session, or an admin force-ended it (D-27) —
+          shows the "ended" screen; only exhausted reconnects fall to the "error" screen. */}
       {state === "ended" ? (
         <div class="gr-ended" role="alert">
           <h2 class="gr-ended-title">This session has ended</h2>
@@ -632,9 +648,23 @@ function Greenroom() {
             the session yourself, or when an administrator ends it.
           </p>
         </div>
+      ) : state === "displaced" ? (
+        <div class="gr-error" role="alert">
+          <p class="gr-error-body">
+            The greenroom is now open in another tab or window. This tab has been disconnected to
+            avoid two greenrooms fighting over the connection — close it and use the other one.
+          </p>
+        </div>
+      ) : state === "reconnecting" ? (
+        <div class="gr-reconnecting" role="status">
+          <p class="gr-reconnecting-body">
+            Reconnecting to the greenroom… your live session is still running, so guests stay on the
+            air — this will recover on its own.
+          </p>
+        </div>
       ) : state === "error" ? (
         <div class="gr-error" role="alert">
-          <p class="gr-error-body">The greenroom lost its connection. Reload the page to reconnect.</p>
+          <p class="gr-error-body">The greenroom couldn’t reconnect after several tries. Reload the page to try again.</p>
         </div>
       ) : null}
       <div class="gr-toolbar">
@@ -698,9 +728,10 @@ function Greenroom() {
       ) : null}
       <div class="greenroom-grid" data-state={state} data-count={tiles.length}>
         {tiles.length === 0 ? (
-          // Once ended/dropped, the teardown banner above already explains the empty grid — the
-          // "waiting for guests" hint would contradict it, so suppress it in those states.
-          state === "ended" || state === "error" ? null : (
+          // Once ended/dropped/reconnecting, the banner above already explains the empty grid — the
+          // "waiting for guests" hint would contradict it, so suppress it in those states (the grid
+          // rebuilds from the fresh roster once a reconnect recovers).
+          state === "ended" || state === "error" || state === "reconnecting" || state === "displaced" ? null : (
             <p class="gr-empty" data-state={state}>
               Waiting for guests to join…
             </p>

@@ -180,10 +180,21 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			return
 		}
 		if old := conns[id]; old != nil {
-			// Tell the evicted client to reconnect (EN-9 transient) before closing
-			// its channel, so a duplicate identity is a clean handover.
+			// A SECOND live connection for this identity took over (EN-16). Tell the evicted client it
+			// was DISPLACED (terminal) — NOT to reconnect: an auto-reconnecting client (the greenroom /
+			// guest ReconnectingSession) would otherwise retry, evict the newcomer, and the two tabs
+			// would ping-pong forever (codex). A genuine reconnect never hits this path — the old socket
+			// has already closed and left before the new one joins — so only a real duplicate is told.
+			//
+			// Best-effort, NON-blocking send then close — the same shape Leave uses. We must NOT
+			// budget-wait to flush the frame: that keeps the displaced socket (and its reader, which
+			// dispatches under id.peer) alive longer, briefly letting a stalled old tab race the active
+			// one — a worse violation of one-conn-per-identity than a missed banner (codex). On the rare
+			// full-buffer case the frame is dropped and the old tab sees a bare close; it then reconnects
+			// onto a FRESH empty socket and is re-displaced, delivering the frame that cycle — so the war
+			// is bounded to one round, not infinite.
 			select {
-			case old.out <- Frame{T: "terminate", Reason: TerminateReconnect}:
+			case old.out <- Frame{T: "terminate", Reason: TerminateDisplaced}:
 			default:
 			}
 			close(old.out)
