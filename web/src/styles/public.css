@@ -1,0 +1,269 @@
+/* Public surfaces — the server-rendered, no-JS pages rendered into base.html: the marketing
+   landing, host sign-in, the guest pass/invite landing, the report-an-invite form, and the
+   error/state screens (M5.6 PR-3, AC-4). Ported from the v2 design (.plans/designs/screens-auth.jsx,
+   screens-states.jsx, screens-marketing.jsx). Layout/page chrome only — the buttons, cards, inputs,
+   badges, and logo come from components.css; tokens + base type from tokens.css. CSP forbids inline
+   styles, so every bit of the prototypes' inline styling lives here as classes. Rides the app bundle
+   (imported from app.js); the OBS bundle never sees it. */
+
+/* ---- Public shell: header + sticky-footer column ---- */
+/* The token layer deliberately skips a global box-sizing reset, so every public container that pairs
+   width:100% with horizontal padding needs border-box or it renders viewport-width + padding and
+   overflows a phone screen (codex). Scoped to the public layout boxes — the device-check island that
+   mounts inside .pass keeps its own box model. */
+.site-header,
+.hero,
+.signin,
+.pass,
+.report,
+.error-screen {
+  box-sizing: border-box;
+}
+.site {
+  /* .site is the <body>; the token layer skips the global margin reset, so clear the UA's default
+     8px body margin before relying on min-height:100vh — otherwise the page is 100vh + 16px and gets
+     a spurious vertical scrollbar with the sticky footer pushed below the fold (codex). */
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 18px 28px;
+}
+.site-header-aside {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.site-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.site-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--line-2);
+  padding: 22px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  /* --ink-2, not the design's faint --ink-3: license/source text is real content and --ink-3 on
+     --bg is only ~2.8:1 in light (fails AA). --ink-2 keeps it clearly secondary at 5.6:1. */
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.site-footer p {
+  max-width: 64ch;
+  margin: 0;
+}
+.site-footer a {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.site-footer a:hover {
+  color: var(--ink);
+}
+
+/* ---- Landing hero ---- */
+.hero {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 7vh 24px 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+.hero-eyebrow {
+  margin-bottom: 10px;
+}
+.hero h1 {
+  font-size: clamp(42px, 7vw, 66px);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.hero p {
+  color: var(--ink-2);
+  font-size: 17px;
+  line-height: 1.6;
+  max-width: 56ch;
+  margin: 0;
+}
+.hero .cta {
+  margin-top: 22px;
+}
+
+/* ---- Centered single-column pages (sign-in, pass, report, error) ---- */
+.signin,
+.pass,
+.report {
+  width: 100%;
+  margin: 0 auto;
+  padding: 4vh 24px 64px;
+}
+.signin {
+  max-width: 440px;
+  text-align: center;
+}
+.signin h1 {
+  font-size: 30px;
+  line-height: 1.1;
+  margin-bottom: 10px;
+}
+.signin p {
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0 0 26px;
+}
+.signin .cta {
+  width: 100%;
+}
+.signin .dev-note {
+  margin-top: 18px;
+  font-size: 13px;
+}
+.signin .dev-note a {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- Guest pass / invite landing ---- */
+.pass {
+  max-width: 560px;
+}
+.pass h1 {
+  font-size: clamp(28px, 5vw, 36px);
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+.pass > p {
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+.pass .privacy {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.pass .watch-live-note {
+  font-size: 14px;
+}
+.pass .watch-live {
+  color: var(--accent-press);
+  font-weight: 700;
+  text-decoration: none;
+}
+.pass .watch-live:hover {
+  text-decoration: underline;
+}
+.pass .report-link {
+  margin-top: 22px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.pass .report-link a {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pass .report-link a:hover {
+  color: var(--ink);
+}
+/* The device-check island mounts here; give it breathing room from the invite intro. */
+.pass #device-check {
+  margin-top: 22px;
+}
+
+/* ---- Report an invite ---- */
+.report {
+  max-width: 540px;
+}
+.report h1 {
+  font-size: 27px;
+  line-height: 1.1;
+  margin-bottom: 10px;
+}
+.report > p {
+  color: var(--ink-2);
+  font-size: 14.5px;
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+.report-error {
+  background: var(--bad-soft);
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  color: var(--danger);
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 18px;
+}
+.report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+/* Each row is a <label class="field"> wrapping a <span class="label"> + control. The mono micro-label
+   styling lives on the .label span only (components.css) — NOT on the <label>, so the nested
+   <select>/<textarea> don't inherit uppercase/letter-spaced mono and stay readable + editable (codex). */
+.report-form button[type="submit"] {
+  align-self: flex-start;
+}
+
+/* ---- Error / state screens (centered card, state-page pattern from screens-states.jsx) ---- */
+.error-screen {
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 8vh 24px 64px;
+  text-align: center;
+}
+.error-heading {
+  font-size: clamp(26px, 5vw, 32px);
+  line-height: 1.1;
+  margin: 0 0 14px;
+}
+.error-body {
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+.error-actions {
+  margin-top: 24px;
+}
+
+@media (max-width: 560px) {
+  .site-header,
+  .site-footer {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}

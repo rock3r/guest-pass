@@ -272,7 +272,13 @@ look (a real secondary button), `.btn-primary` → accent, `.btn-danger` → dan
 `.btn-quiet` → ghost. Dark flattens every button offset shadow (the refinement
 block is mirrored across the explicit `:root[data-theme="dark"]` selector and the
 OS `prefers-color-scheme` path, exactly as the token block is). The OBS bundle
-never imports it. Two triggers: the OS
+never imports it. The **public surfaces** (base.html shell + the landing/sign-in/
+guest-pass/report/error-&-state screens) are laid out by `web/src/styles/public.css`
+(M5.6 PR-3, also app-bundle-only) — page chrome only; their controls reuse the
+components. base.html carries a logo header + a sticky footer; the `.error-screen`
+state pages moved here from `app-host.css`. Real public text uses `--ink-2`, not the
+design's faint `--ink-3` (only ~2.8:1 on the light `--bg` — fails AA). Two triggers:
+the OS
 (`@media (prefers-color-scheme: dark)`, applied only when the user hasn't
 explicitly chosen light), and an explicit choice the **server** stamps onto
 `<html data-theme>` from the `gp_theme` cookie *before paint* (so there's no flash
@@ -475,7 +481,7 @@ web/
                       config from the join-ack + {t:ice-refresh}), getStats sampling
   src/islands/        device-check(+publish), greenroom grid, guest-session (APP entry)
   src/obs/            cam + screen source pages                (OBS esbuild entry — no fonts)
-  src/styles/         tokens.css (design tokens + base type) + components.css (shared components), from styles-v2.css (D-9)
+  src/styles/         tokens.css (tokens+base type) + components.css (shared components) + public.css (public-surface layout), from styles-v2.css (D-9)
   vendor/preact/      vendored Preact (MIT, committed)
   fonts/              OFL woff2 ×3 (+ each family's OFL.txt)   (EN-17)
   dist/               build output — GITIGNORED, go:embed at release (AD-7)
