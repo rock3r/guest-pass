@@ -129,8 +129,9 @@ func (rd *renderer) renderStatus(w http.ResponseWriter, r *http.Request, page st
 	data.ScriptIntegrity = rd.manifest["app.js"]
 	data.DevLogin = rd.devLogin
 	data.Nonce = NonceFromContext(r.Context())
-	data.Theme = themeChoice(r) // stamp the explicit dark-mode choice (no-FOUC); "" = follow OS
-	data.Path = r.URL.Path      // the toggle returns here after setting the cookie
+	data.Theme = themeChoice(r)    // stamp the explicit dark-mode choice (no-FOUC); "" = follow OS
+	data.Path = r.URL.RequestURI() // path + query, so the toggle returns to the SAME view — a query-
+	//                                driven page (e.g. ?tab=sources, ?error=…) keeps its state (codex).
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)

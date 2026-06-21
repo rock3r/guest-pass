@@ -39,6 +39,18 @@ func TestTheme_StampFromCookie(t *testing.T) {
 	}
 }
 
+// The toggle's return path preserves the query string, so toggling on a query-driven page (a tab,
+// a flash, a filter) returns to the SAME view rather than dropping the query (codex).
+func TestTheme_TogglePreservesQuery(t *testing.T) {
+	a := newAPIHarness(t)
+	req := httptest.NewRequest(http.MethodGet, "/?foo=bar", nil)
+	rec := httptest.NewRecorder()
+	a.h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), `name="next" value="/?foo=bar"`) {
+		t.Fatalf("toggle next must carry the query string (/?foo=bar), got:\n%s", rec.Body.String())
+	}
+}
+
 // The no-JS toggle (POST /theme) sets/clears the cookie and PRG-redirects back; the return path is
 // clamped to a same-origin path so it can't become an open redirect.
 func TestTheme_HandlerSetsClearsAndClampsRedirect(t *testing.T) {
