@@ -186,20 +186,18 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			// would ping-pong forever (codex). A genuine reconnect never hits this path — the old socket
 			// has already closed and left before the new one joins — so only a real duplicate is told.
 			//
-			// The displaced frame is TERMINAL, so it must NOT be silently dropped on a full out buffer
-			// (RF-16) — a stalled old tab that missed it would treat the close as a transient drop and
-			// reconnect-war. Deliver it with a budgeted blocking send, then close, in a SEPARATE
-			// goroutine so the room goroutine never blocks (the old conn is already detached from conns).
-			oldOut := old.out
-			go func() {
-				t := time.NewTimer(terminateBudget)
-				defer t.Stop()
-				select {
-				case oldOut <- Frame{T: "terminate", Reason: TerminateDisplaced}:
-				case <-t.C: // a genuinely wedged socket — give up; the close below still tears it down
-				}
-				close(oldOut)
-			}()
+			// Best-effort, NON-blocking send then close — the same shape Leave uses. We must NOT
+			// budget-wait to flush the frame: that keeps the displaced socket (and its reader, which
+			// dispatches under id.peer) alive longer, briefly letting a stalled old tab race the active
+			// one — a worse violation of one-conn-per-identity than a missed banner (codex). On the rare
+			// full-buffer case the frame is dropped and the old tab sees a bare close; it then reconnects
+			// onto a FRESH empty socket and is re-displaced, delivering the frame that cycle — so the war
+			// is bounded to one round, not infinite.
+			select {
+			case old.out <- Frame{T: "terminate", Reason: TerminateDisplaced}:
+			default:
+			}
+			close(old.out)
 		}
 		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
 		outs := st.join(id, role, name)
