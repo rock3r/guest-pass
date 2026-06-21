@@ -1,5 +1,5 @@
 {{define "base"}}<!doctype html>
-<html lang="en">
+<html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,6 +25,13 @@
 <p>GuestPass is free, open-source software licensed
 <a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noopener">AGPL-3.0</a>.
 <a href="{{.SourceURL}}" rel="noopener">Get the source for this running build</a> (AGPL §13).</p>
+{{/* Dark-mode toggle (D-9), no-JS: cycles System → Light → Dark via a PRG POST that sets gp_theme. */}}
+<form method="post" action="/theme" class="theme-toggle">
+<input type="hidden" name="next" value="{{.Path}}">
+{{if eq .Theme "dark"}}<button type="submit" name="theme" value="system" class="theme-btn" aria-label="Theme: Dark. Switch to system.">Theme: Dark</button>
+{{else if eq .Theme "light"}}<button type="submit" name="theme" value="dark" class="theme-btn" aria-label="Theme: Light. Switch to dark.">Theme: Light</button>
+{{else}}<button type="submit" name="theme" value="light" class="theme-btn" aria-label="Theme: follow system. Switch to light.">Theme: System</button>{{end}}
+</form>
 </footer>
 </body>
 </html>{{end}}

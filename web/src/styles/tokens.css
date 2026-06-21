@@ -9,6 +9,30 @@
   /* STATIC inputs so esbuild actually computes + down-levels this (it can't lower a
      color-mix through var()); this is the output the manual Safari check inspects. */
   --accent-ink: color-mix(in srgb, #b8e03a 70%, #1d2218);
+  color-scheme: light;
+}
+
+/* Dark mode (D-9). Only --paper (surface) and --ink (text) flip — the accent stays the same bright
+   celadon green and --accent-ink stays the dark on-accent text (every --accent-ink use sits on an
+   --accent background), so buttons/badges read identically in both themes. Dark values are the v2
+   design's control-room green-black palette (--bg / --ink). Two triggers:
+     1. an explicit choice — the server stamps <html data-theme="dark"> from the gp_theme cookie
+        (no-FOUC, applied before first paint), which always wins;
+     2. the OS preference — prefers-color-scheme, but ONLY when the user hasn't explicitly chosen
+        light (:not([data-theme="light"])), so an explicit light choice survives an OS-dark setting.
+   OBS source pages (obs.html) are exempt — they are transparent, theme-agnostic overlays. */
+:root[data-theme="dark"] {
+  --paper: #15180f;
+  --ink: #eef1df;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15180f;
+    --ink: #eef1df;
+    color-scheme: dark;
+  }
 }
 
 .gp-probe {
@@ -19,4 +43,24 @@
   padding: 8px 14px;
   font: inherit;
   cursor: pointer;
+}
+
+/* Dark-mode toggle (D-9). Styled from the theme tokens so it reads correctly in both modes. */
+.theme-toggle {
+  margin-top: 8px;
+}
+.theme-btn {
+  font: inherit;
+  font-size: 0.85em;
+  padding: 4px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.theme-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
 }

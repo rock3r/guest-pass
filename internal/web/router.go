@@ -88,6 +88,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/", rd.landing)
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
+	// Dark-mode choice (D-9): the no-JS footer toggle POSTs here to set/clear the gp_theme cookie,
+	// then PRG-redirects back. Public + CSRF-safe (SameSite-Lax cosmetic cookie; no state changed).
+	r.Post("/theme", themeHandler(cfg.Secure))
 
 	// The signaling-backed pages (greenroom, OBS source) and /ws all need the authenticator,
 	// store, token hasher, and hub. Without them (a minimal landing-only config) none of

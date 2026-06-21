@@ -30,6 +30,21 @@ type pageData struct {
 	Host            *navHost // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
 	Nav             string   // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
 	Data            any      // host-app pages only — the page-specific payload, rendered server-side (D-32)
+	Theme           string   // explicit dark-mode choice ("light"/"dark") from the gp_theme cookie; "" = follow OS (D-9)
+	Path            string   // the current request path — the theme toggle returns here after setting the cookie (PRG)
+}
+
+// themeCookie holds the host/guest's explicit dark-mode choice ("light"/"dark"); absent means follow
+// the OS (prefers-color-scheme). Read on every render to stamp <html data-theme> before paint (D-9).
+const themeCookie = "gp_theme"
+
+// themeChoice extracts the explicit theme from the request, accepting ONLY the two known values so a
+// tampered cookie can't inject an arbitrary data-theme attribute. Anything else → "" (follow OS).
+func themeChoice(r *http.Request) string {
+	if c, err := r.Cookie(themeCookie); err == nil && (c.Value == "light" || c.Value == "dark") {
+		return c.Value
+	}
+	return ""
 }
 
 // navHost is the authenticated host's identity surfaced in the host-app shell nav. It
@@ -114,6 +129,8 @@ func (rd *renderer) renderStatus(w http.ResponseWriter, r *http.Request, page st
 	data.ScriptIntegrity = rd.manifest["app.js"]
 	data.DevLogin = rd.devLogin
 	data.Nonce = NonceFromContext(r.Context())
+	data.Theme = themeChoice(r) // stamp the explicit dark-mode choice (no-FOUC); "" = follow OS
+	data.Path = r.URL.Path      // the toggle returns here after setting the cookie
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)

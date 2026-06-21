@@ -250,6 +250,18 @@ a known root element.
 Server-side authz (EN-6/EN-8) is the guard; the frontend never touches the DB or
 PII directly.
 
+**Dark mode (D-9, M5.5)** is no-FOUC and no-JS. The four theme tokens live in
+`web/src/styles/tokens.css`; dark flips only `--paper` (surface) + `--ink` (text)
+— the accent and its on-accent ink are theme-constant. Two triggers: the OS
+(`@media (prefers-color-scheme: dark)`, applied only when the user hasn't
+explicitly chosen light), and an explicit choice the **server** stamps onto
+`<html data-theme>` from the `gp_theme` cookie *before paint* (so there's no flash
+and JS is never required). The footer **toggle** is a plain form that POSTs
+`/theme` (cycles System → Light → Dark), sets/clears the SameSite-Lax cosmetic
+cookie, and PRG-redirects back to a path clamped same-origin. base.html (public)
+and appbase.html (host) both stamp + carry it; **OBS source pages are exempt** —
+they're transparent, theme-agnostic overlays rendered outside the base shell.
+
 > **One exception (M5.5):** the host **stream-detail** page carries a *minimal,
 > read-only* liveness poll. It computes its "● Live" pill once at render, so when a
 > session is force-ended out from under the page (admin D-27 cascade, idle reaper,
