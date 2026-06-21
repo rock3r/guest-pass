@@ -320,8 +320,20 @@
   cursor: pointer;
   vertical-align: middle;
 }
+/* Visually hidden but kept in the tab order + accessibility tree (NOT display:none, which would
+   drop the control from keyboard focus and stop .switch:focus-within ever firing — codex). The
+   label wrapper handles mouse toggles; the input stays Tab-focusable + Space-toggleable. */
 .switch input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 .switch .track {
   position: absolute;
