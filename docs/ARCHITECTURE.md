@@ -517,12 +517,14 @@ events fire at the default level.
 - **Never assert "backstage" as truth when the real state is unknown** — degrade to
   `status-unavailable`.
 
-**Live verification (D-29).** The host optionally links a Twitch channel (v1; YouTube → M5.5)
-to a stream; GuestPass best-effort scrapes public web endpoints server-side, zero-config, to feed
-the broadcast layer with a `live (verified on <platform>)` signal. SSRF-closed
-(channel identifier + platform, never a raw URL; fixed template; block
-private/loopback/link-local/metadata IPs; off-domain redirects refused). Degrades to
-`status-unavailable` on failure. Optional API-key verification → v1.1.
+**Live verification (D-29).** The host optionally links a **Twitch or YouTube** channel to a stream;
+GuestPass best-effort scrapes public web endpoints server-side, zero-config, to feed the broadcast
+layer with a `live (verified on <platform>)` signal. Twitch reads the channel page's schema.org
+`isLiveBroadcast`; YouTube fetches `/@handle/live` (following the on-domain redirect to the live
+watch page) and reads `liveBroadcastDetails.isLiveNow` — the broadcasting-now flag, so an ended/
+scheduled stream isn't mis-read as live. SSRF-closed (channel identifier + platform, never a raw URL;
+fixed template host; block private/loopback/link-local/metadata IPs; off-domain redirects refused).
+Degrades to `status-unavailable` on failure. Optional API-key verification → v1.1.
 
 Wiring (M5 PR-5/PR-6): the SSRF-closed verifier core lives in **`internal/livecheck`** (a
 platform-pluggable `Checker` with the validating dialer, a polite per-channel TTL cache, and
