@@ -1,78 +1,214 @@
-/* Design tokens (subset for SPIKE-1; full set copied verbatim from styles-v2.css
-   in M1b, D-9). The color-mix() below deliberately exercises esbuild's CSS
-   down-level path so the SPIKE-1 manual Safari check has something to validate
-   (esbuild's color-mix() lowering has known Safari bugs, EN-13). */
+/* Design tokens + base typography — ported from the v2 design (.plans/designs/styles-v2.css, D-9).
+   M5.6 PR-1 replaces the SPIKE-1 placeholder subset with the FULL system: the three self-hosted
+   fonts, the surface/ink/line/status/accent palette (light + dark, control-room green-black), and
+   the radii + spacing scales. The product's earlier token names (--paper, --muted, --danger) are
+   kept as ALIASES of the design's (--bg, --ink-2, --bad) so the not-yet-restyled component CSS keeps
+   working; later M5.6 PRs migrate those surfaces onto the design's components and token names. */
+
+/* Self-hosted fonts (NO third-party CDN — privacy, EN-20). Variable woff2, Latin subset; the
+   esbuild .woff2 file loader emits each as a hashed /static asset (same-origin → CSP font-src
+   'self'; not SRI-gated). font-display: swap avoids FOIT — text paints in the fallback, then swaps. */
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("../fonts/newsreader-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url("../fonts/schibsted-grotesk-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../fonts/spline-sans-mono-latin.woff2") format("woff2");
+}
+
 :root {
-  --paper: #eef0e6; /* page surface */
-  --surface: #fafbf4; /* card/panel surface, a touch lighter than the page */
-  --line: #d4d9c2; /* hairline borders on cards + inputs */
-  --ink: #1d2218; /* primary text */
-  --muted: #59614c; /* secondary text */
+  --font-display: "Newsreader", Georgia, serif;
+  --font-body: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, monospace;
+
   --accent: #b8e03a;
-  /* STATIC inputs so esbuild actually computes + down-levels this (it can't lower a
-     color-mix through var()); this is the output the manual Safari check inspects. */
-  --accent-ink: color-mix(in srgb, #b8e03a 70%, #1d2218);
-  /* Semantic status text, readable on the page surface in each theme. */
-  --danger: #a3261c;
-  --warn: #8a5a1f;
+  --accent-ink: #161a0e; /* dark text ON the bright accent — theme-constant */
+  --accent-press: color-mix(in srgb, var(--accent), var(--ink) 42%);
+  --accent-soft: color-mix(in srgb, var(--accent) 26%, var(--surface));
+
+  --r-base: 10px;
+  --r-xs: calc(var(--r-base) * 0.4);
+  --r-sm: calc(var(--r-base) * 0.7);
+  --r-md: var(--r-base);
+  --r-lg: calc(var(--r-base) * 1.4);
+  --r-xl: calc(var(--r-base) * 2);
+  --r-pill: 999px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+  --maxw: 1240px;
+
+  --edge: color-mix(in srgb, var(--ink) 78%, transparent);
+}
+
+/* Light — celadon paper */
+:root,
+:root[data-theme="light"] {
+  --bg: #eef0e6;
+  --bg-sunken: #e3e6d6;
+  --surface: #fafbf4;
+  --surface-2: #f0f2e5;
+  --surface-3: #e6e9d7;
+  --ink: #1d2218;
+  --ink-2: #59614c;
+  --ink-3: #8b9279;
+  --line: #d4d9c2;
+  --line-2: #bcc3a6;
+  --shadow-sm: 0 1px 0 rgba(29, 34, 24, 0.07);
+  --shadow-md: 4px 4px 0 rgba(29, 34, 24, 0.12);
+  --shadow-lg: 8px 8px 0 rgba(29, 34, 24, 0.14);
+  /* Status TEXT tokens kept at the darker, AA-readable values (not the design's lighter chip
+     values) — existing consumers render them as normal text on the page surface (.gs-reconnecting
+     → --warn, .gs-screen-status → --good, .btn-danger/error → --danger), where the lighter design
+     values would drop below 4.5:1 (codex). These darker values stay readable on the page AND on the
+     -soft chips, so later component PRs can use them either way. --bad is the design's chip-fill red,
+     kept distinct from the --danger text token. */
   --good: #1f6a3a;
+  --good-soft: #ddeede;
+  --warn: #8a5a1f;
+  --warn-soft: #f3ebcb;
+  --bad: #cf3f2e;
+  --bad-soft: #f8e1da;
+  --live: #e8402e;
+  --tile: #dde1cc;
+  --tile-2: #cfd4b9;
   color-scheme: light;
+  /* product-name aliases (track the design tokens; removed as surfaces migrate) */
+  --paper: var(--bg);
+  --muted: var(--ink-2);
+  --danger: #a3261c;
 }
 
-/* The page itself consumes the tokens, so flipping them themes EVERY base-shell page — public
-   (base.html) and host (appbase.html) alike. Without this the tokens would be defined but unused on
-   pages whose <body> has no themed background/text (codex). OBS pages don't load this bundle. */
-body {
-  background: var(--paper);
-  color: var(--ink);
-}
-
-/* Dark mode (D-9). The accent stays the same bright celadon green and --accent-ink stays the dark
-   on-accent text (every --accent-ink use sits on an --accent background), so buttons/badges read
-   identically; the surface/text/line/status tokens flip to the v2 design's control-room green-black
-   palette. Two triggers:
-     1. an explicit choice — the server stamps <html data-theme="dark"> from the gp_theme cookie
-        (no-FOUC, applied before first paint), which always wins;
-     2. the OS preference — prefers-color-scheme, but ONLY when the user hasn't explicitly chosen
-        light (:not([data-theme="light"])), so an explicit light choice survives an OS-dark setting.
-   OBS source pages (obs.html) are exempt — they are transparent, theme-agnostic overlays. */
+/* Dark — control-room green-black (flat depth: borders carry structure, no offset shadows).
+   Explicit choice (server-stamped <html data-theme="dark"> from the gp_theme cookie) always wins. */
 :root[data-theme="dark"] {
-  --paper: #15180f;
+  --bg: #15180f;
+  --bg-sunken: #0f120a;
   --surface: #1d2115;
-  --line: #2e3420;
+  --surface-2: #252a1a;
+  --surface-3: #2e3420;
   --ink: #eef1df;
-  --muted: #b4bb9e;
-  --danger: #f0654f;
-  --warn: #dca62f;
+  --ink-2: #b4bb9e;
+  --ink-3: #7e856b;
+  --line: #2e3420;
+  --line-2: #3e4529;
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 4px 4px 0 rgba(0, 0, 0, 0.45);
+  --shadow-lg: 8px 8px 0 rgba(0, 0, 0, 0.5);
   --good: #58c084;
+  --good-soft: #1d3526;
+  --warn: #dca62f;
+  --warn-soft: #382e13;
+  --bad: #f0654f;
+  --bad-soft: #3c1f18;
+  --danger: #f0654f;
+  --live: #ff5240;
+  --tile: #262b18;
+  --tile-2: #313722;
+  --edge: rgba(0, 0, 0, 0.85);
+  --accent-press: color-mix(in srgb, var(--accent), #fff 22%);
   color-scheme: dark;
 }
 
+/* OS preference — only when the user hasn't explicitly chosen light (PR-7 contract). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #15180f;
+    --bg: #15180f;
+    --bg-sunken: #0f120a;
     --surface: #1d2115;
-    --line: #2e3420;
+    --surface-2: #252a1a;
+    --surface-3: #2e3420;
     --ink: #eef1df;
-    --muted: #b4bb9e;
-    --danger: #f0654f;
-    --warn: #dca62f;
+    --ink-2: #b4bb9e;
+    --ink-3: #7e856b;
+    --line: #2e3420;
+    --line-2: #3e4529;
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
+    --shadow-md: 4px 4px 0 rgba(0, 0, 0, 0.45);
+    --shadow-lg: 8px 8px 0 rgba(0, 0, 0, 0.5);
     --good: #58c084;
+    --good-soft: #1d3526;
+    --warn: #dca62f;
+    --warn-soft: #382e13;
+    --bad: #f0654f;
+    --bad-soft: #3c1f18;
+    --danger: #f0654f;
+    --live: #ff5240;
+    --tile: #262b18;
+    --tile-2: #313722;
+    --edge: rgba(0, 0, 0, 0.85);
+    --accent-press: color-mix(in srgb, var(--accent), #fff 22%);
     color-scheme: dark;
   }
 }
 
-.gp-probe {
+/* Typography + color ONLY — deliberately NO box-model or margin reset yet. The design's reset
+   (box-sizing: border-box, zeroed block margins, tight heading leading) assumes the per-surface
+   layout classes that later M5.6 PRs add; applying it here would strip the default spacing from the
+   not-yet-restyled server-rendered pages and leave them cramped (codex). So PR-1 only swaps the
+   typeface + color and leaves block flow (margins/box-sizing/line-height) to each surface's restyle.
+   Headings → the editorial Newsreader serif; body + controls → Schibsted Grotesk. */
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection {
   background: var(--accent);
   color: var(--accent-ink);
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  padding: 8px 14px;
-  font: inherit;
-  cursor: pointer;
+}
+h1,
+h2,
+h3,
+h4,
+h5 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--ink);
+  font-optical-sizing: auto;
+}
+a {
+  color: inherit;
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.muted {
+  color: var(--ink-2);
+}
+.faint {
+  color: var(--ink-3);
 }
 
-/* Dark-mode toggle (D-9). Styled from the theme tokens so it reads correctly in both modes. */
+/* Dark-mode toggle (D-9) — from M5.5, restyled to the tokens. */
 .theme-toggle {
   margin-top: 8px;
 }
@@ -80,9 +216,9 @@ body {
   font: inherit;
   font-size: 0.85em;
   padding: 4px 12px;
-  border: 1px solid var(--ink);
-  border-radius: 999px;
-  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--surface);
   color: var(--ink);
   cursor: pointer;
 }

@@ -7,7 +7,7 @@ body.app {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-body);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -385,7 +385,7 @@ body.app {
   width: 100%;
   box-sizing: border-box;
   font: inherit;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   padding: 8px 10px;
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -592,7 +592,7 @@ body.app {
   margin: 12vh auto 0;
   padding: 0 20px;
   color: var(--ink);
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-body);
 }
 .error-heading {
   margin: 0 0 12px;
