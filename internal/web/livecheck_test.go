@@ -73,6 +73,41 @@ func TestLiveCheck_LinkChannel(t *testing.T) {
 	}
 }
 
+// Linking a YouTube channel works through the same platform-agnostic form (M5.5/AC-6): an @handle
+// persists as the bare lowercased handle under the youtube platform, and the page shows the
+// youtube.com watch link. An invalid handle is rejected.
+func TestLiveCheck_LinkYouTubeChannel(t *testing.T) {
+	a := newAPIHarness(t)
+	_, cookie := a.host(t, "ytlinker")
+	streamID := a.createStream(t, cookie, "YT Show")
+
+	// Invalid handle (a space) → rejected, nothing stored.
+	rec := a.formPost(t, "/app/streams/"+streamID+"/channel", "platform=youtube&channel=bad+handle", cookie)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "error=channel") {
+		t.Fatalf("invalid YT handle = %d loc=%q, want 303 → ?error=channel", rec.Code, rec.Header().Get("Location"))
+	}
+	if s, _ := a.store.GetStream(context.Background(), streamID); s.TwitchYTChannel != nil {
+		t.Fatalf("invalid handle must not persist, got %v", s.TwitchYTChannel)
+	}
+
+	// A valid @handle → persisted as the bare lowercased handle under youtube.
+	rec = a.formPost(t, "/app/streams/"+streamID+"/channel", "platform=youtube&channel=%40MrBeast", cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("link = %d", rec.Code)
+	}
+	s, _ := a.store.GetStream(context.Background(), streamID)
+	if s.TwitchYTPlatform == nil || *s.TwitchYTPlatform != "youtube" || s.TwitchYTChannel == nil || *s.TwitchYTChannel != "mrbeast" {
+		t.Fatalf("after link: platform=%v channel=%v", s.TwitchYTPlatform, s.TwitchYTChannel)
+	}
+
+	// The stream-detail page shows the linked channel + the youtube.com watch link.
+	rec = a.req(t, http.MethodGet, "/app/streams/"+streamID, "", cookie)
+	body := rec.Body.String()
+	if !strings.Contains(body, "youtube/mrbeast") || !strings.Contains(body, "https://www.youtube.com/@mrbeast") {
+		t.Fatalf("stream-detail missing the linked YouTube channel / watch link:\n%s", body)
+	}
+}
+
 // The guest pass page surfaces the public watch-live link once a channel is linked (D-29/AC-8).
 func TestLiveCheck_PassPageWatchLink(t *testing.T) {
 	a := newAPIHarness(t)

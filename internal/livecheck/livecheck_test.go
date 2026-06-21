@@ -107,6 +107,117 @@ func TestTwitchVerify_OversizeDegradesToUnavailable(t *testing.T) {
 	}
 }
 
+func TestYouTubeNormalize(t *testing.T) {
+	v := newYouTubeVerifier(http.DefaultClient, youtubeBaseURL)
+	ok := map[string]string{
+		"@MrBeast": "mrbeast", "MrBeast": "mrbeast", "a_b.c-1": "a_b.c-1", "  @Foo  ": "foo", "abc": "abc",
+	}
+	for in, want := range ok {
+		if got, valid := v.normalize(in); !valid || got != want {
+			t.Errorf("normalize(%q) = (%q,%v), want (%q,true)", in, got, valid, want)
+		}
+	}
+	bad := []string{
+		"", "@", "ab", strings.Repeat("x", 31), "has space", "slash/x", "https://youtube.com/@x",
+		".lead", "trail.", "-lead", "trail-", "dot..dot", "uni€",
+	}
+	for _, in := range bad {
+		if got, valid := v.normalize(in); valid {
+			t.Errorf("normalize(%q) = (%q,true), want invalid", in, got)
+		}
+	}
+}
+
+func TestYouTubeWatchURL(t *testing.T) {
+	v := newYouTubeVerifier(http.DefaultClient, youtubeBaseURL)
+	if got := v.watchURL("@MrBeast"); got != "https://www.youtube.com/@mrbeast" {
+		t.Errorf("watchURL = %q", got)
+	}
+	if got := v.watchURL("bad handle"); got != "" {
+		t.Errorf("watchURL(invalid) = %q, want empty", got)
+	}
+}
+
+// verify fetches /@handle/live, follows YouTube's (on-domain) redirect to the live watch page, and
+// reads the isLiveNow flag — true only while broadcasting, so an ended stream (isLiveContent:true,
+// isLiveNow:false) reads offline. Any non-200/transport failure degrades to unavailable (§7.4).
+func TestYouTubeVerify_ParsesAndDegrades(t *testing.T) {
+	var path string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/@liveone/live", func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`<html><script>var ytInitialPlayerResponse = {"videoDetails":{"isLiveContent":true},"microformat":{"playerMicroformatRenderer":{"liveBroadcastDetails":{"isLiveNow":true}}}};</script></html>`))
+	})
+	mux.HandleFunc("/@offchan/live", func(w http.ResponseWriter, _ *http.Request) {
+		// An ended stream still carries isLiveContent:true but isLiveNow:false — must read offline.
+		_, _ = w.Write([]byte(`<html><script>{"videoDetails":{"isLiveContent":true},"liveBroadcastDetails":{"isLiveNow":false}}</script></html>`))
+	})
+	mux.HandleFunc("/@missing/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	mux.HandleFunc("/@boom/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	v := newYouTubeVerifier(srv.Client(), srv.URL)
+	ctx := context.Background()
+
+	if got := v.verify(ctx, "@liveone"); got != StatusLive {
+		t.Errorf("live channel = %q, want live", got)
+	}
+	if path != "/@liveone/live" {
+		t.Errorf("fetched path = %q, want /@handle/live", path)
+	}
+	if got := v.verify(ctx, "offchan"); got != StatusOffline {
+		t.Errorf("ended/offline channel = %q, want offline (isLiveNow:false, not isLiveContent)", got)
+	}
+	if got := v.verify(ctx, "missing"); got != StatusUnavailable {
+		t.Errorf("404 = %q, want status-unavailable", got)
+	}
+	if got := v.verify(ctx, "boom"); got != StatusUnavailable {
+		t.Errorf("5xx = %q, want status-unavailable", got)
+	}
+	if got := v.verify(ctx, "bad handle"); got != StatusUnavailable {
+		t.Errorf("invalid handle = %q, want status-unavailable (no fetch)", got)
+	}
+
+	srv.Close()
+	if got := v.verify(ctx, "liveone"); got != StatusUnavailable {
+		t.Errorf("dead server = %q, want status-unavailable", got)
+	}
+}
+
+// The §7.4 size cap bounds the read AND an oversized body degrades to unavailable rather than a false
+// "offline" — a live marker past the truncation point can't be trusted (mirrors Twitch).
+func TestYouTubeVerify_OversizeDegradesToUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", 1024)))
+		_, _ = w.Write([]byte(`"isLiveNow":true`))
+	}))
+	defer srv.Close()
+	v := newYouTubeVerifier(srv.Client(), srv.URL)
+	v.maxBody = 64
+	if got := v.verify(context.Background(), "somechan"); got != StatusUnavailable {
+		t.Fatalf("oversized body = %q, want status-unavailable", got)
+	}
+	v.maxBody = maxBodyBytes
+	if got := v.verify(context.Background(), "somechan"); got != StatusLive {
+		t.Fatalf("within the cap the signal should be read, status = %q, want live", got)
+	}
+}
+
+// T-6 (YouTube SSRF): the YouTube fetch path goes through the SSRF-closed client, so even a target
+// that resolves to loopback (the httptest server) is refused at dial — the verify degrades rather
+// than scraping it, despite the page parsing as live.
+func TestYouTubeVerify_SSRFBlocksLoopback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`"isLiveNow":true`)) // would read live if the dial weren't blocked
+	}))
+	defer srv.Close()
+	v := newYouTubeVerifier(newSafeClient(), srv.URL) // the REAL SSRF-closed client, not srv.Client()
+	if got := v.verify(context.Background(), "somechan"); got != StatusUnavailable {
+		t.Fatalf("YouTube verify against a loopback target = %q, want status-unavailable (SSRF-blocked)", got)
+	}
+}
+
 // A result produced under a caller-cancelled context must NOT be cached — otherwise one caller's
 // cancellation poisons the shared (platform,channel) entry, denying other clients a retry for the
 // whole TTL (codex/bugbot).

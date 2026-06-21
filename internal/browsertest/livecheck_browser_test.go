@@ -57,3 +57,47 @@ func TestStreamDetail_LinkChannelAndWatchLink(t *testing.T) {
 		}
 	})
 }
+
+// T-6 / AC-6 (M5.5): the host picks YouTube on the same stream-detail form and links a @handle; the
+// page shows the linked channel + the derived youtube.com watch link, exactly as Twitch does (the
+// web layer is platform-agnostic — only the verifier differs).
+func TestStreamDetail_LinkYouTubeChannel(t *testing.T) {
+	s := seedHostApp(t)
+	stream, err := s.store.CreateStream(context.Background(), store.CreateStreamParams{HostID: s.hostID, Title: "YT Show"})
+	if err != nil {
+		t.Fatalf("CreateStream: %v", err)
+	}
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCkie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+
+	Chrome(t, 60*time.Second, func(ctx context.Context) {
+		var watchHref, linkedText string
+		if err := chromedp.Run(ctx,
+			network.Enable(),
+			setHostCookie,
+			chromedp.Navigate(s.base+"/app/streams/"+stream.ID),
+			chromedp.WaitVisible(`.live-verify`, chromedp.ByQuery),
+			// Pick YouTube on the platform selector, then link an @handle (with the leading @).
+			chromedp.SetValue(`.live-verify-form select[name="platform"]`, "youtube", chromedp.ByQuery),
+			chromedp.SetValue(`.live-verify-form input[name="channel"]`, "@MrBeast", chromedp.ByQuery),
+			chromedp.Click(`.live-verify-form button[type="submit"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.live-verify .watch-live`, chromedp.ByQuery),
+			chromedp.AttributeValue(`.live-verify .watch-live`, "href", &watchHref, nil),
+			chromedp.Text(`.live-verify-current`, &linkedText, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("link YouTube channel flow: %v", err)
+		}
+		if watchHref != "https://www.youtube.com/@mrbeast" {
+			t.Fatalf("watch link href = %q, want the normalized youtube channel URL", watchHref)
+		}
+		if !strings.Contains(linkedText, "youtube/mrbeast") {
+			t.Fatalf("linked-channel text = %q, want it to show youtube/mrbeast", linkedText)
+		}
+		// It persisted with the YouTube platform + the @-stripped, lowercased handle.
+		got, _ := s.store.GetStream(context.Background(), stream.ID)
+		if got.TwitchYTPlatform == nil || *got.TwitchYTPlatform != "youtube" || got.TwitchYTChannel == nil || *got.TwitchYTChannel != "mrbeast" {
+			t.Fatalf("YouTube channel not persisted: platform=%v channel=%v", got.TwitchYTPlatform, got.TwitchYTChannel)
+		}
+	})
+}

@@ -63,13 +63,14 @@ type cacheEntry struct {
 	expires time.Time
 }
 
-// NewChecker builds the production checker: the SSRF-closed HTTP client wired to the Twitch verifier
-// against the fixed twitch.tv template, with the polite poll TTL.
+// NewChecker builds the production checker: the SSRF-closed HTTP client wired to the Twitch and
+// YouTube verifiers against their fixed twitch.tv / youtube.com templates, with the polite poll TTL.
 func NewChecker() *Checker {
 	client := newSafeClient()
 	return &Checker{
 		verifiers: map[string]verifier{
-			PlatformTwitch: newTwitchVerifier(client, twitchBaseURL),
+			PlatformTwitch:  newTwitchVerifier(client, twitchBaseURL),
+			PlatformYouTube: newYouTubeVerifier(client, youtubeBaseURL),
 		},
 		cache: map[string]cacheEntry{},
 		ttl:   pollTTL,
