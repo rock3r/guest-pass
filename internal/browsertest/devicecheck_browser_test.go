@@ -232,8 +232,10 @@ func TestDeviceCheck_LeaveShowsGuestLeftThenRejoins(t *testing.T) {
 			t.Fatalf("guest-left screen missing the 24h purge notice:\n%s", leftTxt)
 		}
 
-		// Rejoin returns to the device-check preview (re-capture → re-enter).
+		// Rejoin returns to the device-check preview (re-capture → re-enter). It is gated until the
+		// out-of-band leave POST settles (so a rejoin can't race the vacate), so wait for it to enable.
 		if err := chromedp.Run(cctx,
+			chromedp.WaitEnabled(`.dc-rejoin`, chromedp.ByQuery),
 			chromedp.Click(`.dc-rejoin`, chromedp.ByQuery),
 			chromedp.WaitVisible(`.dc-video`, chromedp.ByQuery),
 			chromedp.Poll(`!!document.querySelector('.dc-video') && document.querySelector('.dc-video').videoWidth > 0`,

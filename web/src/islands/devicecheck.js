@@ -97,6 +97,10 @@ function DeviceCheck() {
   // (the host/system ended it) — the guest chose to go, and can rejoin while the stream is still live
   // (D-40). Wins over the in-session view; the rejoin path returns to the device-check preview.
   const [left, setLeft] = useState(false);
+  // True while the out-of-band leave POST is in flight. Rejoin is gated on it: a rejoin that re-binds
+  // the slot before the vacate lands would be undone by the late VacateOccupant — so we wait for the
+  // POST to settle before re-entry (codex).
+  const [leaving, setLeaving] = useState(false);
   // lockedMods are this guest's currently force-suppressed modalities (mic|cam|share), read from
   // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
   // (RF-8); the guest-session renders the visible "muted/hidden by host" notice from these.
@@ -1101,9 +1105,11 @@ function DeviceCheck() {
     // (D-40). Sent OUT-OF-BAND over HTTP, not the WS, so it works in EVERY state — including a leave
     // during a reconnect, when the socket is down and an in-band frame couldn't be sent (codex).
     // Best-effort + keepalive (it may outlive this view); the server no-ops if nothing is bound.
-    fetch(`/p/${encodeURIComponent(passTokenFromPath())}/leave`, { method: "POST", keepalive: true }).catch(
-      () => {},
-    );
+    // Gate Rejoin on it settling (setLeaving) so a quick rejoin can't re-bind before the vacate lands.
+    setLeaving(true);
+    fetch(`/p/${encodeURIComponent(passTokenFromPath())}/leave`, { method: "POST", keepalive: true })
+      .catch(() => {})
+      .finally(() => setLeaving(false));
     if (sessionRef.current) {
       sessionRef.current.close();
       sessionRef.current = null;
@@ -1119,6 +1125,7 @@ function DeviceCheck() {
   // leave() released. Rejoin only succeeds while the stream is live; otherwise the re-entry surfaces
   // the matching state (host-waiting / link-off) like any fresh entry.
   function rejoin() {
+    if (leaving) return; // wait for the vacate to land, else this re-bind races the late VacateOccupant
     setLeft(false);
     startCheck();
   }
@@ -1130,8 +1137,8 @@ function DeviceCheck() {
       <div class="dc-left" data-state="guest-left">
         <p class="dc-left-title">You've left the greenroom</p>
         <p>You can rejoin while the stream is still live.</p>
-        <button type="button" class="dc-rejoin" onClick={rejoin}>
-          Rejoin
+        <button type="button" class="dc-rejoin" onClick={rejoin} disabled={leaving}>
+          {leaving ? "Leaving…" : "Rejoin"}
         </button>
         {/* GDPR purge notice (D-37 §8 / AC-6), the same reassurance the terminal screens carry. */}
         <p class="dc-left-privacy" data-privacy="purge">
