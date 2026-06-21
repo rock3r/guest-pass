@@ -56,3 +56,35 @@ func TestGreenroom_ForceButtonMeetsAA(t *testing.T) {
 		assertAA("OS dark (no cookie)", setCookie(""), darkMedia)
 	})
 }
+
+// M5.6 PR-6 AA guard for the LIVE/on-air fill: .badge-live (and every white-on-live surface that
+// shares the token — the host live-pill, slot on-air pill, calendar live event, the greenroom on-air
+// + screenshare-live badges) renders white text on --live-fill. The bright --live is only ~4.0:1
+// (light) / ~3.2:1 (dark) under white; --live-fill must clear 4.5:1. Red-proofs the shared token.
+func TestComponents_LiveBadgeMeetsAA(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	const contrastJS = `(() => {
+		const b = document.createElement('span'); b.className = 'badge badge-live'; b.textContent = 'live';
+		document.body.appendChild(b);
+		const cs = getComputedStyle(b); const fg = cs.color, bg = cs.backgroundColor; b.remove();
+		const toRGB = (c) => c.match(/[\d.]+/g).map(Number);
+		const lum = ([r,g,b]) => { const f=(v)=>{v/=255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+			return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b); };
+		const la=lum(toRGB(fg)), lb=lum(toRGB(bg)), hi=Math.max(la,lb), lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05);
+	})()`
+
+	Chrome(t, 60*time.Second, func(ctx context.Context) {
+		var r float64
+		if err := chromedp.Run(ctx,
+			chromedp.Navigate(s.base+"/"),
+			chromedp.WaitVisible(`body`, chromedp.ByQuery),
+			chromedp.Evaluate(contrastJS, &r),
+		); err != nil {
+			t.Fatalf("probe: %v", err)
+		}
+		if r < 4.5 {
+			t.Errorf(".badge-live white-on-fill contrast = %.2f:1, want >= 4.5 (AA)", r)
+		}
+	})
+}

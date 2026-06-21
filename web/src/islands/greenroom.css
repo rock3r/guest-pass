@@ -7,26 +7,31 @@
    components from tokens.css/components.css. */
 
 /* Page wrapper — the greenroom wants to be WIDE (a monitoring grid), unlike the centred public
-   pages, so widen its column past the shell's narrow defaults. */
-.greenroom {
+   pages, so widen its column past the shell's narrow defaults. Scoped to `section.greenroom` (the
+   server-rendered wrapper in greenroom.html) — NOT a bare `.greenroom`, because the Preact island
+   root inside #greenroom is ALSO `<div class="greenroom">`, so a bare selector would double the
+   padding/margin and nest the max-width (codex). */
+section.greenroom {
   width: 100%;
   max-width: 1240px;
   margin: 0 auto;
   padding: 28px 24px 56px;
   box-sizing: border-box;
 }
-.greenroom > h1 {
+section.greenroom > h1 {
   font-size: clamp(26px, 4vw, 32px);
   margin-bottom: 8px;
 }
-.greenroom > p {
+/* The intro paragraph only — NOT the privacy note (which has its own rule and would otherwise lose
+   to this more-specific `section.greenroom > p`). */
+section.greenroom > p:not(.gr-privacy-note) {
   color: var(--ink-2);
   font-size: 15px;
   line-height: 1.6;
   margin: 0 0 8px;
   max-width: 70ch;
 }
-.gr-privacy-note {
+section.greenroom > .gr-privacy-note {
   font-size: 13.5px;
   color: var(--ink-2);
   margin: 0 0 20px;
@@ -133,7 +138,7 @@
   white-space: nowrap;
 }
 .gr-pill[data-onair="on-air"] {
-  background: var(--live);
+  background: var(--live-fill); /* AA: white-on-bright-live is only ~4.0:1 — see --live-fill */
   color: #fff;
   border-color: var(--edge);
 }
@@ -416,7 +421,7 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #fff;
-  background: var(--live);
+  background: var(--live-fill); /* AA: white-on-bright-live is only ~4.0:1 — see --live-fill */
   border-radius: var(--r-xs);
   padding: 3px 7px;
   white-space: nowrap;

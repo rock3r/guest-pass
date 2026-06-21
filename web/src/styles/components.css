@@ -232,7 +232,7 @@
   border-color: color-mix(in srgb, var(--accent-press) 40%, transparent);
 }
 .badge-live {
-  background: var(--live);
+  background: var(--live-fill); /* AA: white on the bright --live is only ~4.0:1 — see --live-fill */
   color: #fff;
   border-color: var(--edge);
   font-weight: 600;
