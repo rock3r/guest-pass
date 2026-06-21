@@ -77,9 +77,15 @@
   --shadow-sm: 0 1px 0 rgba(29, 34, 24, 0.07);
   --shadow-md: 4px 4px 0 rgba(29, 34, 24, 0.12);
   --shadow-lg: 8px 8px 0 rgba(29, 34, 24, 0.14);
-  --good: #2e8b57;
+  /* Status TEXT tokens kept at the darker, AA-readable values (not the design's lighter chip
+     values) — existing consumers render them as normal text on the page surface (.gs-reconnecting
+     → --warn, .gs-screen-status → --good, .btn-danger/error → --danger), where the lighter design
+     values would drop below 4.5:1 (codex). These darker values stay readable on the page AND on the
+     -soft chips, so later component PRs can use them either way. --bad is the design's chip-fill red,
+     kept distinct from the --danger text token. */
+  --good: #1f6a3a;
   --good-soft: #ddeede;
-  --warn: #b07c0a;
+  --warn: #8a5a1f;
   --warn-soft: #f3ebcb;
   --bad: #cf3f2e;
   --bad-soft: #f8e1da;
@@ -90,7 +96,7 @@
   /* product-name aliases (track the design tokens; removed as surfaces migrate) */
   --paper: var(--bg);
   --muted: var(--ink-2);
-  --danger: var(--bad);
+  --danger: #a3261c;
 }
 
 /* Dark — control-room green-black (flat depth: borders carry structure, no offset shadows).
@@ -115,6 +121,7 @@
   --warn-soft: #382e13;
   --bad: #f0654f;
   --bad-soft: #3c1f18;
+  --danger: #f0654f;
   --live: #ff5240;
   --tile: #262b18;
   --tile-2: #313722;

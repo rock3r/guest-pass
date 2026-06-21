@@ -250,9 +250,19 @@ a known root element.
 Server-side authz (EN-6/EN-8) is the guard; the frontend never touches the DB or
 PII directly.
 
-**Dark mode (D-9, M5.5)** is no-FOUC and no-JS. The four theme tokens live in
-`web/src/styles/tokens.css`; dark flips only `--paper` (surface) + `--ink` (text)
-— the accent and its on-accent ink are theme-constant. Two triggers: the OS
+**Design tokens + dark mode (D-9).** `web/src/styles/tokens.css` carries the v2
+design's full token system (M5.6): the three self-hosted fonts (`--font-display`
+Newsreader / `--font-body` Schibsted Grotesk / `--font-mono` Spline Sans Mono,
+woff2 under `web/src/fonts/`, emitted as hashed `/static` assets by the esbuild
+`.woff2` loader — `font-src 'self'`), the surface/ink/line palette
+(`--bg`/`--surface*`/`--ink*`/`--line*`), shadow/radii (`--r-*`)/spacing (`--sp-*`)
+scales, and status/accent tokens, for **light and dark**. The product's older
+names (`--paper`/`--muted`/`--danger`) remain as aliases of the design's
+(`--bg`/`--ink-2`/…) while surfaces migrate; the status **text** tokens
+(`--good`/`--warn`/`--danger`) keep AA-readable darker values (the design's lighter
+`--bad`/`-soft` are for chip fills). The accent + its on-accent ink are
+theme-constant; dark is the control-room green-black, flat-depth (no offset
+shadows). Two triggers: the OS
 (`@media (prefers-color-scheme: dark)`, applied only when the user hasn't
 explicitly chosen light), and an explicit choice the **server** stamps onto
 `<html data-theme>` from the `gp_theme` cookie *before paint* (so there's no flash
