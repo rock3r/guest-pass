@@ -77,7 +77,7 @@
 .gr-lock {
   margin: 0;
   font-size: 0.8rem;
-  color: #8a1f1f;
+  color: var(--danger);
 }
 
 .gr-hand {
@@ -130,7 +130,7 @@
   margin: 0;
   margin-right: auto;
   font-size: 0.8rem;
-  color: #a3271f;
+  color: var(--danger);
 }
 .gr-recover {
   font: inherit;
@@ -180,10 +180,10 @@
 .gr-degraded {
   margin: 0;
   font-size: 0.8rem;
-  color: #8a5a1f;
+  color: var(--warn);
 }
 .gr-degraded[data-degraded^="recovering"] {
-  color: #1f6a3a;
+  color: var(--good);
 }
 
 /* Host-only slot picker (People controls, AC-6/D-20): (re)assign a guest to a cam slot. */
@@ -338,7 +338,7 @@
 .gr-screen-livebadge {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #8a1f1f;
+  color: var(--danger);
   white-space: nowrap;
 }
 /* Teardown banners (M5.5). The "ended" screen marks a terminal session end (host/admin, D-27); the
@@ -354,7 +354,7 @@
   color: var(--ink);
 }
 .gr-ended {
-  border-color: #8a1f1f;
+  border-color: var(--danger);
 }
 .gr-reconnecting {
   /* A recoverable, non-error state (AC-4): the live session keeps running while it reconnects. */
@@ -363,7 +363,7 @@
 .gr-ended-title {
   margin: 0 0 4px;
   font-size: 1rem;
-  color: #8a1f1f;
+  color: var(--danger);
 }
 .gr-ended-body,
 .gr-error-body,
