@@ -68,6 +68,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 	r.Use(SecurityHeaders(SecurityOptions{TURNHost: cfg.TURNHost, Secure: cfg.Secure}))
+	// Unmatched routes render the 404 state screen for a navigation, a terse body for fetch/XHR
+	// (M5.5/AC-2, DESIGN §6 `notfound`) — instead of chi's bare "404 page not found" text.
+	r.NotFound(rd.notFound)
 
 	// Global request-body cap (D-M5.5-4 / AC-8): reject an oversized body instance-wide with 413,
 	// before any handler reads it. /ws is exempt (streaming signaling). Always on — a zero/negative

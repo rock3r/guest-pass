@@ -59,3 +59,58 @@
   font-weight: 600;
   color: #8a1f1f;
 }
+
+/* Device-check error/state screens (M5.5/AC-2, DESIGN §6 cam-blocked / unsupported / no-devices).
+   Functional-first, matching the netblocked screen: a heading + guidance + an optional retry. */
+.dc-error {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 42ch;
+}
+
+.dc-error-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.dc-error p {
+  margin: 0;
+}
+
+/* Voluntary guest-left screen (M5.5/AC-2, DESIGN §6 guest-left): a clear left state with a rejoin
+   action and the GDPR purge reassurance. Shares the error screens' calm, functional layout. */
+.dc-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 42ch;
+}
+
+.dc-left-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.dc-left p {
+  margin: 0;
+}
+
+.dc-rejoin {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.dc-left-privacy {
+  font-size: 0.9em;
+  opacity: 0.8;
+}

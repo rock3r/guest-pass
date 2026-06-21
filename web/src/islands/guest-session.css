@@ -115,6 +115,25 @@
   color: var(--accent-ink);
 }
 
+/* Voluntary leave control (DESIGN §6 guest-left) — a quiet, secondary action next to raise-hand. */
+.gs-leave {
+  align-self: flex-start;
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* host-waiting status note (DESIGN §6) — the guest is connected but no host has arrived yet. */
+.gs-host-waiting {
+  margin: 0;
+  font-weight: 600;
+}
+
 .gs-chat {
   display: flex;
   flex-direction: column;
