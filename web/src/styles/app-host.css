@@ -559,22 +559,5 @@ body.app {
   display: contents;
 }
 
-/* Auth-denial / error screens (M5.5). Rendered into base.html (the public shell), so they are
-   unscoped from body.app. Functional-first/on-brand (D-B); pixel polish is DEF-2. */
-.error-screen {
-  max-width: 36rem;
-  margin: 12vh auto 0;
-  padding: 0 20px;
-  color: var(--ink);
-  font-family: var(--font-body);
-}
-.error-heading {
-  margin: 0 0 12px;
-}
-.error-body {
-  margin: 0 0 10px;
-  line-height: 1.5;
-}
-.error-actions {
-  margin-top: 20px;
-}
+/* The error / auth-denial / state screens (.error-screen) render into base.html (the public shell),
+   so their styling moved to public.css with the rest of the public surfaces (M5.6 PR-3). */

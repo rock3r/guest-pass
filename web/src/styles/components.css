@@ -538,6 +538,11 @@
   width: 27px;
   height: 21px;
 }
+/* wordmark "Pass" in pressed accent so it reads on paper (styles-v2.css:377). The wordmark is the
+   logo's last child <span>Guest<span>Pass</span></span>; the nested span is "Pass". */
+.logo > span:last-child > span {
+  color: var(--accent-press);
+}
 
 .spinner {
   width: 18px;

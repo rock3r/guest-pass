@@ -6,8 +6,11 @@
 <title>{{.Title}} · GuestPass</title>
 <link rel="stylesheet" href="/static/app.css"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}" crossorigin="anonymous"{{end}}>{{/* integrity added when the build manifest is present; the stylesheet still loads without it */}}
 </head>
-<body>
-<main>{{template "content" .}}</main>
+<body class="site">
+<header class="site-header">
+<a class="logo logo-sm" href="/" aria-label="GuestPass home"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></a>
+</header>
+<main class="site-main">{{template "content" .}}</main>
 <footer class="site-footer">
 <p>GuestPass is free, open-source software licensed
 <a href="https://uelicense.eu" rel="noopener">UEL v1.0</a>.
