@@ -1,30 +1,34 @@
-/* Device-check pre-join surface — functional-first styling (D-B); pixel-fidelity to the v2
-   prototype is a deferred polish pass (DEF-2). The guest picks a camera + microphone before going
-   live (M5.5 UX). These styles ride the same app.css bundle the guest pass page already loads. */
+/* Device-check pre-join surface — restyled to the v2 design (M5.6 PR-7, AC-8), ported from the
+   DeviceCheck prototype (screens-auth.jsx) + the cam-blocked/unsupported/host-waiting state screens
+   (screens-states.jsx). The guest picks a camera + mic before going live, then enters the greenroom.
+   This island mounts inside the guest pass page (.pass #device-check, public shell). CSS-only against
+   the Preact `.dc-*` class names (coupled to the device-check/netblocked/reconnect browser tests);
+   tokens + components from tokens.css/components.css. */
 
 .dc-preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   align-items: flex-start;
 }
 
+/* The live camera preview — a design tile. */
 .dc-video {
-  width: min(100%, 360px);
+  width: min(100%, 380px);
   aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 10px;
+  background: var(--tile);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   object-fit: cover;
 }
 
-/* Audio-only fallback preview (PD-12): a connected-with-audio placeholder that stands in for the
-   black camera tile, sized like the video so the layout doesn't jump. */
+/* Audio-only fallback preview (PD-12) — stands in for the camera tile, same footprint. */
 .dc-audio-preview {
-  width: min(100%, 360px);
+  width: min(100%, 380px);
   aspect-ratio: 16 / 9;
-  background: color-mix(in srgb, var(--ink) 8%, var(--paper));
-  border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
-  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -32,124 +36,193 @@
   justify-content: center;
   text-align: center;
   padding: 12px;
+  color: var(--ink-2);
 }
-
 .dc-audio-preview-icon {
   font-size: 2em;
   line-height: 1;
 }
-
 .dc-audio-preview-text {
   margin: 0;
   font-weight: 600;
 }
 
-/* Camera + microphone dropdowns, sat under the preview at the same width. */
+/* Camera + microphone dropdowns. */
 .dc-devices {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  width: min(100%, 360px);
+  gap: 14px;
+  width: min(100%, 380px);
 }
-
 .dc-device {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 1 1 150px;
+  gap: 6px;
+  flex: 1 1 160px;
   min-width: 0;
 }
-
 .dc-device-label {
-  font-weight: 600;
-  font-size: 0.9em;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
 }
-
 .dc-device-select {
   font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   color: var(--ink);
   max-width: 100%;
+  box-sizing: border-box;
 }
-
+.dc-device-select:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+}
 .dc-device-select:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ============ Action buttons (CSS-only — these carry no .btn class) ============ */
+/* Secondary / outline: start camera, retry, audio-only fallback. */
+.dc-start,
+.dc-retry,
+.dc-netblocked-retry,
+.dc-audio-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 10px 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+  cursor: pointer;
+  line-height: 1.15;
+  box-sizing: border-box;
+  transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s, filter 0.15s;
+}
+/* Primary accent: enter the greenroom, rejoin. */
+.dc-enter,
+.dc-rejoin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 10px 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 2px 2px 0 var(--edge);
+  cursor: pointer;
+  line-height: 1.15;
+  box-sizing: border-box;
+  transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s, filter 0.15s;
+}
+.dc-start:hover,
+.dc-retry:hover,
+.dc-netblocked-retry:hover,
+.dc-audio-only:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--edge);
+  background: var(--surface-2);
+}
+.dc-enter:hover,
+.dc-rejoin:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--edge);
+}
+.dc-start:active,
+.dc-retry:active,
+.dc-netblocked-retry:active,
+.dc-audio-only:active,
+.dc-enter:active,
+.dc-rejoin:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.dc-start:disabled,
+.dc-enter:disabled,
+.dc-rejoin:disabled,
+.dc-retry:disabled,
+.dc-netblocked-retry:disabled,
+.dc-audio-only:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 /* Inline notice when a device switch fails but the current preview keeps working. */
 .dc-switch-error {
   margin: 0;
   font-weight: 600;
+  font-size: 13.5px;
   color: var(--danger);
 }
 
-/* Device-check error/state screens (M5.5/AC-2, DESIGN §6 cam-blocked / unsupported / no-devices).
-   Functional-first, matching the netblocked screen: a heading + guidance + an optional retry. */
-.dc-error {
+/* ============ State screens (cam-blocked / unsupported / no-devices / network-blocked / left) ============
+   Centered cards in the design's state-page pattern, sitting in the device-check area. */
+.dc-error,
+.dc-left,
+.dc-netblocked {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
-  max-width: 42ch;
+  max-width: 44ch;
+  padding: 22px 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
-
-.dc-error-title {
+.dc-error-title,
+.dc-left-title,
+.dc-netblocked-title {
   margin: 0;
-  font-weight: 700;
-  font-size: 1.1em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.25rem;
 }
-
-.dc-error p {
+.dc-netblocked-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
   margin: 0;
 }
-
-/* The cam-blocked screen's two recovery actions side by side: Try again + Join audio-only (PD-12). */
+.dc-error p,
+.dc-left p,
+.dc-netblocked-body {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
 .dc-error-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-
-.dc-error-hint {
-  font-size: 0.9em;
-  opacity: 0.8;
-}
-
-/* Voluntary guest-left screen (M5.5/AC-2, DESIGN §6 guest-left): a clear left state with a rejoin
-   action and the GDPR purge reassurance. Shares the error screens' calm, functional layout. */
-.dc-left {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-  max-width: 42ch;
-}
-
-.dc-left-title {
-  margin: 0;
-  font-weight: 700;
-  font-size: 1.1em;
-}
-
-.dc-left p {
-  margin: 0;
-}
-
-.dc-rejoin {
-  font: inherit;
-  padding: 6px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  cursor: pointer;
-}
-
-.dc-left-privacy {
-  font-size: 0.9em;
-  opacity: 0.8;
+.dc-error-hint,
+.dc-left-privacy,
+.dc-netblocked-note {
+  font-size: 12.5px;
+  color: var(--ink-2);
 }
