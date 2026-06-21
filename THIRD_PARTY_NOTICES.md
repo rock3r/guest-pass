@@ -9,9 +9,11 @@ UEL v1.0 is affirmed per `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` (D-31).
 
 - **Preact** (planned) — MIT — vendored under `web/vendor/preact/` when the frontend
   lands (D-32); no registry fetch at build time.
-- **Newsreader**, **Schibsted Grotesk**, **Spline Sans Mono** fonts (planned) —
-  SIL Open Font License 1.1, **no Reserved Font Names** — each family ships its
-  `OFL.txt` (D-9, EN-17).
+- **Newsreader**, **Schibsted Grotesk**, **Spline Sans Mono** fonts —
+  SIL Open Font License 1.1 — self-hosted (variable woff2, Latin subset) under
+  `web/src/fonts/`, emitted into the binary's static assets at build time. The full
+  OFL text + per-family copyright notices ship in `web/src/fonts/OFL.txt` (D-9,
+  EN-17). No third-party CDN is contacted at runtime (privacy).
 
 ## Go module dependencies (planned)
 

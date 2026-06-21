@@ -154,24 +154,18 @@
   }
 }
 
-/* Base reset + typography (ported from the design). Headings are the editorial Newsreader serif;
-   body + controls are Schibsted Grotesk. Links inherit the text color and keep an underline as a
-   visible affordance until later PRs style them per component (nav/buttons drop it). */
-* {
-  box-sizing: border-box;
-}
-html,
-body {
-  margin: 0;
-  padding: 0;
-}
+/* Typography + color ONLY — deliberately NO box-model or margin reset yet. The design's reset
+   (box-sizing: border-box, zeroed block margins, tight heading leading) assumes the per-surface
+   layout classes that later M5.6 PRs add; applying it here would strip the default spacing from the
+   not-yet-restyled server-rendered pages and leave them cramped (codex). So PR-1 only swaps the
+   typeface + color and leaves block flow (margins/box-sizing/line-height) to each surface's restyle.
+   Headings → the editorial Newsreader serif; body + controls → Schibsted Grotesk. */
 body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  line-height: 1.5;
 }
 ::selection {
   background: var(--accent);
@@ -184,14 +178,8 @@ h4,
 h5 {
   font-family: var(--font-display);
   font-weight: 600;
-  margin: 0;
-  line-height: 1.04;
-  letter-spacing: 0;
   color: var(--ink);
   font-optical-sizing: auto;
-}
-p {
-  margin: 0;
 }
 a {
   color: inherit;
