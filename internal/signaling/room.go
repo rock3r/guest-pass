@@ -185,11 +185,21 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			// guest ReconnectingSession) would otherwise retry, evict the newcomer, and the two tabs
 			// would ping-pong forever (codex). A genuine reconnect never hits this path — the old socket
 			// has already closed and left before the new one joins — so only a real duplicate is told.
-			select {
-			case old.out <- Frame{T: "terminate", Reason: TerminateDisplaced}:
-			default:
-			}
-			close(old.out)
+			//
+			// The displaced frame is TERMINAL, so it must NOT be silently dropped on a full out buffer
+			// (RF-16) — a stalled old tab that missed it would treat the close as a transient drop and
+			// reconnect-war. Deliver it with a budgeted blocking send, then close, in a SEPARATE
+			// goroutine so the room goroutine never blocks (the old conn is already detached from conns).
+			oldOut := old.out
+			go func() {
+				t := time.NewTimer(terminateBudget)
+				defer t.Stop()
+				select {
+				case oldOut <- Frame{T: "terminate", Reason: TerminateDisplaced}:
+				case <-t.C: // a genuinely wedged socket — give up; the close below still tears it down
+				}
+				close(oldOut)
+			}()
 		}
 		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
 		outs := st.join(id, role, name)
