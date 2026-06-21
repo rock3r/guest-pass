@@ -71,14 +71,14 @@
 }
 
 .btn-danger {
-  background: var(--bad);
+  background: var(--danger-fill);
   color: #fff;
 }
 .btn-danger:hover {
-  background: var(--bad);
+  background: var(--danger-fill);
 }
 .btn-danger:active {
-  background: var(--bad);
+  background: var(--danger-fill);
 }
 
 /* Quiet / ghost — low-emphasis, no edge or offset shadow. */
@@ -571,11 +571,11 @@
 }
 :root[data-theme="dark"] .btn-danger:hover {
   filter: brightness(1.07);
-  background: var(--bad);
+  background: var(--danger-fill);
 }
 :root[data-theme="dark"] .btn-danger:active {
   transform: translateY(1px);
-  background: var(--bad);
+  background: var(--danger-fill);
 }
 :root[data-theme="dark"] .btn-outline {
   border-color: var(--line-2);
@@ -634,11 +634,11 @@
   }
   :root:not([data-theme="light"]) .btn-danger:hover {
     filter: brightness(1.07);
-    background: var(--bad);
+    background: var(--danger-fill);
   }
   :root:not([data-theme="light"]) .btn-danger:active {
     transform: translateY(1px);
-    background: var(--bad);
+    background: var(--danger-fill);
   }
   :root:not([data-theme="light"]) .btn-outline {
     border-color: var(--line-2);
