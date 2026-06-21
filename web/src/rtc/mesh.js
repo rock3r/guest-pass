@@ -59,7 +59,25 @@ export class MeshPeer {
   async start() {
     if (!this.isOfferer) return;
     this._addLocalTracks();
+    this._ensureRecvTransceivers();
     return this._negotiate();
+  }
+
+  // _ensureRecvTransceivers guarantees the OFFER carries both an audio and a video m-line, even when
+  // this guest publishes only one of them — the audio-only fallback (PD-12) sends no camera, so its
+  // offer would otherwise omit the video m-line and the answering peer would have nothing to send its
+  // camera back on, leaving this guest's thumbnail of that peer blank. Offerer-only: an answer can't
+  // introduce an m-line the offer lacks, so the missing receive direction must be opened here. A kind
+  // already covered by a local sender (the common both-tracks case) is left untouched — no extra
+  // transceiver, so a normal guest's negotiation is unchanged.
+  _ensureRecvTransceivers() {
+    const sent = new Set();
+    for (const s of this.pc.getSenders()) {
+      if (s.track) sent.add(s.track.kind);
+    }
+    for (const kind of ["audio", "video"]) {
+      if (!sent.has(kind)) this.pc.addTransceiver(kind, { direction: "recvonly" });
+    }
   }
 
   _addLocalTracks() {

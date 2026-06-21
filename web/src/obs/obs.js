@@ -106,7 +106,10 @@ function start() {
   function renderNoVideo() {
     const s = video && video.srcObject;
     const novideo = !!s && s.getVideoTracks().length === 0 && s.getAudioTracks().length > 0;
-    document.documentElement.dataset.obsNovideo = novideo ? "1" : "";
+    // Delete the attribute (not set it to "") when false, so a host presence selector
+    // (html[data-obs-novideo]) stops matching once the slot is video again / unbound.
+    if (novideo) document.documentElement.dataset.obsNovideo = "1";
+    else delete document.documentElement.dataset.obsNovideo;
   }
 
   // renderNameplate writes the bound occupant's display name into the nameplate as ESCAPED
