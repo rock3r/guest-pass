@@ -1,6 +1,7 @@
 package livecheck
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -111,15 +112,32 @@ func (v *youtubeVerifier) verify(ctx context.Context, channel string) Status {
 	return parseYouTubeLive(body)
 }
 
-// youtubeLiveRe matches YouTube's "broadcasting right now" flag from the watch page's embedded player
-// response (liveBroadcastDetails.isLiveNow), tolerating arbitrary JSON whitespace around the colon.
-// This is the live-NOW signal — true only while actually broadcasting — unlike isLiveContent /
-// isLiveBroadcast, which stay true for a scheduled or already-ended stream, so it doesn't read an old
-// VOD as live. Absence is read as offline (best-effort, fragile by nature, fixed via PR — D-29).
+// youtubePlayerStartRe locates the MAIN video's player response (ytInitialPlayerResponse). The live
+// flag is read ONLY from that block, never the whole page — a watch page's sidebar/recommendations
+// (in the separate ytInitialData script) can carry another stream's isLiveNow, which would otherwise
+// false-positive this channel as live (codex). The channel's own /live page, when offline, has no
+// player response at all → offline.
+var youtubePlayerStartRe = regexp.MustCompile(`ytInitialPlayerResponse\s*=`)
+
+// youtubeLiveRe matches YouTube's "broadcasting right now" flag (liveBroadcastDetails.isLiveNow),
+// tolerating arbitrary JSON whitespace. This is the live-NOW signal — true only while actually
+// broadcasting — unlike isLiveContent / isLiveBroadcast, which stay true for a scheduled or ended
+// stream, so it doesn't read an old VOD as live. Absence is offline (best-effort, fragile — D-29).
 var youtubeLiveRe = regexp.MustCompile(`"isLiveNow"\s*:\s*true\b`)
 
 func parseYouTubeLive(body []byte) Status {
-	if youtubeLiveRe.Match(body) {
+	loc := youtubePlayerStartRe.FindIndex(body)
+	if loc == nil {
+		return StatusOffline // no main player response (e.g. an offline channel's /live page)
+	}
+	// Scope the flag search to the player-response <script> block (assignment → its closing tag), so
+	// only the MAIN video's isLiveNow counts — a recommended stream's flag in a later script can't
+	// make this channel read as live.
+	scope := body[loc[1]:]
+	if end := bytes.Index(scope, []byte("</script>")); end >= 0 {
+		scope = scope[:end]
+	}
+	if youtubeLiveRe.Match(scope) {
 		return StatusLive
 	}
 	return StatusOffline

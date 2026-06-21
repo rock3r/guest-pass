@@ -149,8 +149,14 @@ func TestYouTubeVerify_ParsesAndDegrades(t *testing.T) {
 		_, _ = w.Write([]byte(`<html><script>var ytInitialPlayerResponse = {"videoDetails":{"isLiveContent":true},"microformat":{"playerMicroformatRenderer":{"liveBroadcastDetails":{"isLiveNow":true}}}};</script></html>`))
 	})
 	mux.HandleFunc("/@offchan/live", func(w http.ResponseWriter, _ *http.Request) {
-		// An ended stream still carries isLiveContent:true but isLiveNow:false — must read offline.
-		_, _ = w.Write([]byte(`<html><script>{"videoDetails":{"isLiveContent":true},"liveBroadcastDetails":{"isLiveNow":false}}</script></html>`))
+		// The MAIN player response is NOT live (isLiveNow:false), and a RECOMMENDED stream in the
+		// separate ytInitialData script IS live — must read offline: the recommendation's flag must
+		// not leak into this channel's status (codex: scope the parse to the main player response).
+		_, _ = w.Write([]byte(`<html><script>var ytInitialPlayerResponse = {"videoDetails":{"isLiveContent":true},"microformat":{"playerMicroformatRenderer":{"liveBroadcastDetails":{"isLiveNow":false}}}};</script><script>var ytInitialData = {"recommended":[{"title":"someone else live","liveBroadcastDetails":{"isLiveNow":true}}]};</script></html>`))
+	})
+	mux.HandleFunc("/@noplayer/live", func(w http.ResponseWriter, _ *http.Request) {
+		// An offline channel's /live page with no player response at all → offline (degrade-safe).
+		_, _ = w.Write([]byte(`<html><body>This channel isn't live right now.</body></html>`))
 	})
 	mux.HandleFunc("/@missing/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
 	mux.HandleFunc("/@boom/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) })
@@ -167,7 +173,10 @@ func TestYouTubeVerify_ParsesAndDegrades(t *testing.T) {
 		t.Errorf("fetched path = %q, want /@handle/live", path)
 	}
 	if got := v.verify(ctx, "offchan"); got != StatusOffline {
-		t.Errorf("ended/offline channel = %q, want offline (isLiveNow:false, not isLiveContent)", got)
+		t.Errorf("offline channel w/ a live RECOMMENDATION = %q, want offline (scoped to player response)", got)
+	}
+	if got := v.verify(ctx, "noplayer"); got != StatusOffline {
+		t.Errorf("no player response = %q, want offline", got)
 	}
 	if got := v.verify(ctx, "missing"); got != StatusUnavailable {
 		t.Errorf("404 = %q, want status-unavailable", got)
@@ -189,8 +198,8 @@ func TestYouTubeVerify_ParsesAndDegrades(t *testing.T) {
 // "offline" — a live marker past the truncation point can't be trusted (mirrors Twitch).
 func TestYouTubeVerify_OversizeDegradesToUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(strings.Repeat("x", 1024)))
-		_, _ = w.Write([]byte(`"isLiveNow":true`))
+		_, _ = w.Write([]byte(strings.Repeat("x", 1024))) // 1 KiB of filler...
+		_, _ = w.Write([]byte(`<script>var ytInitialPlayerResponse = {"liveBroadcastDetails":{"isLiveNow":true}};</script>`))
 	}))
 	defer srv.Close()
 	v := newYouTubeVerifier(srv.Client(), srv.URL)
