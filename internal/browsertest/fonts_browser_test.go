@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+
+	"github.com/rock3r/guest-pass/internal/auth"
 )
 
 // M5.6/AC-1 (T-1+T-2): the three self-hosted design fonts are SERVED (same-origin under /static —
@@ -50,6 +53,23 @@ func TestFonts_DesignFacesLoadAndApply(t *testing.T) {
 		}
 		if !allLoaded {
 			t.Fatal("a self-hosted face failed to load — its woff2 is not being served under /static")
+		}
+
+		// The HOST shell (body.app in app-host.css, imported AFTER tokens.css) must also resolve to
+		// the design body font, not a hard-coded system-ui that would override it (codex).
+		var hostBodyFont string
+		if err := chromedp.Run(ctx,
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+			}),
+			chromedp.Navigate(s.base+"/app"),
+			chromedp.WaitVisible(`body`, chromedp.ByQuery),
+			chromedp.Evaluate(`getComputedStyle(document.body).fontFamily`, &hostBodyFont),
+		); err != nil {
+			t.Fatalf("host page font: %v", err)
+		}
+		if !strings.Contains(hostBodyFont, "Schibsted Grotesk") {
+			t.Fatalf("host /app body font-family = %q, want Schibsted Grotesk (host CSS must not override it)", hostBodyFont)
 		}
 	})
 }
