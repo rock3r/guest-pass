@@ -1,0 +1,692 @@
+/* Shared component system — ported from the v2 design (.plans/designs/styles-v2.css, D-9), M5.6 PR-2.
+   The buttons, cards/panels, badges, dividers, form controls, switch, and the small shared layout
+   primitives the later per-surface PRs consume. Light = hard ink edges + press-down offset shadows;
+   dark = control-room flat-depth (borders carry structure, no offset shadows — styles-v2.css:82-102).
+
+   Reconciliation with the product's existing vocabulary (the templates already ship these names):
+     .btn (bare)  → the design's OUTLINE treatment (a real secondary button), not the design's
+                    transparent base — so existing bare-.btn buttons (Go live, Save name, error CTA)
+                    read as buttons with no template churn.
+     .btn-primary → accent          .btn-danger → danger (bad)        .btn-quiet → ghost
+   The design's own variant names (.btn-outline/.btn-ghost/.btn-soft/.btn-danger-soft/.btn-lg/.btn-sm/
+   .btn-icon/.btn-block) are also defined for the per-surface restyles that follow.
+
+   This file rides the APP bundle only (imported from web/src/islands/app.js, after tokens.css) — the
+   OBS source-page bundle never sees it (D-13/EN-13: transparent, chromeless, font-free). */
+
+/* ============ Buttons — flat ink edges, press-down offset (light) ============ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 10px 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+  cursor: pointer;
+  /* The design uses white-space: nowrap (its labels are all short). The product has long-label
+     buttons — e.g. "Regenerate all URLs (my URLs leaked)" on the sources tab — that would overflow
+     a 320px viewport's ~280px content column with nowrap (codex). Let labels wrap instead; short
+     labels never wrap, so this is invisible for them. line-height ~1.15 keeps a wrapped label
+     legible without meaningfully changing single-line button height. */
+  white-space: normal;
+  text-align: center;
+  user-select: none;
+  line-height: 1.15;
+  text-decoration: none; /* the product uses <a class="btn"> as well as <button> */
+  transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s, border-color 0.15s,
+    color 0.15s, filter 0.15s;
+}
+.btn svg {
+  width: 18px;
+  height: 18px;
+}
+.btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--edge);
+  background: var(--surface-2);
+}
+.btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--edge);
+  background: var(--surface-2);
+}
+
+/* Explicit outline — identical to the bare button; present so prototype-faithful markup
+   (.btn.btn-outline) styles correctly. */
+.btn-outline {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-primary:hover {
+  background: var(--accent);
+}
+.btn-primary:active {
+  background: var(--accent);
+}
+
+.btn-danger {
+  background: var(--danger-fill);
+  color: #fff;
+}
+.btn-danger:hover {
+  background: var(--danger-fill);
+}
+.btn-danger:active {
+  background: var(--danger-fill);
+}
+
+/* Quiet / ghost — low-emphasis, no edge or offset shadow. */
+.btn-quiet,
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: transparent;
+  box-shadow: none;
+}
+.btn-quiet:hover,
+.btn-ghost:hover {
+  background: var(--surface-3);
+  transform: none;
+  box-shadow: none;
+}
+.btn-quiet:active,
+.btn-ghost:active {
+  background: var(--surface-3);
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.btn-soft {
+  background: var(--accent-soft);
+  color: var(--accent-press);
+  border-color: color-mix(in srgb, var(--accent-press) 35%, transparent);
+  box-shadow: none;
+}
+.btn-soft:hover {
+  background: color-mix(in srgb, var(--accent) 36%, var(--surface));
+  transform: none;
+  box-shadow: none;
+}
+.btn-soft:active {
+  transform: translateY(1px);
+}
+
+.btn-danger-soft {
+  background: var(--bad-soft);
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  box-shadow: none;
+}
+.btn-danger-soft:hover {
+  filter: brightness(0.97);
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-lg {
+  font-size: 16.5px;
+  padding: 14px 22px;
+  border-radius: var(--r-md);
+}
+.btn-sm {
+  font-size: 13px;
+  padding: 7px 11px;
+  gap: 6px;
+}
+.btn-sm svg {
+  width: 15px;
+  height: 15px;
+}
+.btn-icon {
+  padding: 9px;
+}
+.btn-icon.btn-sm {
+  padding: 6px;
+}
+.btn[disabled],
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.btn-block {
+  width: 100%;
+}
+
+/* ============ Cards / surfaces ============ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad {
+  padding: var(--sp-5);
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+}
+.divider {
+  height: 1px;
+  background: var(--line-2);
+  border: 0;
+  margin: 0;
+}
+
+/* ============ Badges — stamp style ============ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line-2);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.badge-good {
+  background: var(--good-soft);
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.badge-bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+}
+.badge-accent {
+  background: var(--accent-soft);
+  color: var(--accent-press);
+  border-color: color-mix(in srgb, var(--accent-press) 40%, transparent);
+}
+.badge-live {
+  background: var(--live);
+  color: #fff;
+  border-color: var(--edge);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  font-size: 10.5px;
+  padding: 4px 9px;
+}
+.badge-live .badge-dot {
+  background: #fff;
+  animation: pulse 1.6s infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 0 var(--line-2);
+  color: var(--ink-2);
+}
+
+/* ============ Inputs ============ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.hint {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.input,
+.textarea,
+.select {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 11px 13px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-3);
+}
+.input:focus,
+.textarea:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+}
+.input-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+}
+
+/* toggle switch — squared track */
+.switch {
+  display: inline-block;
+  position: relative;
+  width: 44px;
+  height: 25px;
+  flex: none;
+  cursor: pointer;
+  vertical-align: middle;
+}
+/* Visually hidden but kept in the tab order + accessibility tree (NOT display:none, which would
+   drop the control from keyboard focus and stop .switch:focus-within ever firing — codex). The
+   label wrapper handles mouse toggles; the input stays Tab-focusable + Space-toggleable. */
+.switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.switch .track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  transition: background 0.18s, border-color 0.18s;
+}
+.switch .thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 17px;
+  height: 17px;
+  background: var(--ink-3);
+  border-radius: calc(var(--r-xs) - 2px);
+  transition: transform 0.18s, background 0.18s;
+}
+.switch input:checked + .track {
+  background: var(--accent);
+  border-color: var(--edge);
+}
+.switch input:checked + .track + .thumb {
+  transform: translateX(19px);
+  background: var(--accent-ink);
+}
+
+/* segmented control */
+.seg {
+  display: inline-flex;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  gap: 2px;
+}
+.seg button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 6px 13px;
+  border-radius: calc(var(--r-sm) - 3px);
+  cursor: pointer;
+  transition: all 0.14s;
+}
+.seg button.on {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* range slider (new-stream length, quality ceiling, etc.) */
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  outline: none;
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--edge);
+  box-shadow: 1.5px 1.5px 0 var(--edge);
+  cursor: pointer;
+  margin-top: -1px;
+}
+.range::-webkit-slider-thumb:active {
+  transform: scale(1.08);
+}
+.range::-moz-range-thumb {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--edge);
+  cursor: pointer;
+}
+.range::-moz-range-track {
+  height: 7px;
+  border-radius: 99px;
+  background: var(--surface-3);
+}
+.range:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* ============ Small shared layout primitives ============ */
+.row {
+  display: flex;
+  align-items: center;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+}
+.between {
+  justify-content: space-between;
+}
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gap-1 {
+  gap: 4px;
+}
+.gap-2 {
+  gap: 8px;
+}
+.gap-3 {
+  gap: 12px;
+}
+.gap-4 {
+  gap: 16px;
+}
+.gap-5 {
+  gap: 24px;
+}
+.gap-6 {
+  gap: 32px;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+.grow {
+  flex: 1;
+}
+
+/* logo — ticket stub, ink-edged (shared by the public + host shells) */
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 21px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.logo-mark {
+  position: relative;
+  width: 31px;
+  height: 24px;
+  background: var(--accent);
+  border: 1px solid var(--edge);
+  box-shadow: 2px 2px 0 var(--edge);
+  border-radius: 6px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.logo-mark::before,
+.logo-mark::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--bg);
+  border: 1px solid var(--edge);
+  border-radius: 99px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.logo-mark::before {
+  left: -5px;
+}
+.logo-mark::after {
+  right: -5px;
+}
+.logo-mark span {
+  width: 0;
+  border-left: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent);
+  height: 13px;
+}
+.logo-sm {
+  font-size: 18px;
+}
+.logo-sm .logo-mark {
+  width: 27px;
+  height: 21px;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid var(--line-2);
+  border-top-color: var(--accent-press);
+  border-radius: 99px;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn:focus-visible,
+.switch:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ============ Dark refinements — flat depth (no offset shadows). The design keys these on
+   [data-theme="dark"]; the product stamps the explicit choice on :root[data-theme="dark"] and the
+   OS-preference path is the prefers-color-scheme media query (only when the user hasn't chosen
+   light) — so each refinement block is mirrored across both, exactly as tokens.css mirrors the dark
+   token block. (.btn matches every button incl. .btn-primary/.btn-danger, so one selector flattens
+   the lot.) ============ */
+:root[data-theme="dark"] .btn {
+  box-shadow: none;
+}
+:root[data-theme="dark"] .btn:hover {
+  transform: none;
+  box-shadow: none;
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .btn-primary:hover {
+  filter: brightness(1.07);
+  background: var(--accent);
+}
+:root[data-theme="dark"] .btn-primary:active {
+  filter: brightness(0.96);
+  transform: translateY(1px);
+  background: var(--accent);
+}
+:root[data-theme="dark"] .btn-danger:hover {
+  filter: brightness(1.07);
+  background: var(--danger-fill);
+}
+:root[data-theme="dark"] .btn-danger:active {
+  transform: translateY(1px);
+  background: var(--danger-fill);
+}
+:root[data-theme="dark"] .btn-outline {
+  border-color: var(--line-2);
+}
+:root[data-theme="dark"] .btn-quiet:hover,
+:root[data-theme="dark"] .btn-ghost:hover {
+  background: var(--surface-3);
+}
+:root[data-theme="dark"] .logo-mark {
+  box-shadow: none;
+}
+:root[data-theme="dark"] .input:focus,
+:root[data-theme="dark"] .textarea:focus,
+:root[data-theme="dark"] .select:focus {
+  border-color: var(--accent-press);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+:root[data-theme="dark"] .switch .track {
+  background: var(--surface-3);
+}
+:root[data-theme="dark"] .switch .thumb {
+  background: var(--ink-2);
+}
+:root[data-theme="dark"] .switch input:checked + .track {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+:root[data-theme="dark"] .seg {
+  background: var(--bg-sunken);
+}
+:root[data-theme="dark"] .kbd {
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .btn {
+    box-shadow: none;
+  }
+  :root:not([data-theme="light"]) .btn:hover {
+    transform: none;
+    box-shadow: none;
+    background: var(--surface-2);
+  }
+  :root:not([data-theme="light"]) .btn:active {
+    transform: translateY(1px);
+    box-shadow: none;
+    background: var(--surface-2);
+  }
+  :root:not([data-theme="light"]) .btn-primary:hover {
+    filter: brightness(1.07);
+    background: var(--accent);
+  }
+  :root:not([data-theme="light"]) .btn-primary:active {
+    filter: brightness(0.96);
+    transform: translateY(1px);
+    background: var(--accent);
+  }
+  :root:not([data-theme="light"]) .btn-danger:hover {
+    filter: brightness(1.07);
+    background: var(--danger-fill);
+  }
+  :root:not([data-theme="light"]) .btn-danger:active {
+    transform: translateY(1px);
+    background: var(--danger-fill);
+  }
+  :root:not([data-theme="light"]) .btn-outline {
+    border-color: var(--line-2);
+  }
+  :root:not([data-theme="light"]) .btn-quiet:hover,
+  :root:not([data-theme="light"]) .btn-ghost:hover {
+    background: var(--surface-3);
+  }
+  :root:not([data-theme="light"]) .logo-mark {
+    box-shadow: none;
+  }
+  :root:not([data-theme="light"]) .input:focus,
+  :root:not([data-theme="light"]) .textarea:focus,
+  :root:not([data-theme="light"]) .select:focus {
+    border-color: var(--accent-press);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  :root:not([data-theme="light"]) .switch .track {
+    background: var(--surface-3);
+  }
+  :root:not([data-theme="light"]) .switch .thumb {
+    background: var(--ink-2);
+  }
+  :root:not([data-theme="light"]) .switch input:checked + .track {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  :root:not([data-theme="light"]) .seg {
+    background: var(--bg-sunken);
+  }
+  :root:not([data-theme="light"]) .kbd {
+    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+  }
+}

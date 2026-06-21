@@ -1,4 +1,5 @@
 import "../styles/tokens.css";
+import "../styles/components.css"; // shared design components (buttons/cards/badges/inputs/switch); no JS rides this (D-32)
 import "../styles/app-host.css"; // host-app shell styles (dashboard/CRUD); no JS rides this (D-32)
 import { mountDeviceCheck } from "./devicecheck.js";
 import { mountGreenroom } from "./greenroom.js";

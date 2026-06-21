@@ -89,6 +89,10 @@
   --warn-soft: #f3ebcb;
   --bad: #cf3f2e;
   --bad-soft: #f8e1da;
+  /* danger BUTTON fill (white text on top): a third context distinct from --bad (chip fill) and
+     --danger (text token). #cf3f2e gives white 4.76:1 (AA). The design's lighter --bad would fail
+     here, as the dark value below would too — so both branches carry an AA-clean fill (M5.6 PR-2). */
+  --danger-fill: #cf3f2e;
   --live: #e8402e;
   --tile: #dde1cc;
   --tile-2: #cfd4b9;
@@ -122,6 +126,9 @@
   --bad: #f0654f;
   --bad-soft: #3c1f18;
   --danger: #f0654f;
+  /* danger BUTTON fill: white on the lighter dark --bad (#f0654f) is only ~3.15:1 — fails AA. This
+     deeper brick red gives white 5.41:1 at rest and stays >= 4.5:1 under the hover brightness. */
+  --danger-fill: #c2372a;
   --live: #ff5240;
   --tile: #262b18;
   --tile-2: #313722;
@@ -153,6 +160,7 @@
     --bad: #f0654f;
     --bad-soft: #3c1f18;
     --danger: #f0654f;
+    --danger-fill: #c2372a; /* AA-clean danger-button fill (white text) — see the explicit-dark block */
     --live: #ff5240;
     --tile: #262b18;
     --tile-2: #313722;
