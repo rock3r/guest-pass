@@ -170,10 +170,12 @@ func TestBinding_LiveRebindReachesSource(t *testing.T) {
 	}
 }
 
-// M5.5/AC-2 (DESIGN §6 guest-left): a DELIBERATE leave — the guest clicks "Leave the greenroom",
-// sending {t:"leave"} — vacates the bound cam slot IMMEDIATELY, so the OBS source re-routes to empty
-// at once, instead of the transient grace-retain a bare socket drop gets (D-40). Without the terminal
-// vacate the source would hold the departed guest's frozen frame for the whole grace window (codex).
+// M5.5/AC-2 (DESIGN §6 guest-left): a DELIBERATE leave — the guest clicks "Leave the greenroom" —
+// vacates the bound cam slot IMMEDIATELY via the out-of-band POST /p/{token}/leave, so the OBS source
+// re-routes to empty at once instead of the transient grace-retain a bare socket drop gets (D-40).
+// Exercised in the HARDEST case (codex): the guest's signaling socket has already DROPPED (a
+// reconnect), so an in-band WS frame could not be sent — the slot is grace-held — yet the deliberate
+// leave must still vacate it now, not hold the departed guest's frozen frame for the whole window.
 func TestBinding_DeliberateLeaveVacatesSlotImmediately(t *testing.T) {
 	h := newWSHarness(t, wsHarnessOpts{})
 	host, cookie := h.seedHost(t, "leaver", store.HostActive)
@@ -207,12 +209,25 @@ func TestBinding_DeliberateLeaveVacatesSlotImmediately(t *testing.T) {
 		t.Fatalf("slot-rebind occupant = %q, want the guest %q", f.OccupantPeerID, pass.ID)
 	}
 
-	// The guest deliberately leaves → the source must re-route to empty (slot-unbound) right away. If
-	// the leave were treated like a transient drop, the slot would stay grace-bound and no unbound
-	// would arrive within the read deadline (≪ the grace window) — failing this read.
-	wsWriteFrame(t, gc, signaling.Frame{T: "leave"})
+	// The guest's socket DROPS (transient) — the slot is now grace-held; the source keeps the frozen
+	// frame and gets no vacate frame yet.
+	_ = gc.Close(websocket.StatusNormalClosure, "drop")
+
+	// The guest deliberately leaves DURING the reconnect, out-of-band. The slot must vacate now: the
+	// source re-routes to empty. If the leave couldn't reach the server while the socket is down, the
+	// slot would stay grace-bound and no unbound would arrive within the read deadline (≪ the grace
+	// window) — failing this read.
+	lreq, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/p/"+passRaw+"/leave", nil)
+	lresp, err := http.DefaultClient.Do(lreq)
+	if err != nil {
+		t.Fatalf("POST leave: %v", err)
+	}
+	_ = lresp.Body.Close()
+	if lresp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST leave = %d, want 204", lresp.StatusCode)
+	}
 	if f := readFrameOfType(t, sc, "slot-unbound"); f.T != "slot-unbound" {
-		t.Fatalf("after a deliberate leave, source frame = %q, want slot-unbound (immediate vacate)", f.T)
+		t.Fatalf("after a deliberate leave during a reconnect, source frame = %q, want slot-unbound", f.T)
 	}
 }
 

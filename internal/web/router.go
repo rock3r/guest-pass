@@ -270,6 +270,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			}
 			pr.Get("/p/{token}", api.passLanding)
 			pr.Post("/p/{token}/enter", api.passEnter)
+			// Voluntary leave (DESIGN §6 guest-left): vacate the guest's own cam slot out-of-band, so it
+			// works even when the signaling socket is down (a leave during a reconnect) — when the WS
+			// can't carry the signal. Token-authed like /enter; idempotent.
+			pr.Post("/p/{token}/leave", api.passLeave)
 			// Public abuse-report form (D-42/EN-24): the reporter is the invited guest, resolved from
 			// the token server-side; only category + message come from the form. Same rate limiter.
 			pr.Get("/p/{token}/report", api.reportForm)

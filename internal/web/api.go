@@ -364,6 +364,37 @@ func (a *apiServer) passEnter(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// passLeave handles POST /p/{token}/leave — the guest's voluntary "Leave the greenroom" (DESIGN §6
+// guest-left). It vacates the guest's OWN cam slot in the live room OUT-OF-BAND, so a deliberate
+// leave is honoured even when the signaling socket is down (a leave during a reconnect): the WS-close
+// path alone looks like a transient drop and would grace-hold the slot — and the OBS source's frozen
+// frame — for the whole window (D-40). Token-authed (no host session), idempotent, and opaque: an
+// unknown/retired token or an offline host is a quiet 204 no-op, never revealing room state.
+func (a *apiServer) passLeave(w http.ResponseWriter, r *http.Request) {
+	raw := chi.URLParam(r, "token")
+	pass, err := a.store.GetPassByTokenHash(r.Context(), a.hasher.Hash(raw))
+	if errors.Is(err, store.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent) // nothing to vacate; don't reveal whether the token exists
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pass")
+		return
+	}
+	if a.hub != nil {
+		if stream, err := a.store.GetStream(r.Context(), pass.StreamID); err == nil {
+			// Serialize the vacate with the /ws join-replay + host rebinds (D-20), exactly as the
+			// host-side revoke does, so a leave racing a concurrent rejoin can't leave a stale binding.
+			unlock := a.binds.lock(stream.HostID)
+			if room := a.hub.RoomIfLive(stream.HostID); room != nil {
+				room.VacateOccupant(signaling.PeerID(pass.ID))
+			}
+			unlock()
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // hostActive reports whether the stream's host is currently active (EN-6). A lookup
 // failure is treated as not-active so a transient error never lets a guest enter.
 func (a *apiServer) hostActive(ctx context.Context, streamID string) bool {

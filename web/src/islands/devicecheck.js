@@ -860,6 +860,9 @@ function DeviceCheck() {
       // resets it. Holding it through the error phase makes a still-in-flight switch bail (it can't
       // install behind the error UI), and the picker isn't rendered here so no new switch can start.
       stopStream(); // entry failed — don't leave the camera running behind the error UI
+      setErrorKind(""); // a POST /enter failure (expired link, inactive host) is NOT a media-permission
+      //                   problem — clear any prior cam-blocked/no-devices kind so the generic screen
+      //                   shows, not "unblock your camera" guidance for a pass/server error (codex).
       setError(String((e && /** @type {Error} */ (e).message) || e));
       setPhase("error");
     }
@@ -1093,18 +1096,15 @@ function DeviceCheck() {
   // lights go off), then show the guest-left screen. Voluntary — NOT a terminate; the guest can rejoin
   // while the stream is live (D-40). Mirrors retryNetwork's teardown, but stops the camera too.
   function leave() {
+    // Tell the server this is a DELIBERATE leave so it vacates our cam slot NOW (terminal), instead of
+    // grace-holding it — and the OBS source's frozen frame — for the whole window after a bare close
+    // (D-40). Sent OUT-OF-BAND over HTTP, not the WS, so it works in EVERY state — including a leave
+    // during a reconnect, when the socket is down and an in-band frame couldn't be sent (codex).
+    // Best-effort + keepalive (it may outlive this view); the server no-ops if nothing is bound.
+    fetch(`/p/${encodeURIComponent(passTokenFromPath())}/leave`, { method: "POST", keepalive: true }).catch(
+      () => {},
+    );
     if (sessionRef.current) {
-      // Tell the server this is a DELIBERATE leave so it vacates our cam slot NOW (terminal), instead
-      // of grace-holding it — and the OBS source frozen frame — for the whole window after a bare
-      // close (D-40). Best-effort: only a live socket can carry it; otherwise the grace timer reclaims
-      // the slot. WebSocket flushes this queued frame before the close handshake, so it lands first.
-      if (pubStateRef.current === "live") {
-        try {
-          sessionRef.current.send({ t: "leave" });
-        } catch {
-          /* socket already gone — the server's grace timer vacates the slot */
-        }
-      }
       sessionRef.current.close();
       sessionRef.current = null;
     }

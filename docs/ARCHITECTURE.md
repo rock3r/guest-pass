@@ -1006,11 +1006,6 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
 {"t":"hand","peerId":"<id>","raised":false}               // host dismisses another's raised hand (lower-only)
                                                           // → roster `handRaised`; auto-cleared on leave + on promote to co-host
 {"t":"screen-start"}   {"t":"screen-stop"}                // sharer enters/leaves the preview pool (D-21, RF-15)
-{"t":"leave"}                                             // DELIBERATE departure (guest-left): vacate the
-                                                          // sender's OWN cam slot NOW — terminal, not the
-                                                          // grace-retain a bare socket drop gets (D-40), so the
-                                                          // OBS source doesn't hold the frozen frame for the
-                                                          // whole window. Keyed off the authenticated id.
 {"t":"stats","signal":3,"rttMs":48,                       // periodic self-report (AD-21): the publisher
         "degraded":{"dir":"lowering","reason":"cpu"}}     // derives its OWN coarse signal (1..5) + shedding
                                                           // state from getStats and sheds its own senders
