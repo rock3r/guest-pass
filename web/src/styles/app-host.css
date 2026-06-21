@@ -1,563 +1,921 @@
-/* Host-app shell — the day-to-day out-of-room UI (dashboard, stream CRUD, and the later
-   calendar / detail / settings surfaces). Functional-first/on-brand styling (D-B); exact
-   v2-prototype pixel fidelity is a deferred polish pass (DEF-2). Server-rendered, no JS
-   (CONVENTIONS §3.1) — these styles ride the app.css bundle the host pages already load. */
+/* Host-app shell — the day-to-day out-of-room UI (dashboard, calendar, stream CRUD, settings, the
+   stream-detail invites/sources tabs, and the admin console). Restyled to the v2 design (M5.6 PR-4,
+   AC-5), ported from screens-{host,stream,sources}.jsx: a left sidebar appshell + ledger tables +
+   card surfaces. The product's existing class names are kept (tests + templates depend on them) and
+   given the design treatment. Buttons/cards/badges/inputs come from components.css; tokens + base
+   type from tokens.css. Server-rendered, no JS (CONVENTIONS §3.1). Rides the app bundle. */
 
 body.app {
   margin: 0;
-  background: var(--paper);
+  min-height: 100vh;
+  background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
+}
+
+/* ============ Sidebar appshell ============ */
+.appshell {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  min-height: 100vh;
+}
+.sidebar {
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line-2);
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  box-sizing: border-box;
+}
+.sidebar-logo {
+  padding: 4px 8px 16px;
+}
+.app-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 14.5px;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+  border: 1px solid transparent;
+  text-decoration: none;
+}
+.navitem:hover {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  color: var(--ink);
+}
+.navitem.on,
+.app-links a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+.sidebar-divider {
+  margin: 10px 4px;
+}
+.sidebar-account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 4px 0;
+}
+.sidebar-account-id {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.sidebar-account-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-signout-form {
+  margin: 0;
+}
+.sidebar-theme {
+  margin: 6px 0 0;
+  padding: 0 4px;
+}
+
+/* ============ Content column ============ */
+.content {
+  padding: 30px 28px 16px;
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
-
-.app-nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--ink);
+.content > section {
+  flex: 1 0 auto;
 }
-
-.app-brand {
-  font-weight: 700;
-  font-size: 1.1rem;
+.app-footer {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.app-footer a {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.app-footer a:hover {
   color: var(--ink);
-  text-decoration: none;
 }
 
-.app-links {
+/* Page heads — the title row most host pages open with. */
+.dash-head,
+.cal-head,
+.detail-head {
   display: flex;
-  gap: 14px;
-  flex: 1;
-}
-
-.app-links a {
-  color: var(--ink);
-  text-decoration: none;
-  opacity: 0.8;
-}
-
-.app-links a[aria-current="page"] {
-  opacity: 1;
-  font-weight: 600;
-  border-bottom: 2px solid var(--accent);
-}
-
-.app-account {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.app-host {
-  opacity: 0.8;
-}
-
-.app-signout-form {
-  margin: 0;
-}
-
-.app-main {
-  flex: 1;
-  width: 100%;
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 24px 20px;
-  box-sizing: border-box;
-}
-
-/* Buttons (.btn / .btn-primary / .btn-quiet / .btn-danger) now come from the shared component
-   system in components.css (M5.6 PR-2) — the design's offset-shadow / flat-dark treatment. */
-
-/* Dashboard stream list. */
-.dash-head {
-  display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.dash-head h1,
+.cal-head h1,
+.detail-head h1 {
+  font-size: clamp(24px, 4vw, 30px);
+  line-height: 1.08;
+}
+.dash h1,
+.settings h1,
+.greenroom h1 {
+  font-size: clamp(24px, 4vw, 30px);
+  margin-bottom: 6px;
 }
 
+/* Flash messages (saved / errors / quota). */
+.dash-flash,
+.settings-flash,
+.admin-flash {
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 18px;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.dash-flash-error,
+.settings-flash-error,
+.admin-flash-error {
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+  color: var(--danger);
+}
+.settings-flash-ok,
+.admin-flash-ok {
+  background: var(--good-soft);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+  color: var(--good);
+}
+
+/* ============ Dashboard — stream list ============ */
 .stream-list {
   list-style: none;
-  margin: 16px 0 28px;
+  margin: 0 0 28px;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
-
 .stream-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  flex-wrap: wrap;
 }
-
 .stream-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
-
 .stream-title {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15.5px;
   color: var(--ink);
   text-decoration: none;
 }
-
-.stream-status {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--ink);
-  opacity: 0.85;
+.stream-title:hover {
+  color: var(--accent-press);
 }
-
 .stream-when {
-  opacity: 0.7;
-  font-size: 0.9rem;
+  color: var(--ink-2);
+  font-size: 13px;
 }
-
 .stream-actions {
   display: flex;
   gap: 8px;
 }
-
 .inline-form {
   margin: 0;
 }
-
 .dash-empty {
-  opacity: 0.7;
-  margin: 16px 0 28px;
+  color: var(--ink-2);
+  margin: 0 0 28px;
+  font-size: 15px;
 }
 
-/* Create + edit forms. */
+/* Status pill (stream-status / slot states / invite status). */
+.stream-status,
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+.status-live,
+.status-active {
+  background: var(--good-soft);
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+.status-scheduled {
+  background: var(--accent-soft);
+  color: var(--accent-press);
+  border-color: color-mix(in srgb, var(--accent-press) 40%, transparent);
+}
+.status-ended,
+.status-draft {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.status-suspended,
+.status-pending {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+/* ============ Create / edit forms ============ */
 .stream-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   max-width: 460px;
 }
-
 .stream-form label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-weight: 600;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
 }
-
-.stream-form input {
+.stream-form input,
+.stream-form select {
   font: inherit;
-  padding: 8px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--surface);
+  text-transform: none;
+  letter-spacing: normal;
   color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 11px 13px;
+  box-sizing: border-box;
 }
-
+.stream-form input:focus,
+.stream-form select:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+}
 .stream-form button {
   align-self: flex-start;
 }
-
 .stream-create {
-  border-top: 1px solid var(--ink);
-  padding-top: 20px;
+  border-top: 1px solid var(--line-2);
+  padding-top: 24px;
+  margin-top: 8px;
 }
-
+.stream-create h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
 .stream-delete {
-  margin-top: 20px;
+  margin-top: 24px;
 }
-
+.back-link {
+  margin: 0 0 14px;
+}
 .back-link a {
-  color: var(--ink);
+  color: var(--ink-2);
   text-decoration: none;
-  opacity: 0.8;
+  font-size: 13.5px;
+  font-weight: 600;
 }
-
+.back-link a:hover {
+  color: var(--ink);
+}
 .form-error {
   color: var(--danger);
   font-weight: 600;
+  background: var(--bad-soft);
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  margin: 0 0 16px;
 }
 
-/* Calendar — read-only month grid + agenda (D-8; recurring control deliberately absent). */
-.cal-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
+/* ============ Calendar ============ */
 .cal-nav {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-
 .cal-month {
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
   min-width: 9ch;
   text-align: center;
 }
-
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-  margin: 16px 0 28px;
+  gap: 0;
+  margin: 0 0 28px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface);
 }
-
 .cal-weekday {
-  font-weight: 600;
-  font-size: 0.85rem;
-  opacity: 0.7;
-  padding: 4px 6px;
-  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2); /* AA: --ink-3 micro-labels are only ~2.8:1 on the light surfaces (fails AA) */
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-2);
 }
-
 .cal-cell {
-  min-height: 84px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  padding: 4px 6px;
+  min-height: 92px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 9px;
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
-
 .cal-empty {
-  border-style: dashed;
-  opacity: 0.4;
-  background: transparent;
+  background: var(--surface-2);
 }
-
 .cal-today {
-  border-width: 2px;
-  border-color: var(--accent);
+  background: var(--accent-soft);
 }
-
 .cal-day {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 13px;
+  color: var(--ink-2);
 }
-
+.cal-today .cal-day {
+  color: var(--accent-press);
+  font-weight: 800;
+}
 .cal-event {
-  font-size: 0.78rem;
+  font-size: 11.5px;
+  font-weight: 600;
   text-decoration: none;
-  color: var(--accent-ink);
-  background: var(--accent);
-  border-radius: 5px;
-  padding: 1px 5px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 7px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.agenda {
-  border-top: 1px solid var(--ink);
-  padding-top: 18px;
+.cal-event:hover {
+  background: var(--surface-3);
 }
-
+.cal-event.status-live {
+  background: var(--live);
+  color: #fff;
+  border-left-color: color-mix(in srgb, #000 25%, var(--live));
+}
+.agenda {
+  border-top: 1px solid var(--line-2);
+  padding-top: 22px;
+}
+.agenda h2 {
+  font-size: 18px;
+  margin-bottom: 14px;
+}
 .agenda-list {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-
 .agenda-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
-
 .agenda-when {
-  opacity: 0.75;
+  color: var(--ink-2);
   font-variant-numeric: tabular-nums;
-  min-width: 18ch;
+  min-width: 17ch;
+  font-size: 13.5px;
 }
-
 .agenda-title {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink);
   text-decoration: none;
+  flex: 1;
+}
+.agenda-title:hover {
+  color: var(--accent-press);
 }
 
-/* Stream detail + Invites tab. */
-.detail-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
+/* ============ Stream detail — header, tabs, invites, sources, live-verify ============ */
 .detail-actions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-/* Live-session indicator (EN-2/D-20): the host's one live show. */
 .live-pill {
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
   font-weight: 600;
-  color: var(--danger);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--live);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-xs);
+  padding: 4px 9px;
   white-space: nowrap;
 }
 .live-note {
-  font-size: 0.8rem;
-  color: var(--muted, #555);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.session-state {
+  display: contents;
 }
 
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--ink);
-  margin: 12px 0 20px;
+  border-bottom: 1px solid var(--line-2);
+  margin: 0 0 24px;
 }
-
 .tab {
-  padding: 8px 14px;
+  padding: 11px 14px;
   text-decoration: none;
-  color: var(--ink);
-  opacity: 0.75;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-}
-
-.tab-active {
-  opacity: 1;
+  color: var(--ink-2); /* AA: --ink-3 micro-labels are only ~2.8:1 on the light surfaces (fails AA) */
   font-weight: 600;
-  border-color: var(--ink);
-  background: var(--surface);
+  font-size: 14.5px;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--ink-2);
+}
+.tab-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
 }
 
+.invites h2,
+.invite-create h3,
+.live-verify h2,
+.sources h2 {
+  font-size: 18px;
+  margin-bottom: 14px;
+}
 .issued {
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  background: var(--surface);
-  padding: 12px 14px;
-  margin-bottom: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent-press) 35%, var(--line-2));
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  padding: 14px 16px;
+  margin-bottom: 22px;
 }
-
+.issued p {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
 .issued-link {
   width: 100%;
   box-sizing: border-box;
   font: inherit;
   font-family: var(--font-mono);
-  padding: 8px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
+  font-size: 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
 }
 
+/* Ledger-style table for invites. */
 .invite-table {
   width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0 24px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0 0 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface);
 }
-
-.invite-table th,
-.invite-table td {
+.invite-table th {
   text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2); /* AA: --ink-3 micro-labels are only ~2.8:1 on the light surfaces (fails AA) */
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface-2);
+}
+.invite-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
   vertical-align: middle;
 }
-
-.invite-table th {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
+.invite-table tr:last-child td {
+  border-bottom: 0;
 }
-
+.invite-table tbody tr:hover {
+  background: var(--surface-2);
+}
 .role-form {
   display: flex;
   gap: 6px;
   align-items: center;
   margin: 0;
 }
-
 .role-form select,
-.invite-create select {
+.invite-create select,
+.live-verify-form select {
   font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--ink);
 }
-
 .invite-actions {
   display: flex;
   gap: 6px;
 }
-
 .invite-create {
-  border-top: 1px solid var(--ink);
-  padding-top: 18px;
+  border-top: 1px solid var(--line-2);
+  padding-top: 22px;
+  margin-top: 8px;
 }
 
-.muted {
-  opacity: 0.5;
-}
-
-/* Read-only Sources tab (EN-26): per-slot reference cards, no editable controls. */
+/* Read-only Sources tab — per-slot reference cards. */
 .sources-intro {
-  opacity: 0.85;
-  max-width: 60ch;
+  color: var(--ink-2);
+  max-width: 64ch;
+  line-height: 1.6;
+  margin: 0 0 18px;
 }
-
+.sources-intro a {
+  color: var(--accent-press);
+  font-weight: 600;
+}
+.rotate-all {
+  margin: 0 0 20px;
+}
 .reveal-all {
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
 }
-
 .slot-list {
   list-style: none;
   margin: 16px 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
 }
-
 .slot-card {
-  border: 1px solid var(--ink);
-  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   background: var(--surface);
-  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-
 .slot-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-
 .slot-title {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 14.5px;
 }
-
 .slot-onair {
-  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--ink);
-  opacity: 0.7;
+  padding: 4px 8px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  white-space: nowrap;
 }
-
 .slot-onair[data-onair="on-air"] {
-  background: #a3261c;
+  background: var(--live);
   color: #fff;
-  border-color: var(--danger);
-  opacity: 1;
+  border-color: var(--edge);
 }
-
-.slot-onair[data-onair="not-on-air"] {
-  opacity: 0.85;
-}
-
 .slot-occupant {
-  font-size: 0.9rem;
+  font-size: 13.5px;
+  color: var(--ink-2);
 }
-
+.slot-occupant strong {
+  color: var(--ink);
+}
 .slot-url-label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2); /* AA: --ink-3 micro-labels are only ~2.8:1 on the light surfaces (fails AA) */
+}
+.slot-url-hidden {
+  font-size: 12.5px;
+  margin: 0;
+}
+.slot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+.slot-manage {
+  color: var(--accent-press);
+  text-decoration: none;
+  font-size: 13px;
   font-weight: 600;
 }
-
-.slot-manage a {
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 0.85rem;
-  opacity: 0.8;
+.slot-manage:hover {
+  text-decoration: underline;
 }
 
-/* Account settings + GDPR stubs (AC-10/D-37): read-only account card + non-functional entry points. */
+.live-verify {
+  border-top: 1px solid var(--line-2);
+  padding-top: 22px;
+  margin-top: 28px;
+}
+.live-verify > p {
+  color: var(--ink-2);
+  max-width: 64ch;
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+.live-verify-current {
+  font-size: 14px;
+}
+.live-verify-current .watch-live {
+  color: var(--accent-press);
+  font-weight: 700;
+  text-decoration: none;
+}
+.live-verify-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.live-verify-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.live-verify-form input {
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+
+/* ============ Settings ============ */
 .settings {
-  max-width: 640px;
+  max-width: 720px;
 }
 .settings-card {
-  margin: 0 0 18px;
-  padding: 16px 18px;
-  border: 1px solid var(--line, #d8d2c4);
-  border-radius: 10px;
-  background: var(--paper);
+  margin: 0 0 20px;
+  padding: 20px 22px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 .settings-card h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+.settings-card h3 {
+  margin: 18px 0 6px;
+  font-size: 14.5px;
+}
+.settings-card p {
+  color: var(--ink-2);
+  line-height: 1.6;
   margin: 0 0 10px;
-  font-size: 1.05rem;
+}
+.settings-card strong {
+  color: var(--ink);
 }
 .settings-fields {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
-  margin: 0;
+  gap: 8px 18px;
+  margin: 0 0 16px;
 }
 .settings-fields dt {
-  font-weight: 600;
-  opacity: 0.7;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2); /* AA: --ink-3 micro-labels are only ~2.8:1 on the light surfaces (fails AA) */
+  align-self: center;
 }
 .settings-fields dd {
   margin: 0;
+  font-size: 14.5px;
 }
-.settings-note {
-  margin: 10px 0 0;
-  font-size: 0.85rem;
-  opacity: 0.7;
-}
-.settings-gdpr {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+.settings-amend {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.settings-gdpr li {
-  display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   gap: 10px;
   flex-wrap: wrap;
 }
-.settings-gdpr-note {
-  font-size: 0.85rem;
-  opacity: 0.7;
+.settings-amend label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.settings-amend input {
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-sizing: border-box;
+  margin-top: 6px;
+  min-width: 220px;
+}
+.settings-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.settings-delete {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 6px;
+}
+.settings-delete-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14px;
+  color: var(--ink-2);
+  line-height: 1.5;
 }
 
-/* Stream-detail live-state wrapper (M5.5): a transparent container around the "● Live / End
-   session" controls so the liveness poll can swap them for an "ended" notice in place. display:
-   contents keeps its children in the .detail-actions flex row (no layout change). */
-.session-state {
-  display: contents;
+/* ============ Responsive: collapse the sidebar to a top strip ============ */
+@media (max-width: 860px) {
+  .appshell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .sidebar-logo {
+    padding: 4px 8px;
+  }
+  .app-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+  .sidebar > .grow {
+    display: none;
+  }
+  .sidebar-divider {
+    display: none;
+  }
+  .sidebar-account {
+    flex-direction: row;
+    align-items: center;
+    padding: 0;
+  }
+  .app-signout-form .btn-block {
+    width: auto;
+  }
+  .content {
+    padding: 22px 20px 12px;
+    min-height: 0;
+  }
 }
 
-/* The error / auth-denial / state screens (.error-screen) render into base.html (the public shell),
-   so their styling moved to public.css with the rest of the public surfaces (M5.6 PR-3). */
+/* ============ Dark refinement: the host nav active item ============ */
+:root[data-theme="dark"] .navitem.on,
+:root[data-theme="dark"] .app-links a[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent-press);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .navitem.on,
+  :root:not([data-theme="light"]) .app-links a[aria-current="page"] {
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    color: var(--accent-press);
+  }
+}
