@@ -69,34 +69,8 @@ body.app {
   box-sizing: border-box;
 }
 
-/* Buttons + links shared across the host-app forms. */
-.btn {
-  display: inline-block;
-  font: inherit;
-  cursor: pointer;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--ink);
-  background: var(--paper);
-  color: var(--ink);
-  text-decoration: none;
-  line-height: 1.2;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-
-.btn-quiet {
-  background: transparent;
-}
-
-.btn-danger {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: transparent;
-}
+/* Buttons (.btn / .btn-primary / .btn-quiet / .btn-danger) now come from the shared component
+   system in components.css (M5.6 PR-2) — the design's offset-shadow / flat-dark treatment. */
 
 /* Dashboard stream list. */
 .dash-head {

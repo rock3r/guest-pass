@@ -262,7 +262,17 @@ names (`--paper`/`--muted`/`--danger`) remain as aliases of the design's
 (`--good`/`--warn`/`--danger`) keep AA-readable darker values (the design's lighter
 `--bad`/`-soft` are for chip fills). The accent + its on-accent ink are
 theme-constant; dark is the control-room green-black, flat-depth (no offset
-shadows). Two triggers: the OS
+shadows). The design's shared **component system** (the `.btn` family,
+`.card`/`.panel`/`.divider`, `.badge` variants, the `.input`/`.textarea`/`.select`/
+`.switch`/`.seg`/`.range` form controls, and small layout primitives) lives in
+`web/src/styles/components.css`, ported from `styles-v2.css` and imported by the
+app bundle after `tokens.css` (M5.6 PR-2). It reconciles the product's existing
+button vocabulary onto the design's treatment: bare `.btn` → the design's outline
+look (a real secondary button), `.btn-primary` → accent, `.btn-danger` → danger,
+`.btn-quiet` → ghost. Dark flattens every button offset shadow (the refinement
+block is mirrored across the explicit `:root[data-theme="dark"]` selector and the
+OS `prefers-color-scheme` path, exactly as the token block is). The OBS bundle
+never imports it. Two triggers: the OS
 (`@media (prefers-color-scheme: dark)`, applied only when the user hasn't
 explicitly chosen light), and an explicit choice the **server** stamps onto
 `<html data-theme>` from the `gp_theme` cookie *before paint* (so there's no flash
@@ -465,7 +475,7 @@ web/
                       config from the join-ack + {t:ice-refresh}), getStats sampling
   src/islands/        device-check(+publish), greenroom grid, guest-session (APP entry)
   src/obs/            cam + screen source pages                (OBS esbuild entry — no fonts)
-  src/styles/         design tokens verbatim from styles-v2.css (D-9)
+  src/styles/         tokens.css (design tokens + base type) + components.css (shared components), from styles-v2.css (D-9)
   vendor/preact/      vendored Preact (MIT, committed)
   fonts/              OFL woff2 ×3 (+ each family's OFL.txt)   (EN-17)
   dist/               build output — GITIGNORED, go:embed at release (AD-7)
