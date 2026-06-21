@@ -43,12 +43,45 @@
   align-items: flex-start;
 }
 
-.gs-selfview {
+/* The self-view sits in a relative wrapper so the audio-only placeholder (PD-12) can overlay it. */
+.gs-selfview-wrap {
+  position: relative;
   width: min(100%, 360px);
+  flex: 0 0 auto;
+}
+
+.gs-selfview {
+  display: block;
+  width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
   border-radius: 10px;
   object-fit: cover;
+}
+
+/* Connected-with-audio placeholder shown over the black self-view when the guest joined audio-only. */
+.gs-novideo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 14%, #000);
+  color: #fff;
+}
+
+.gs-novideo-icon {
+  font-size: 2em;
+  line-height: 1;
+}
+
+.gs-novideo-text {
+  font-weight: 600;
 }
 
 .gs-status {

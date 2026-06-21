@@ -3,6 +3,7 @@
 package browsertest
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -31,6 +32,73 @@ func TestGuestSession_BackstageThumbnails(t *testing.T) {
 	}
 	if err := chromedp.Run(ctxB, chromedp.Poll(thumb, nil, chromedp.WithPollingTimeout(90*time.Second))); err != nil {
 		t.Fatalf("guest B did not render guest A's backstage thumbnail over the mesh: %v", err)
+	}
+}
+
+// enterGuestSessionAudioOnly opens a FRESH fake-media browser whose getUserMedia rejects any video
+// request (camera blocked) but resolves audio, runs the cam-blocked → "Join audio-only" → enter flow
+// (PD-12), and returns the live ctx. The mic-only mirror of enterGuestSession.
+func enterGuestSessionAudioOnly(t *testing.T, base, rawToken, label string) context.Context {
+	t.Helper()
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	t.Cleanup(cancelAlloc)
+	ctx, cancel := chromedp.NewContext(alloc)
+	t.Cleanup(cancel)
+	ctx, cancelT := context.WithTimeout(ctx, 150*time.Second)
+	t.Cleanup(cancelT)
+	blockVideo := `(() => {
+		const md = navigator.mediaDevices;
+		const orig = md.getUserMedia.bind(md);
+		Object.defineProperty(md, 'getUserMedia', {
+			configurable: true, writable: true,
+			value: (c) => (c && c.video)
+				? Promise.reject(new DOMException('camera blocked', 'NotAllowedError'))
+				: orig(c),
+		});
+		return true;
+	})()`
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(base+"/p/"+rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Evaluate(blockVideo, nil),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-error[data-error-kind="blocked"] .dc-audio-only`, chromedp.ByQuery),
+		chromedp.Click(`.dc-audio-only`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-preview[data-audio-only="1"]`, chromedp.ByQuery),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"] .gs-selfview`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("audio-only guest %s enter: %v", label, err)
+	}
+	return ctx
+}
+
+// PD-12 mesh: an audio-only guest must still RECEIVE other backstage participants' cameras over the
+// thumbnail mesh even when it is the deterministic OFFERER (the lower peer id). Its offer must carry a
+// video receive m-line despite publishing no camera; otherwise the answering peer has no m-line to
+// send its camera back on and the thumbnail stays blank (codex P2). The lower-id guest joins
+// audio-only (the offerer); assert it renders the video peer's thumbnail with live frames, and that
+// the video peer renders the audio-only guest as connected-with-audio (placeholder, not a broken tile).
+func TestGuestSession_AudioOnlyOffererReceivesPeerThumbnail(t *testing.T) {
+	s := seedDeviceCheck(t)
+	// The LOWER peer id (== pass id) offers in the mesh — make THAT guest audio-only so the fix is
+	// exercised on the offerer path (where the missing video m-line bites).
+	audioTok, videoTok := s.rawToken, s.rawTokenB
+	if s.passIDB < s.passID {
+		audioTok, videoTok = s.rawTokenB, s.rawToken
+	}
+	audioCtx := enterGuestSessionAudioOnly(t, s.base, audioTok, "audio-only")
+	videoCtx := enterGuestSession(t, s.base, videoTok, "video")
+
+	// The audio-only OFFERER renders the video peer's camera thumbnail with live frames — proof the
+	// answerer attached its camera because the audio-only offer included a video receive m-line.
+	thumbVideo := `[...document.querySelectorAll('.gr-tile .gr-video')].some((v) => v.videoWidth > 0)`
+	if err := chromedp.Run(audioCtx, chromedp.Poll(thumbVideo, nil, chromedp.WithPollingTimeout(90*time.Second))); err != nil {
+		t.Fatalf("audio-only offerer did not receive the video peer's thumbnail (mesh offer missing a video recv m-line): %v", err)
+	}
+	// The video peer renders the audio-only guest's thumbnail as connected-with-audio.
+	if err := chromedp.Run(videoCtx, chromedp.WaitVisible(`.gr-tile[data-novideo="1"]`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("video peer did not render the audio-only guest as connected-with-audio: %v", err)
 	}
 }
 

@@ -86,11 +86,32 @@ export function GuestSession({
   const [draft, setDraft] = useState("");
   /** @type {{current: HTMLVideoElement|null}} */
   const selfRef = useRef(null);
-  // Attach the guest's own camera once the <video> is mounted; an effect (not a render-time set)
-  // so a re-render (an on-air change, a new chat line) never reloads the self-view.
+  // Whether the guest's own published stream carries video. An audio-only join (PD-12) has a mic
+  // track but no camera track, so the self-view shows a connected-with-audio placeholder instead of a
+  // black box. Tracked as state (not just a render-time read) so a track added/removed on the same
+  // stream object refreshes it. This is distinct from a force-no-cam lock, which keeps the (disabled)
+  // video track — that case is covered by the separate lock notice, not this placeholder.
+  const [selfHasVideo, setSelfHasVideo] = useState(false);
+  const [selfHasAudio, setSelfHasAudio] = useState(false);
+  // Attach the guest's own camera once the <video> is mounted; an effect (not a render-time set) so a
+  // re-render (an on-air change, a new chat line) never reloads the self-view. The same effect tracks
+  // whether the stream carries video, for the audio-only placeholder.
   useEffect(() => {
     if (selfRef.current) selfRef.current.srcObject = selfStream || null;
+    const recompute = () => {
+      setSelfHasVideo(!!selfStream && selfStream.getVideoTracks().length > 0);
+      setSelfHasAudio(!!selfStream && selfStream.getAudioTracks().length > 0);
+    };
+    recompute();
+    if (!selfStream || !selfStream.addEventListener) return undefined;
+    selfStream.addEventListener("addtrack", recompute);
+    selfStream.addEventListener("removetrack", recompute);
+    return () => {
+      selfStream.removeEventListener("addtrack", recompute);
+      selfStream.removeEventListener("removetrack", recompute);
+    };
   }, [selfStream]);
+  const selfAudioOnly = selfHasAudio && !selfHasVideo;
   // The live screen share, rendered for everyone backstage (AC-11): attach the consumed stream via an
   // effect keyed by its identity, so a re-render doesn't reload it but a swap to a new sharer does.
   /** @type {{current: HTMLVideoElement|null}} */
@@ -152,7 +173,17 @@ export function GuestSession({
       data-degraded={selfDegraded ? `${selfDegraded.dir}:${selfDegraded.reason}` : ""}
     >
       <div class="gs-stage">
-        <video ref={selfRef} class="gs-selfview" autoplay playsinline muted />
+        <div class="gs-selfview-wrap" data-novideo={selfAudioOnly ? "1" : undefined}>
+          <video ref={selfRef} class="gs-selfview" autoplay playsinline muted />
+          {/* Audio-only join (PD-12): a connected-with-audio placeholder over the black self-view,
+              so the guest sees they're live with just their mic rather than a broken camera. */}
+          {selfAudioOnly ? (
+            <div class="gs-novideo" data-novideo="1">
+              <span class="gs-novideo-icon" aria-hidden="true">🎙️</span>
+              <span class="gs-novideo-text">Camera off — you're connected with audio only.</span>
+            </div>
+          ) : null}
+        </div>
         {/* The host-selected live screen share, shown to everyone backstage (AC-11). Rendered only
             while a share is live; muted (video-only capture, D-41) and never reloaded across a
             re-render (the effect keys on the sharer identity). */}
