@@ -276,9 +276,15 @@ never imports it. The **public surfaces** (base.html shell + the landing/sign-in
 guest-pass/report/error-&-state screens) are laid out by `web/src/styles/public.css`
 (M5.6 PR-3, also app-bundle-only) — page chrome only; their controls reuse the
 components. base.html carries a logo header + a sticky footer; the `.error-screen`
-state pages moved here from `app-host.css`. Real public text uses `--ink-2`, not the
-design's faint `--ink-3` (only ~2.8:1 on the light `--bg` — fails AA). Two triggers:
-the OS
+state pages moved here from `app-host.css`. The **host app** (dashboard, calendar,
+stream CRUD, settings, the stream-detail invites/sources tabs, admin) is laid out by
+`web/src/styles/app-host.css` (M5.6 PR-4): the design's left-**sidebar appshell**
+(`.appshell`/`.sidebar`/`.navitem` + a sticky footer), ledger `.invite-table`, and
+card surfaces, restyling the product's existing `.stream-*`/`.cal-*`/`.slot-*`/
+`.settings-*` classes in place (so coupled test selectors keep working); it collapses
+to a top strip under 860px. Real text — both public and host — uses `--ink-2`, never
+the design's faint `--ink-3` (only ~2.8:1 on the light surfaces — fails AA; `--ink-3`
+is for placeholders). Two triggers: the OS
 (`@media (prefers-color-scheme: dark)`, applied only when the user hasn't
 explicitly chosen light), and an explicit choice the **server** stamps onto
 `<html data-theme>` from the `gp_theme` cookie *before paint* (so there's no flash
