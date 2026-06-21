@@ -1,5 +1,5 @@
 import "./greenroom.css";
-import { useRef, useEffect } from "preact/hooks";
+import { useRef, useEffect, useState } from "preact/hooks";
 
 /**
  * Shared greenroom tile + moderation controls, rendered by BOTH the host greenroom grid (PR-9/10)
@@ -211,13 +211,43 @@ function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismi
 export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
+  // Whether the consumed stream carries video. An audio-only guest (PD-12 mic-only join) connects
+  // with a mic track but no camera track, so the tile shows a connected-with-audio placeholder
+  // instead of a broken black box. Tracked as state (not a bare render-time read) so a track added or
+  // removed on the same stream object updates the tile. A force-no-cam lock KEEPS the (disabled) video
+  // track, so it stays "has video" here and is communicated by the lock notice — not this placeholder.
+  const [hasVideo, setHasVideo] = useState(false);
+  const [hasAudio, setHasAudio] = useState(false);
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream || null;
+    const recompute = () => {
+      setHasVideo(!!stream && stream.getVideoTracks().length > 0);
+      setHasAudio(!!stream && stream.getAudioTracks().length > 0);
+    };
+    recompute();
+    if (!stream || !stream.addEventListener) return undefined;
+    stream.addEventListener("addtrack", recompute);
+    stream.addEventListener("removetrack", recompute);
+    return () => {
+      stream.removeEventListener("addtrack", recompute);
+      stream.removeEventListener("removetrack", recompute);
+    };
   }, [stream]);
+  const audioOnly = hasAudio && !hasVideo;
   const notices = lockNotices(entry.locks);
   return (
-    <div class="gr-tile" data-guest={entry.id} data-role={entry.role}>
-      <video ref={videoRef} class="gr-video" data-guest={entry.id} autoplay playsinline muted />
+    <div class="gr-tile" data-guest={entry.id} data-role={entry.role} data-novideo={audioOnly ? "1" : undefined}>
+      <div class="gr-video-wrap">
+        <video ref={videoRef} class="gr-video" data-guest={entry.id} autoplay playsinline muted />
+        {/* Audio-only guest (PD-12): a connected-with-audio placeholder over the black video, so a
+            mic-only guest reads as connected-with-audio rather than a broken tile. */}
+        {audioOnly ? (
+          <div class="gr-novideo" data-novideo="1">
+            <span class="gr-novideo-icon" aria-hidden="true">🎙️</span>
+            <span class="gr-novideo-text">Camera off · audio only</span>
+          </div>
+        ) : null}
+      </div>
       <div class="gr-meta">
         <span class="gr-name">{entry.name || entry.id}</span>
         <span class="gr-pill" data-onair={entry.onAir || "status-unavailable"}>

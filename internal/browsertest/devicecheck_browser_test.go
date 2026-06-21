@@ -314,6 +314,87 @@ func TestDeviceCheck_PermissionDeniedShowsBlockedScreen(t *testing.T) {
 	})
 }
 
+// DESIGN §6 cam-blocked "Join audio-only" fallback (PD-12): when the camera is blocked but the mic
+// is available, the blocked screen offers a REAL mic-only join — not a dead-end button. Clicking it
+// re-runs getUserMedia with {audio:true, video:false}, previews audio-only (no camera picker), and
+// entering publishes an audio-only stream that goes live in the greenroom. getUserMedia is overridden
+// so any request wanting video rejects (NotAllowedError) while a mic-only request resolves.
+func TestDeviceCheck_CamBlockedAudioOnlyJoinGoesLive(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	Chrome(t, 120*time.Second, func(cctx context.Context) {
+		// Camera blocked, mic allowed: a request carrying video rejects; audio-only resolves via the
+		// fake device. Installed before the first capture so the initial {video,audio} request fails.
+		blockVideo := `(() => {
+			const md = navigator.mediaDevices;
+			const orig = md.getUserMedia.bind(md);
+			Object.defineProperty(md, 'getUserMedia', {
+				configurable: true, writable: true,
+				value: (c) => (c && c.video)
+					? Promise.reject(new DOMException('camera blocked', 'NotAllowedError'))
+					: orig(c),
+			});
+			return true;
+		})()`
+		if err := chromedp.Run(cctx,
+			chromedp.Navigate(s.base+"/p/"+s.rawToken),
+			chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+			chromedp.Evaluate(blockVideo, nil),
+			chromedp.Click(`.dc-start`, chromedp.ByQuery),
+			// The full {video,audio} capture is denied → the cam-blocked screen, which now offers a
+			// real audio-only join alongside the Try-again.
+			chromedp.WaitVisible(`.dc-error[data-error-kind="blocked"] .dc-audio-only`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("blocked screen did not offer the audio-only join: %v", err)
+		}
+
+		// Join audio-only → a mic-only re-acquire that succeeds → an audio-only preview: no camera
+		// picker (there is no camera), the mic picker kept, ready to enter.
+		var hasCamPicker bool
+		if err := chromedp.Run(cctx,
+			chromedp.Click(`.dc-audio-only`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-preview[data-audio-only="1"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.dc-mic-select`, chromedp.ByQuery),
+			chromedp.Evaluate(`!!document.querySelector('.dc-cam-select')`, &hasCamPicker),
+		); err != nil {
+			t.Fatalf("audio-only preview did not render: %v", err)
+		}
+		if hasCamPicker {
+			t.Fatal("audio-only preview must not offer a camera picker (the camera is blocked)")
+		}
+
+		// The preview stream is audio-only: the mic picker is populated, ready to enter.
+		if err := chromedp.Run(cctx,
+			chromedp.Poll(`(() => {
+				const v = document.querySelector('.dc-preview[data-audio-only="1"]');
+				return !!v && document.querySelector('.dc-mic-select') &&
+					[...document.querySelectorAll('.dc-mic-select option')].filter((o) => o.value).length >= 1;
+			})()`, nil, chromedp.WithPollingTimeout(20*time.Second)),
+		); err != nil {
+			t.Fatalf("audio-only preview did not populate the mic picker: %v", err)
+		}
+
+		// Enter → publishes the audio-only stream and goes live in the greenroom.
+		var counts []int
+		if err := chromedp.Run(cctx,
+			chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+			// The self-view shows a connected-with-audio placeholder, not a broken/black tile.
+			chromedp.WaitVisible(`.gs-selfview-wrap[data-novideo="1"]`, chromedp.ByQuery),
+			chromedp.Evaluate(`(() => {
+				const v = document.querySelector('.gs-selfview');
+				if (!v || !v.srcObject) return [0, 0];
+				return [v.srcObject.getAudioTracks().length, v.srcObject.getVideoTracks().length];
+			})()`, &counts),
+		); err != nil {
+			t.Fatalf("audio-only entry did not go live: %v", err)
+		}
+		if len(counts) != 2 || counts[0] < 1 || counts[1] != 0 {
+			t.Fatalf("the published session stream must be audio-only: tracks=%v (want >=1 audio, 0 video)", counts)
+		}
+	})
+}
+
 // M5.5/AC-2 (DESIGN §6 unsupported): a browser with no WebRTC (old engine, or an in-app webview
 // that strips it) gets a terminal "can't join" screen up front — before any permission prompt — and
 // NO Try-again, since a retry can't add the missing API. getUserMedia is removed to simulate it.
@@ -868,5 +949,80 @@ func TestPeerLink_GuestPublishesToHostMonitor(t *testing.T) {
 			nil, chromedp.WithPollingTimeout(30*time.Second)),
 	); err != nil {
 		t.Fatalf("media did not survive an ICE restart: %v", err)
+	}
+}
+
+// PD-12 downstream: an audio-only guest (camera blocked → mic-only join) must render as
+// connected-with-audio on the HOST greenroom grid — a placeholder over the tile (data-novideo) and a
+// consumed stream that carries audio with no video — not a broken black tile. Two real Chrome tabs
+// exchange media over loopback; the guest's getUserMedia rejects every video request so it joins
+// mic-only. This validates the core assumption end-to-end: the consumer genuinely sees an audio
+// track and zero video tracks over real P2P.
+func TestPeerLink_AudioOnlyGuestShowsConnectedWithAudio(t *testing.T) {
+	s := seedDeviceCheck(t)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+
+	// Tab 1: the guest. Tab 2 (the host) is created in the SAME browser so loopback P2P works.
+	guestCtx, cancelGuest := chromedp.NewContext(allocCtx)
+	defer cancelGuest()
+	guestCtx, cancelGuestT := context.WithTimeout(guestCtx, 150*time.Second)
+	defer cancelGuestT()
+	hostCtx, cancelHost := chromedp.NewContext(guestCtx)
+	defer cancelHost()
+
+	// Guest: camera blocked (any video request rejects), mic available → join audio-only.
+	blockVideo := `(() => {
+		const md = navigator.mediaDevices;
+		const orig = md.getUserMedia.bind(md);
+		Object.defineProperty(md, 'getUserMedia', {
+			configurable: true, writable: true,
+			value: (c) => (c && c.video)
+				? Promise.reject(new DOMException('camera blocked', 'NotAllowedError'))
+				: orig(c),
+		});
+		return true;
+	})()`
+	if err := chromedp.Run(guestCtx,
+		chromedp.Navigate(s.base+"/p/"+s.rawToken),
+		chromedp.WaitVisible(`.dc-start`, chromedp.ByQuery),
+		chromedp.Evaluate(blockVideo, nil),
+		chromedp.Click(`.dc-start`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-error[data-error-kind="blocked"] .dc-audio-only`, chromedp.ByQuery),
+		chromedp.Click(`.dc-audio-only`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.dc-preview[data-audio-only="1"]`, chromedp.ByQuery),
+		chromedp.Click(`.dc-enter`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-entered="1"][data-pub="live"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("guest audio-only join: %v", err)
+	}
+
+	// Host: open the greenroom → the grid consumes the guest over P2P and renders a
+	// connected-with-audio tile (placeholder, audio track, no video track).
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	var counts []int
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		// The tile shows the audio-only placeholder once the audio track is consumed over P2P.
+		chromedp.WaitVisible(`.gr-tile[data-novideo="1"]`, chromedp.ByQuery),
+		chromedp.Poll(`(() => {
+			const v = document.querySelector('.gr-tile[data-novideo="1"] .gr-video');
+			return !!(v && v.srcObject && v.srcObject.getAudioTracks().length >= 1);
+		})()`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+		chromedp.Evaluate(`(() => {
+			const v = document.querySelector('.gr-tile[data-novideo="1"] .gr-video');
+			if (!v || !v.srcObject) return [0, 0];
+			return [v.srcObject.getAudioTracks().length, v.srcObject.getVideoTracks().length];
+		})()`, &counts),
+	); err != nil {
+		t.Fatalf("host grid did not render the audio-only guest as connected-with-audio: %v", err)
+	}
+	if len(counts) != 2 || counts[0] < 1 || counts[1] != 0 {
+		t.Fatalf("host-consumed audio-only stream must be audio-only: tracks=%v (want >=1 audio, 0 video)", counts)
 	}
 }

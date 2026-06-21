@@ -22,12 +22,45 @@
   background: var(--paper);
 }
 
+/* The video sits in a relative wrapper so the audio-only placeholder (PD-12) can overlay it. */
+.gr-video-wrap {
+  position: relative;
+  width: 100%;
+}
+
 .gr-video {
+  display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
   border-radius: 8px;
   object-fit: cover;
+}
+
+/* Connected-with-audio placeholder over the black tile when a guest joined audio-only (PD-12). */
+.gr-novideo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 14%, #000);
+  color: #fff;
+}
+
+.gr-novideo-icon {
+  font-size: 1.6em;
+  line-height: 1;
+}
+
+.gr-novideo-text {
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .gr-meta {

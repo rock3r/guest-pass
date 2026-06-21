@@ -17,6 +17,33 @@
   object-fit: cover;
 }
 
+/* Audio-only fallback preview (PD-12): a connected-with-audio placeholder that stands in for the
+   black camera tile, sized like the video so the layout doesn't jump. */
+.dc-audio-preview {
+  width: min(100%, 360px);
+  aspect-ratio: 16 / 9;
+  background: color-mix(in srgb, var(--ink) 8%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+}
+
+.dc-audio-preview-icon {
+  font-size: 2em;
+  line-height: 1;
+}
+
+.dc-audio-preview-text {
+  margin: 0;
+  font-weight: 600;
+}
+
 /* Camera + microphone dropdowns, sat under the preview at the same width. */
 .dc-devices {
   display: flex;
@@ -78,6 +105,18 @@
 
 .dc-error p {
   margin: 0;
+}
+
+/* The cam-blocked screen's two recovery actions side by side: Try again + Join audio-only (PD-12). */
+.dc-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dc-error-hint {
+  font-size: 0.9em;
+  opacity: 0.8;
 }
 
 /* Voluntary guest-left screen (M5.5/AC-2, DESIGN §6 guest-left): a clear left state with a rejoin

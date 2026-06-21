@@ -95,7 +95,18 @@ function start() {
     occupant = null;
     lockedMods = []; // a (re)bind re-projects from the server; never carry a prior occupant's locks
     if (video) video.srcObject = null;
+    renderNoVideo(); // an unbound/cleared slot carries no media — clear the audio-only seam
     renderNameplate(""); // an unbound/cleared slot shows no nameplate
+  }
+
+  // renderNoVideo reflects whether the bound occupant is connected with audio but NO camera (an
+  // audio-only join, PD-12) onto the document for the host (an OBS Custom CSS hook) and the browser
+  // test. The audio still rides the source into OBS as normal; the source just composites a black
+  // frame, which is the host's to style. Computed from the live <video> srcObject's tracks.
+  function renderNoVideo() {
+    const s = video && video.srcObject;
+    const novideo = !!s && s.getVideoTracks().length === 0 && s.getAudioTracks().length > 0;
+    document.documentElement.dataset.obsNovideo = novideo ? "1" : "";
   }
 
   // renderNameplate writes the bound occupant's display name into the nameplate as ESCAPED
@@ -166,6 +177,14 @@ function start() {
       link = l;
       l.pc.ontrack = (e) => {
         if (video) video.srcObject = e.streams[0];
+        renderNoVideo(); // audio-only occupant (PD-12) → reflect the connected-with-audio seam
+        // Keep the seam current if the occupant adds/drops a track on the same stream (e.g. a future
+        // upgrade from audio-only to camera) without a fresh ontrack.
+        const s = e.streams[0];
+        if (s && s.addEventListener) {
+          s.addEventListener("addtrack", renderNoVideo);
+          s.addEventListener("removetrack", renderNoVideo);
+        }
         applyOccupantLocks(); // re-assert any active suppression lock on the freshly-arrived track (RF-8)
       };
       l.pc.oniceconnectionstatechange = () => {

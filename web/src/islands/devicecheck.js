@@ -158,6 +158,15 @@ function DeviceCheck() {
   // still live: we keep that preview and show an inline notice rather than dropping to the error
   // screen with the old camera/mic running behind it. Cleared on the next switch attempt.
   const [switchError, setSwitchError] = useState(false);
+  // The cam-blocked "Join audio-only" fallback (PD-12, DESIGN §6): when the camera is blocked but the
+  // mic is available, the guest can join MIC-ONLY rather than hitting a dead end. In this mode capture
+  // requests video:false, the camera picker is hidden (there is no camera to pick), and the preview +
+  // self-view + every downstream tile render a connected-with-audio placeholder instead of a black
+  // video. A normal "Try again" / fresh check resets it to the full camera+mic experience. The ref is
+  // the source of truth for the async re-acquire (mediaConstraints/getStream read it without a stale
+  // render closure); the state mirror drives the render.
+  const [audioOnly, setAudioOnly] = useState(false);
+  const audioOnlyRef = useRef(false);
   const camIdRef = useRef("");
   const micIdRef = useRef("");
   // Set the instant entry begins, so a device switch still acquiring when the guest hits Enter does
@@ -239,17 +248,23 @@ function DeviceCheck() {
 
   // mediaConstraints builds the getUserMedia constraints from the current selection: an explicit
   // deviceId when the guest has chosen one, else the browser default (`true`). Read from the refs so
-  // an async re-acquire always uses the latest pick, not a stale render closure.
+  // an async re-acquire always uses the latest pick, not a stale render closure. In the audio-only
+  // fallback (PD-12) video is dropped entirely — a mic-only capture that succeeds even when the
+  // camera is blocked.
   function mediaConstraints() {
+    const audio = micIdRef.current ? { deviceId: { exact: micIdRef.current } } : true;
+    if (audioOnlyRef.current) return { video: false, audio };
     return {
       video: camIdRef.current ? { deviceId: { exact: camIdRef.current } } : true,
-      audio: micIdRef.current ? { deviceId: { exact: micIdRef.current } } : true,
+      audio,
     };
   }
 
   // getStream captures the current camera+mic selection, retrying once on the browser default if a
   // stored/selected device is gone (OverconstrainedError) so a stale saved id never hard-fails the
   // check — syncSelectedFromTracks then re-points the dropdowns at whatever was actually captured.
+  // The retry honours the audio-only fallback (video stays off), so a stale mic id can't pull the
+  // blocked camera back into the request.
   async function getStream() {
     try {
       return await navigator.mediaDevices.getUserMedia(mediaConstraints());
@@ -257,7 +272,8 @@ function DeviceCheck() {
       if (e && /** @type {Error} */ (e).name === "OverconstrainedError") {
         camIdRef.current = "";
         micIdRef.current = "";
-        return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const retry = audioOnlyRef.current ? { video: false, audio: true } : { video: true, audio: true };
+        return await navigator.mediaDevices.getUserMedia(retry);
       }
       throw e;
     }
@@ -335,8 +351,14 @@ function DeviceCheck() {
     );
   }
 
-  async function startCheck() {
+  // startCheck runs the device check. `audio` requests the MIC-ONLY fallback (PD-12): a fresh full
+  // check (the start button, Try again, rejoin) passes false and resets the camera+mic experience;
+  // the cam-blocked "Join audio-only" action passes true. Callers wire it as `() => startCheck(...)`
+  // so a DOM event object is never passed as the flag.
+  async function startCheck(audio = false) {
     if (requestingRef.current) return; // a getUserMedia is already in flight
+    audioOnlyRef.current = audio; // drives mediaConstraints/getStream for this (re)acquire
+    setAudioOnly(audio); // mirror for the render (hide the camera picker, show the audio-only chrome)
     enteringRef.current = false; // a fresh check (incl. a retry) is back to a switchable preview
     setErrorKind(""); // a fresh attempt clears any prior failure kind (so a later generic failure
     //                    can't inherit a stale "blocked"/"no-devices" screen)
@@ -366,6 +388,13 @@ function DeviceCheck() {
     } finally {
       requestingRef.current = false;
     }
+  }
+
+  // joinAudioOnly is the cam-blocked screen's "Join audio-only" action (PD-12, DESIGN §6): re-run the
+  // check MIC-ONLY. If the mic is available it lands in the audio-only preview ready to enter; if the
+  // mic is also blocked it re-surfaces the blocked screen (an honest dead end, never a fake button).
+  function joinAudioOnly() {
+    startCheck(true);
   }
 
   // switchDevice re-acquires the preview on a newly chosen camera or mic (AC-5). It runs only in the
@@ -1246,9 +1275,20 @@ function DeviceCheck() {
             Your browser is blocking access to your camera and mic. Allow them for this site — use
             the camera icon in the address bar, or your browser's site settings — then try again.
           </p>
-          <button type="button" class="dc-retry" onClick={startCheck}>
-            Try again
-          </button>
+          <div class="dc-error-actions">
+            <button type="button" class="dc-retry" onClick={() => startCheck()}>
+              Try again
+            </button>
+            {/* PD-12 (DESIGN §6): a REAL mic-only join for a guest whose camera is blocked but whose
+                mic works — not a dead-end button. If the mic is also blocked it just re-surfaces this
+                screen (an honest dead end), so it never lies about what it can do. */}
+            <button type="button" class="dc-audio-only" onClick={joinAudioOnly}>
+              Join audio-only
+            </button>
+          </div>
+          <p class="dc-error-hint">
+            If only your camera is blocked, you can still join with just your microphone.
+          </p>
         </div>
       );
     }
@@ -1260,7 +1300,7 @@ function DeviceCheck() {
             We couldn't find a camera or microphone to use. Connect one, close any other app that
             might be using it, then try again.
           </p>
-          <button type="button" class="dc-retry" onClick={startCheck}>
+          <button type="button" class="dc-retry" onClick={() => startCheck()}>
             Try again
           </button>
         </div>
@@ -1269,7 +1309,7 @@ function DeviceCheck() {
     return (
       <div class="dc-error" data-error-kind="generic">
         <p>Couldn't continue: {error}. Check that your browser can access the camera and mic.</p>
-        <button type="button" class="dc-retry" onClick={startCheck}>
+        <button type="button" class="dc-retry" onClick={() => startCheck()}>
           Try again
         </button>
       </div>
@@ -1277,27 +1317,40 @@ function DeviceCheck() {
   }
   if (phase === "preview" || phase === "entering") {
     return (
-      <div class="dc-preview">
-        <video ref={videoRef} class="dc-video" autoplay playsinline muted />
+      <div class="dc-preview" data-audio-only={audioOnly ? "1" : undefined}>
+        {audioOnly ? (
+          // Audio-only fallback (PD-12): there is no camera to preview, so a connected-with-audio
+          // placeholder stands in for the black video — the guest sees they're joining mic-only,
+          // not a broken preview.
+          <div class="dc-audio-preview" data-novideo="1">
+            <span class="dc-audio-preview-icon" aria-hidden="true">🎙️</span>
+            <p class="dc-audio-preview-text">Camera off — you'll join with audio only.</p>
+          </div>
+        ) : (
+          <video ref={videoRef} class="dc-video" autoplay playsinline muted />
+        )}
         {/* Device picker (AC-5): choose the camera + mic before going live. Switching re-acquires
-            the preview on the new device; the choice persists into the published stream. */}
+            the preview on the new device; the choice persists into the published stream. The camera
+            picker is hidden in the audio-only fallback — there is no camera to choose. */}
         <div class="dc-devices">
-          <label class="dc-device">
-            <span class="dc-device-label">Camera</span>
-            <select
-              class="dc-device-select dc-cam-select"
-              value={camId}
-              disabled={phase === "entering" || switching}
-              onChange={(e) => switchDevice("cam", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
-            >
-              {devices.cams.length === 0 ? <option value="">Default camera</option> : null}
-              {devices.cams.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {audioOnly ? null : (
+            <label class="dc-device">
+              <span class="dc-device-label">Camera</span>
+              <select
+                class="dc-device-select dc-cam-select"
+                value={camId}
+                disabled={phase === "entering" || switching}
+                onChange={(e) => switchDevice("cam", /** @type {HTMLSelectElement} */ (e.currentTarget).value)}
+              >
+                {devices.cams.length === 0 ? <option value="">Default camera</option> : null}
+                {devices.cams.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label class="dc-device">
             <span class="dc-device-label">Microphone</span>
             <select
@@ -1320,7 +1373,11 @@ function DeviceCheck() {
             Couldn't switch to that device — staying on your current one.
           </p>
         ) : null}
-        <p>This is your camera preview. Only you can see it until you enter.</p>
+        <p>
+          {audioOnly
+            ? "Only you can hear your microphone until you enter."
+            : "This is your camera preview. Only you can see it until you enter."}
+        </p>
         <button type="button" class="dc-enter" disabled={phase === "entering" || switching} onClick={enter}>
           {switching ? "Switching device…" : phase === "entering" ? "Entering…" : "Enter the greenroom"}
         </button>
@@ -1332,7 +1389,7 @@ function DeviceCheck() {
       type="button"
       class="dc-start"
       disabled={phase === "requesting"}
-      onClick={startCheck}
+      onClick={() => startCheck()}
     >
       {phase === "requesting" ? "Requesting camera…" : "Continue to camera check"}
     </button>
