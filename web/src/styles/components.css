@@ -26,6 +26,7 @@
   padding: 10px 16px;
   border-radius: var(--r-sm);
   border: 1px solid var(--edge);
+  box-sizing: border-box; /* so .btn-block (width:100%) stays within its column — no global reset */
   background: var(--surface);
   color: var(--ink);
   box-shadow: 2px 2px 0 var(--edge);
@@ -286,6 +287,9 @@
 .textarea,
 .select {
   width: 100%;
+  /* border-box: these are width:100% with padding, and the token layer skips a global box-sizing
+     reset — without this they'd render 26px wider than their column and overflow (codex). */
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
@@ -401,6 +405,7 @@
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
+  box-sizing: border-box;
   height: 7px;
   border-radius: 99px;
   background: var(--surface-3);

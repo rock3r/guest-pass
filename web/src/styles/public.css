@@ -7,6 +7,18 @@
    (imported from app.js); the OBS bundle never sees it. */
 
 /* ---- Public shell: header + sticky-footer column ---- */
+/* The token layer deliberately skips a global box-sizing reset, so every public container that pairs
+   width:100% with horizontal padding needs border-box or it renders viewport-width + padding and
+   overflows a phone screen (codex). Scoped to the public layout boxes — the device-check island that
+   mounts inside .pass keeps its own box model. */
+.site-header,
+.hero,
+.signin,
+.pass,
+.report,
+.error-screen {
+  box-sizing: border-box;
+}
 .site {
   display: flex;
   flex-direction: column;
