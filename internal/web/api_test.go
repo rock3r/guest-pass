@@ -591,6 +591,12 @@ func TestGreenroom_RequiresHostAuth(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `id="greenroom"`) {
 		t.Error("greenroom page is missing the greenroom grid island root")
 	}
+	// EN-20/AC-7: the host greenroom surfaces the chat-privacy guarantee (the same one the guest
+	// session's chat note carries), so the host can reassure guests backstage chat isn't recorded.
+	body := strings.ToLower(rec.Body.String())
+	if !strings.Contains(body, "backstage chat is never recorded") {
+		t.Errorf("greenroom page missing the EN-20 chat-privacy trust copy:\n%s", rec.Body.String())
+	}
 }
 
 // A minimal config (no Store/Hasher/Mailer) must not expose the host API or /p/ routes —

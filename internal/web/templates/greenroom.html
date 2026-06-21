@@ -2,6 +2,10 @@
 <section class="greenroom">
 <h1>Greenroom</h1>
 <p>Your guests' live cameras appear here. Wire each OBS source once and reuse it every stream.</p>
+{{/* Chat-privacy trust copy (EN-20/AC-7): the backstage chat your guests + co-hosts use is relayed
+     live over the connection and never written to disk — surfaced here so the host can reassure
+     guests it's private. The same guarantee shows in the guest session's chat note. */}}
+<p class="gr-privacy-note muted" data-privacy="chat">Backstage chat is never recorded — it's relayed live and leaves no trace, so everyone backstage can talk freely off the air.</p>
 <div id="greenroom"></div>
 </section>
 <script type="module" src="/static/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}" crossorigin="anonymous"{{end}}></script>
