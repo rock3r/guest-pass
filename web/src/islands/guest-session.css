@@ -1,65 +1,84 @@
-/* Guest-session in-session surface — functional-first styling (D-B). Pixel-fidelity to the v2
-   prototype is a deferred polish pass (DEF-2); this is clean, on-brand layout via the tokens. */
+/* Guest-session in-session surface — restyled to the v2 design (M5.6 PR-7, AC-8), ported from the
+   GuestSession prototype (screens-guest.jsx). What the guest sees once in the room: self-view tile,
+   on-air/lock notices, screenshare + raise-hand + leave controls, the backstage chat panel, the
+   filmstrip of everyone else, the live screen, and the terminal/reconnect state notices. This is the
+   same island/page/connection as the device-check (it swaps in after entry). CSS-only against the
+   Preact `.gs-*` class names (coupled to the guestsession/screenshare/thumbnails/reconnect tests);
+   tokens + components from tokens.css/components.css. */
 
 .gs-root {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
-/* Reconnecting overlay (AC-13): shown while a dropped signaling socket auto-retries. */
+/* Reconnecting note (AC-13) — a recoverable, non-error state. */
 .gs-reconnecting {
   font-weight: 600;
+  font-size: 13.5px;
+  color: var(--warn);
+}
+.gs-host-waiting {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.gs-degraded {
+  margin: 0;
+  font-size: 13px;
   color: var(--warn);
 }
 
-/* Terminal terminate-routed error screen (AC-13/EN-9): kicked / expired / revoked / … */
+/* Terminal terminate-routed state screen (AC-13/EN-9): kicked / expired / revoked / session-ended. */
 .gs-terminal {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 24px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  background: var(--paper);
+  max-width: 46ch;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 .gs-terminal-title {
   margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.3rem;
 }
 .gs-terminal-body {
   margin: 0;
-  opacity: 0.85;
+  color: var(--ink-2);
+  line-height: 1.55;
 }
 .gs-terminal-privacy {
   margin: 8px 0 0;
-  font-size: 0.85em;
-  opacity: 0.65;
+  font-size: 12.5px;
+  color: var(--ink-2);
 }
 
+/* Stage: self-view + status side by side. */
 .gs-stage {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 18px;
   align-items: flex-start;
 }
-
-/* The self-view sits in a relative wrapper so the audio-only placeholder (PD-12) can overlay it. */
 .gs-selfview-wrap {
   position: relative;
-  width: min(100%, 360px);
+  width: min(100%, 380px);
   flex: 0 0 auto;
 }
-
 .gs-selfview {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 10px;
+  background: var(--tile);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   object-fit: cover;
 }
-
-/* Connected-with-audio placeholder shown over the black self-view when the guest joined audio-only. */
 .gs-novideo {
   position: absolute;
   inset: 0;
@@ -70,16 +89,14 @@
   justify-content: center;
   text-align: center;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--ink) 14%, #000);
   color: #fff;
 }
-
 .gs-novideo-icon {
   font-size: 2em;
   line-height: 1;
 }
-
 .gs-novideo-text {
   font-weight: 600;
 }
@@ -87,177 +104,255 @@
 .gs-status {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 220px;
   flex: 1;
 }
 
-/* The separate "muted/hidden by host" force-lock notice (D-13), always shown when a lock is active. */
+/* Three-state on-air reflection (D-24), rendered in the guest view as a status banner (class is
+   `dc-onair`). on-air = white-on-live-fill (AA); not-on-air = neutral; can't-tell = warn. */
+.dc-onair {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 7px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.dc-onair[data-onair="on-air"] {
+  background: var(--live-fill);
+  color: #fff;
+  border-color: var(--edge);
+}
+.dc-onair[data-onair="status-unavailable"] {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.dc-onair-hint {
+  font-weight: 400;
+  opacity: 0.9;
+}
+/* "The broadcast is live" — a live indicator pill (white on live-fill, AA). */
+.dc-live {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  background: var(--live-fill);
+  color: #fff;
+}
+
+/* The separate "muted/hidden by host" force-lock notice (D-13). */
 .gs-lock {
   margin: 0;
   font-weight: 600;
+  font-size: 13.5px;
   color: var(--danger);
 }
 
-/* Screenshare control (EN-23/AC-9/AC-13): shown when the host grants can_screen. The button drives
-   getDisplayMedia capture; the status line reflects the server-folded self-state (idle/backstage/
-   live) — the sharer never asserts "live" without the roster pointer. */
+/* ============ Controls — screenshare toggle, raise hand, leave ============ */
 .gs-screen {
   display: flex;
   flex-direction: column;
   gap: 6px;
   align-self: flex-start;
 }
-.gs-screen-toggle {
+.gs-screen-toggle,
+.gs-hand {
   align-self: flex-start;
-  font: inherit;
-  padding: 6px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 9px 14px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
   cursor: pointer;
+  line-height: 1.15;
+  transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s;
 }
-.gs-screen-toggle[data-sharing="1"] {
+.gs-screen-toggle:hover,
+.gs-hand:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--edge);
+  background: var(--surface-2);
+}
+.gs-screen-toggle:active,
+.gs-hand:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--edge);
+}
+.gs-screen-toggle[data-sharing="1"],
+.gs-hand[data-raised="1"] {
   background: var(--accent);
   color: var(--accent-ink);
+}
+.gs-screen-toggle[data-sharing="1"]:hover,
+.gs-hand[data-raised="1"]:hover {
+  background: var(--accent);
 }
 .gs-screen-toggle:disabled {
   opacity: 0.5;
   cursor: default;
+  pointer-events: none;
 }
 .gs-screen-status {
   margin: 0;
   font-weight: 600;
+  font-size: 13px;
   color: var(--good);
 }
 .gs-screen[data-screen-state="live"] .gs-screen-status {
   color: var(--danger);
 }
 
-.gs-hand {
-  align-self: flex-start;
-  font: inherit;
-  padding: 6px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
-  cursor: pointer;
-}
-.gs-hand[data-raised="1"] {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-
-/* Voluntary leave control (DESIGN §6 guest-left) — a quiet, secondary action next to raise-hand. */
+/* Voluntary leave — a quiet ghost action. */
 .gs-leave {
   align-self: flex-start;
   font: inherit;
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-/* host-waiting status note (DESIGN §6) — the guest is connected but no host has arrived yet. */
-.gs-host-waiting {
-  margin: 0;
   font-weight: 600;
+  font-size: 13.5px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+}
+.gs-leave:hover {
+  background: var(--surface-3);
+  color: var(--ink);
 }
 
+/* ============ Backstage chat ============ */
 .gs-chat {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  padding: 12px;
+  gap: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
 }
-
-/* EN-20 trust microcopy: backstage chat is relayed but never recorded. */
 .gs-chat-note {
   margin: 0;
-  font-size: 0.8rem;
-  opacity: 0.7;
+  font-size: 12px;
+  color: var(--ink-2);
 }
-
 .gs-chat-log {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 240px;
   overflow-y: auto;
 }
-
 .gs-chat-msg {
-  font-size: 0.9rem;
+  font-size: 14px;
+  line-height: 1.4;
 }
-
 .gs-chat-from {
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--ink);
 }
-
 .gs-chat-form {
   display: flex;
   gap: 8px;
 }
-
 .gs-chat-input {
   flex: 1;
+  min-width: 0;
   font: inherit;
-  padding: 6px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper);
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
   color: var(--ink);
+  box-sizing: border-box;
 }
-
+.gs-chat-input:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+}
 .gs-chat-send {
+  flex: none;
   font: inherit;
-  padding: 6px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 9px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
   background: var(--accent);
   color: var(--accent-ink);
+  box-shadow: 2px 2px 0 var(--edge);
   cursor: pointer;
+  transition: transform 0.07s ease, box-shadow 0.07s ease;
+}
+.gs-chat-send:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--edge);
+}
+.gs-chat-send:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--edge);
 }
 
-/* Backstage thumbnails (D-10): the other participants over the P2P mesh, reusing the greenroom grid. */
+/* ============ Filmstrip (everyone else, D-10) + live screen ============ */
 .gs-thumbs {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .gs-thumbs-label {
   margin: 0;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
 }
 
-/* The live screen share, shown to everyone backstage (D-21/AC-11): a video-only render of the
-   host-selected sharer's screen, above the status block. Muted (D-41 is video-only). */
 .gs-livescreen {
-  margin: 0 0 10px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
+  margin: 0 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
   overflow: hidden;
-  background: #000;
+  background: var(--tile);
+  box-shadow: var(--shadow-sm);
 }
 .gs-livescreen-video {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
-  background: #000;
+  background: var(--tile);
 }
 .gs-livescreen-cap {
-  padding: 6px 10px;
-  font-size: 0.85rem;
+  padding: 8px 12px;
+  font-size: 13px;
   font-weight: 600;
-  background: var(--paper);
+  background: var(--surface);
   color: var(--ink);
 }

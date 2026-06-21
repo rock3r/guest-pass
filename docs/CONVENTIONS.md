@@ -304,6 +304,13 @@ force-button labels use `--danger` not the lighter chip `--bad` (~3.8:1 on
 `--bad-soft`), and every white-on-live badge (`.badge-live`, the host live-pill,
 on-air pills, the calendar live event, the greenroom on-air + screenshare-live
 badges) fills from `--live-fill`, since white on the bright `--live` is only ~4.0:1.
+The **guest islands** carry the design too (M5.6 PR-7): `web/src/islands/devicecheck.css`
+(pre-join camera preview as a tile, mono device labels + styled selects, the start/
+enter/retry/audio-only buttons, and the cam-blocked/unsupported/network-blocked/left
+state cards) and `web/src/islands/guest-session.css` (in-session self-view tile,
+the `.dc-onair` three-state on-air banner + `.dc-live` indicator both on `--live-fill`,
+screenshare/raise-hand/leave controls, the backstage chat panel, filmstrip, live
+screen, and terminal/reconnect notices) — CSS-only against the `.dc-*`/`.gs-*` names.
 
 > **One exception (M5.5):** the host **stream-detail** page carries a *minimal,
 > read-only* liveness poll. It computes its "● Live" pill once at render, so when a
