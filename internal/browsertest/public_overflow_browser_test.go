@@ -40,5 +40,22 @@ func TestPublic_NoHorizontalOverflowOnPhone(t *testing.T) {
 				t.Errorf("%s overflows a 360px viewport by %dpx (horizontal scroll) — needs border-box", p.name, overflow)
 			}
 		}
+
+		// And no spurious VERTICAL scrollbar on a short page rendered through the public shell: with
+		// .site (the <body>) at min-height:100vh, the UA's default 8px body margin would make the page
+		// 100vh + 16px and scroll (codex). The 404 state screen is short, so at a tall viewport its
+		// scrollHeight must equal the viewport.
+		var vover int64
+		if err := chromedp.Run(ctx,
+			chromedp.EmulateViewport(900, 1000),
+			chromedp.Navigate(s.base+"/no-such-page"),
+			chromedp.WaitVisible(`.error-screen`, chromedp.ByQuery),
+			chromedp.Evaluate(`document.documentElement.scrollHeight - document.documentElement.clientHeight`, &vover),
+		); err != nil {
+			t.Fatalf("vertical: %v", err)
+		}
+		if vover > 1 {
+			t.Errorf("the 404 shell scrolls vertically by %dpx at a 1000px viewport — unreset body margin under min-height:100vh", vover)
+		}
 	})
 }

@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 .site {
+  /* .site is the <body>; the token layer skips the global margin reset, so clear the UA's default
+     8px body margin before relying on min-height:100vh — otherwise the page is 100vh + 16px and gets
+     a spurious vertical scrollbar with the sticky footer pushed below the fold (codex). */
+  margin: 0;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
