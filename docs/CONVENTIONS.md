@@ -460,7 +460,7 @@ web/
   fonts/              OFL woff2 ×3 (+ each family's OFL.txt)   (EN-17)
   dist/               build output — GITIGNORED, go:embed at release (AD-7)
 docs/                 ARCHITECTURE / CONVENTIONS / TESTING / DEPLOYMENT
-LICENSE               AGPL-3.0 (D-31)
+LICENSE               UEL v1.0 (D-31)
 THIRD_PARTY_NOTICES   coturn BSD, Preact MIT, fonts OFL (EN-17)
 ```
 
@@ -492,22 +492,18 @@ Placement rules:
 
 ## 7. Licensing in source
 
-GuestPass is **AGPL-3.0** (D-31). Network use triggers §13's source-offer
-obligation, and satisfying it is a **product requirement**, not just a `LICENSE`
-file (EN-17):
+GuestPass is **UEL v1.0** (D-31). The UEL requires keeping the license and
+copyright notice intact in all copies, distributing modified versions under the
+same license with source access, and documenting significant changes (EN-17):
 
 - **Embed the build/commit ref at compile time** (e.g. `-ldflags -X`); the in-app
   source link must resolve to the **exact running build**, not just `HEAD`.
 - **The source link appears in the guest / greenroom UI**, not only the host
-  dashboard — **guests are §13 network users** (EN-17). A host-dashboard-only
-  link is non-compliant.
-- Ship `LICENSE` (AGPL-3.0) and `THIRD_PARTY_NOTICES`. License compatibility is
+  dashboard (EN-17).
+- Ship `LICENSE` (UEL v1.0) and `THIRD_PARTY_NOTICES`. License compatibility is
   clean and must stay so: **coturn** BSD (separate process), **Preact** MIT
   (vendored), **fonts** OFL 1.1 with **no Reserved Font Names** — ship each
   family's `OFL.txt`.
-- Any in-bundle "open source" / license copy must read **AGPL-3.0** and must
+- Any in-bundle "open source" / license copy must read **UEL v1.0** and must
   match the repo's actual license (D-30 ↔ D-31). If they diverge, the copy is
   wrong, not the repo.
-
-> Note: the repo currently has `LICENSE` deleted in-tree (`D LICENSE`); the
-> Apache→AGPL-3.0 relicense lands at M1 step 1 before first release (AD-I / EN-17).

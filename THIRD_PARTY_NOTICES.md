@@ -1,9 +1,9 @@
 # Third-party notices
 
-GuestPass is licensed under **AGPL-3.0** (see `LICENSE`). It includes or depends on the
+GuestPass is licensed under **UEL v1.0** (see `LICENSE`). It includes or depends on the
 third-party components below. This list is finalized as dependencies land; entries marked
 **(planned)** are designed-for but not yet vendored/imported. License compatibility with
-AGPL-3.0 is affirmed per `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` (EN-17, D-31).
+UEL v1.0 is affirmed per `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` (D-31).
 
 ## Bundled / vendored (shipped in the binary or repo)
 

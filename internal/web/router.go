@@ -19,7 +19,7 @@ import (
 // landing, sign-in, health, and static routes. /ws needs the authenticator, store, and
 // token hasher because it authenticates by credential.
 type RouterConfig struct {
-	SourceURL     string              // AGPL §13 link to the running build's source (EN-17)
+	SourceURL     string              // link to the running build's source (EN-17)
 	Hub           *signaling.Hub      // signaling hub for /ws
 	OAuth         *auth.GoogleOAuth   // Google sign-in; nil disables /auth/google*
 	Auth          *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout

@@ -29,9 +29,8 @@ func TestSourceURLPinsCommitWhenKnown(t *testing.T) {
 	}
 }
 
-// EN-17 / AGPL §13: a MODIFIED build must NOT pin a commit, because the running
-// code does not correspond to that revision — doing so points network users at the
-// wrong "corresponding source".
+// EN-17: a MODIFIED build must NOT pin a commit, because the running code does not
+// correspond to that revision — doing so would link to the wrong corresponding source.
 func TestSourceURLByState(t *testing.T) {
 	cases := []struct {
 		name     string

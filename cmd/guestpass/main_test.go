@@ -74,7 +74,7 @@ func TestBuildHandler_Wiring(t *testing.T) {
 	if !strings.Contains(csp, "turn.example.org:5349") {
 		t.Errorf("CSP connect-src should include the configured TURN host; got %q", csp)
 	}
-	if !strings.Contains(root.Body.String(), "AGPL-3.0") {
-		t.Error("/ missing AGPL §13 source link")
+	if !strings.Contains(root.Body.String(), "uelicense.eu") {
+		t.Error("/ missing license link")
 	}
 }

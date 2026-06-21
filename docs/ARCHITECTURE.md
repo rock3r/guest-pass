@@ -41,7 +41,7 @@ is LOCKED.
   frames. It **never touches media** — no media server, ever (D-23).
 - **Runs as a free public instance *and* self-hosts.** The official multi-tenant
   instance lives at **guest-pass.link** (free, no ads); the same binary self-hosts
-  via docker-compose (D-35). License is **AGPL-3.0** (D-31).
+  via docker-compose (D-35). License is **UEL v1.0** (D-31).
 - **Absolute-minimum data.** Host Google identity + guest name/email for invites +
   transient session metadata. Never media, never chat, no third-party trackers.
   Minimal *data*, not just minimal PII, is the backstop ethos (D-37).
@@ -127,7 +127,7 @@ page (program feed). The server only relays SDP/ICE and room state.
 | Shape | What it is | Media cost | TURN |
 |---|---|---|---|
 | **Public instance** — `guest-pass.link` | Official, free, no ads, **multi-tenant**: any Google-verified user signs in and hosts (progressive-trust quotas, D-36). Cost ≈ signaling + SQLite only. | ~zero (P2P mesh; no operator relay) | None by default; a host may BYO (D-38) |
-| **Self-hosted** | Same single binary + docker-compose, **AGPL** (D-31). Operator picks `SIGNUP_MODE` (open / approval / allowlist). | ~zero unless the operator opts into TURN | Operator/host BYO (bundled coturn is a config-flip) |
+| **Self-hosted** | Same single binary + docker-compose, **UEL v1.0** (D-31). Operator picks `SIGNUP_MODE` (open / approval / allowlist). | ~zero unless the operator opts into TURN | Operator/host BYO (bundled coturn is a config-flip) |
 
 Both shapes are media-blind by construction (D-23) and run the identical signaling
 + storage path; they differ only in tenancy, signup mode, and whether a TURN relay
@@ -1349,9 +1349,9 @@ types npm-free, with an optional external `tsc`/`tsgo` gate bolt-on later.
 - **Island state = Preact hooks only** (AD-18): `useState`/`useReducer`/`useContext`
   from vendored `preact/hooks`. A **`Room` orchestrator holds canonical state** and
   pushes via context/reducer. Zero extra deps; adequate for ~4 island screens.
-- AGPL §13 (EN-17): the source link must resolve to the **running** build (embed the
-  build/commit ref) and appear in the **guest/greenroom** UI — guests are §13
-  network users, so a host-dashboard-only link is insufficient.
+- Source transparency (EN-17): the source link resolves to the **running** build
+  (embed the build/commit ref) and appears in the **guest/greenroom** UI — not
+  only the host dashboard.
 
 ### The `web/src/rtc/` module
 

@@ -1,9 +1,9 @@
 # Deployment & operations
 
-How to run GuestPass: the official public instance at **guest-pass.link** and an
-AGPL self-host, the env config that distinguishes them, persistence/backup/job
-operations, AGPL §13 obligations, the data-retention contract, and a
-step-by-step provisioning checklist for first deploy.
+How to run GuestPass: the official public instance at **guest-pass.link** and a
+UEL v1.0 self-host, the env config that distinguishes them, persistence/backup/job
+operations, the data-retention contract, and a step-by-step provisioning checklist
+for first deploy.
 
 > Source of truth: this doc distills the frozen design (`guest-pass-DESIGN.md`
 > §8–§10, primarily §9) and the implementation-architecture ledger
@@ -26,7 +26,7 @@ instance is just GuestPass with `SIGNUP_MODE=open` and the abuse dials turned up
 | Shape | What it is | Who runs it | Differs only by |
 |---|---|---|---|
 | **Official public instance** — `guest-pass.link` | Free, no-ads, **multi-tenant**; self-service Google sign-in; progressive-trust abuse controls. Demonstrates "easy & cheap to run" — media is P2P so cost ≈ signaling + SQLite (no operator media relay). | Project maintainers | `SIGNUP_MODE=open`, abuse dials up, **no TURN** (D-38) |
-| **AGPL self-host** (D-31) | Same binary, operator-owned. `SIGNUP_MODE` picks the onboarding posture; solo or small-team is the common case. AGPL §13 obliges source disclosure for network use. | Anyone | operator picks `SIGNUP_MODE`, optional TURN |
+| **UEL self-host** (D-31) | Same binary, operator-owned. `SIGNUP_MODE` picks the onboarding posture; solo or small-team is the common case. UEL v1.0 obliges distributing modified versions under the same license with source. | Anyone | operator picks `SIGNUP_MODE`, optional TURN |
 
 Both shapes are **media-blind by construction** (D-23) and run the identical
 signaling + storage path. They differ only in tenancy, signup mode, abuse-dial
@@ -361,20 +361,18 @@ revocation** (EN-4), so:
 
 ---
 
-## 10. AGPL §13 compliance (D-31, EN-17)
+## 10. License compliance (D-31, EN-17)
 
-GuestPass is **AGPL-3.0**; network use triggers §13's source-offer obligation.
-The running binary must let its network users reach the corresponding source.
-These are **product requirements**, not just legal text:
+GuestPass is **UEL v1.0**. The UEL requires keeping the license and copyright
+notice intact in all copies, distributing modified versions under the same license
+with source access, and documenting significant changes.
 
 - **Embed the build / commit ref at compile time.** The in-app source link must
   resolve to the **exact running version**, not just `HEAD`.
 - **The source link appears in the guest / greenroom UI**, not only the host
-  dashboard — **guests are §13 network users too**, so a host-only link is
-  insufficient.
+  dashboard (EN-17).
 - **Ship the license/notice files:**
-  - `LICENSE` = **AGPL-3.0** (relicensed from Apache-2.0 before first release;
-    fix any lingering "MIT licensed" copy in the bundle to AGPL-3.0).
+  - `LICENSE` = **UEL v1.0**.
   - `THIRD_PARTY_NOTICES`.
   - Per-font **`OFL.txt`** for each family (Newsreader, Schibsted Grotesk,
     Spline Sans Mono — all SIL OFL 1.1 with no Reserved Font Names).
@@ -382,9 +380,6 @@ These are **product requirements**, not just legal text:
   Preact (MIT, vendored), fonts (OFL 1.1). The marketing license claim must
   match the repo's actual license — if they diverge, the page is wrong, not the
   repo (D-30 ↔ D-31).
-
-> Repo note: `LICENSE` is currently deleted in the working tree and must be
-> recreated as AGPL-3.0 (tracked as AD/track-I in the impl-arch ledger).
 
 ---
 

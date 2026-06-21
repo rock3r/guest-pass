@@ -2,7 +2,7 @@
 // (signaling relay + SQLite + embedded frontend & OBS source pages).
 // See docs/ARCHITECTURE.md for the design.
 //
-//	guestpass          # print version + AGPL §13 source link
+//	guestpass          # print version + source link
 //	guestpass serve    # run the HTTP + signaling server
 package main
 

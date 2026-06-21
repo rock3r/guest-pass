@@ -1,17 +1,16 @@
 // Package buildinfo exposes the running build's version and VCS revision so the
-// AGPL-3.0 §13 source-offer link can resolve to the *corresponding source* of the
-// running build (EN-17). Guests are §13 network users too, so SourceURL must be
-// surfaced in the guest/greenroom UI, not only the host dashboard.
+// in-app source link can resolve to the corresponding source of the running build
+// (EN-17). The link is surfaced in the guest/greenroom UI for transparency.
 package buildinfo
 
 import "runtime/debug"
 
-// repo is the canonical source repository for the AGPL §13 offer.
+// repo is the canonical source repository.
 //
-// Operators who run a MODIFIED build must publish their corresponding source and
-// point users at it (§13). A future deploy-time override (e.g. a SOURCE_URL value)
-// will let them set this; until then a modified build links to the repository root
-// rather than falsely pinning a commit it does not match.
+// Operators who run a modified build are encouraged to publish their corresponding
+// source. A future deploy-time override (e.g. a SOURCE_URL value) will let them
+// set this; until then a modified build links to the repository root rather than
+// falsely pinning a commit it does not match.
 const repo = "https://github.com/rock3r/guest-pass"
 
 // version/commit are overridden at build time via, e.g.:
@@ -42,10 +41,10 @@ func Modified() bool {
 	return vcsSetting("vcs.modified") == "true"
 }
 
-// SourceURL returns the AGPL-3.0 §13 source link for the running build. It pins the
-// exact revision ONLY when that revision faithfully corresponds to the running code
-// (a known commit from a clean tree); a modified or unknown build links to the
-// repository root instead of misrepresenting the corresponding source (EN-17).
+// SourceURL returns the source link for the running build. It pins the exact revision
+// ONLY when that revision faithfully corresponds to the running code (a known commit
+// from a clean tree); a modified or unknown build links to the repository root instead
+// of misrepresenting the corresponding source (EN-17).
 func SourceURL() string { return sourceURL(Commit(), Modified()) }
 
 func sourceURL(commit string, modified bool) string {

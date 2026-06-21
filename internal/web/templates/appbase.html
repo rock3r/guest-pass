@@ -23,8 +23,8 @@
 <main class="app-main">{{template "content" .}}</main>
 <footer class="site-footer">
 <p>GuestPass is free, open-source software licensed
-<a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noopener">AGPL-3.0</a>.
-<a href="{{.SourceURL}}" rel="noopener">Get the source for this running build</a> (AGPL §13).</p>
+<a href="https://uelicense.eu" rel="noopener">UEL v1.0</a>.
+<a href="{{.SourceURL}}" rel="noopener">Get the source for this build</a>.</p>
 {{/* Dark-mode toggle (D-9), no-JS: cycles System → Light → Dark via a PRG POST that sets gp_theme. */}}
 <form method="post" action="/theme" class="theme-toggle">
 <input type="hidden" name="next" value="{{.Path}}">

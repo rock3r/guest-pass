@@ -22,10 +22,10 @@ func TestRenderer_LandingHasSourceLinkAndLicense(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, testSourceURL) {
-		t.Error("landing missing AGPL §13 source link to the running build")
+		t.Error("landing missing source link to the running build")
 	}
-	if !strings.Contains(body, "AGPL-3.0") {
-		t.Error("landing missing AGPL-3.0 license mention")
+	if !strings.Contains(body, "uelicense.eu") {
+		t.Error("landing missing UEL v1.0 license mention")
 	}
 	// The stylesheet loads even without a build manifest (no integrity) so the page is
 	// never unstyled; integrity is added only when the manifest is present (next test).

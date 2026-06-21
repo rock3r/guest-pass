@@ -12,8 +12,8 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// pageData is passed to every server-rendered page. SourceURL is the AGPL §13 link to
-// the corresponding source of the running build, surfaced on every user-facing page
+// pageData is passed to every server-rendered page. SourceURL is the link to the
+// corresponding source of the running build, surfaced on every user-facing page
 // (EN-17). Nonce is the per-request CSP script nonce (§3.5).
 type pageData struct {
 	Title           string
@@ -71,7 +71,7 @@ type renderer struct {
 // standalone, chromeless, font-free page (EN-13) with its own template.
 // error.html (the denial/error screens, M5.5) is composed into base.html — the PUBLIC shell, NOT
 // appbase.html: a suspended/pending/non-admin host must not see a host nav whose every link would
-// itself 403. It still carries the AGPL §13 footer (EN-17).
+// itself 403. It still carries the source-link footer (EN-17).
 var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html", "report.html", "error.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
@@ -81,7 +81,7 @@ var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.
 // with no name clash.
 var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html", "streamdetail.html", "settings.html", "admin.html"}
 
-// newRenderer parses the embedded templates. sourceURL is the AGPL §13 source link;
+// newRenderer parses the embedded templates. sourceURL is the build source link (EN-17);
 // manifest carries the SRI hashes (nil/empty in tests); devLogin toggles dev sign-in.
 func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*renderer, error) {
 	pages := make(map[string]*template.Template, len(pageFiles)+len(appPageFiles))
