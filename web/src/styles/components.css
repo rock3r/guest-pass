@@ -30,9 +30,15 @@
   color: var(--ink);
   box-shadow: 2px 2px 0 var(--edge);
   cursor: pointer;
-  white-space: nowrap;
+  /* The design uses white-space: nowrap (its labels are all short). The product has long-label
+     buttons — e.g. "Regenerate all URLs (my URLs leaked)" on the sources tab — that would overflow
+     a 320px viewport's ~280px content column with nowrap (codex). Let labels wrap instead; short
+     labels never wrap, so this is invisible for them. line-height ~1.15 keeps a wrapped label
+     legible without meaningfully changing single-line button height. */
+  white-space: normal;
+  text-align: center;
   user-select: none;
-  line-height: 1;
+  line-height: 1.15;
   text-decoration: none; /* the product uses <a class="btn"> as well as <button> */
   transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s, border-color 0.15s,
     color 0.15s, filter 0.15s;
