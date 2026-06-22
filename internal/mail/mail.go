@@ -135,26 +135,30 @@ func (m *SMTPMailer) send(ctx context.Context, from, to string, msg []byte) erro
 		addr = net.JoinHostPort(m.host, m.port)
 	}
 
-	var conn net.Conn
-	var err error
-	if m.serverAddr != "" {
-		// Test path: plain TCP, no TLS.
-		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", addr)
-	} else if m.port == "465" {
-		conn, err = tls.DialWithDialer(&net.Dialer{}, "tcp", addr, &tls.Config{ServerName: m.host})
-	} else {
-		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", addr)
-	}
-	if err != nil {
-		return fmt.Errorf("mail: smtp dial %s: %w", addr, err)
-	}
-
-	// Apply a deadline for the full exchange so a stalled relay cannot block the
-	// caller indefinitely. Prefer the context deadline when it is tighter.
+	// Compute a deadline for the full exchange (dial + TLS + SMTP commands).
+	// Prefer the context deadline when it is tighter than 30s.
 	deadline := time.Now().Add(30 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
+	dialer := &net.Dialer{Deadline: deadline}
+
+	var conn net.Conn
+	var err error
+	if m.serverAddr != "" {
+		// Test path: plain TCP, no TLS.
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	} else if m.port == "465" {
+		// Implicit TLS: deadline is set on the dialer so the TLS handshake is
+		// also bounded (tls.DialWithDialer uses the dialer's deadline).
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: m.host})
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	}
+	if err != nil {
+		return fmt.Errorf("mail: smtp dial %s: %w", addr, err)
+	}
+	// Propagate the deadline to all subsequent reads/writes on this connection.
 	_ = conn.SetDeadline(deadline)
 
 	c, err := smtp.NewClient(conn, m.host)
