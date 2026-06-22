@@ -94,9 +94,13 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `JWT_SECRET` | ✅ | **✅ (EN-14)** | HS256 host-session cookies; the current signing key. Part of a **`kid` + two-key ring** so rotation isn't a global logout (EN-6). Refuses placeholder/empty/short. |
 | `JWT_SECRET_PREVIOUS` | optional | **✅ when set** | The retired, **verify-only** second key during a `JWT_SECRET` rotation: set it to the old secret so sessions signed with it keep verifying until they expire, then remove it. Empty in steady state. When set it must be a real (non-placeholder, ≥32-char) secret. |
 | `TOKEN_SECRET` | ✅ | **✅ (EN-14)** | **Stable** HMAC key for hashing magic-link / slot / host source tokens (EN-5): only `HMAC(TOKEN_SECRET, token)` is stored, never the raw token. Kept **separate from `JWT_SECRET`** — `JWT_SECRET` rotates via the `kid` ring, but rotating the token key would orphan every stored token hash (turn off all outstanding magic links), so this one does not rotate. Refuses placeholder/empty/short. |
-| `RESEND_API_KEY` | ✅ unless `MAIL_MODE=log` | — | Invite delivery over the Resend HTTP API (D-2). |
-| `MAIL_FROM` | ✅ unless `MAIL_MODE=log` | — | `From` address for invite emails, e.g. `GuestPass <invites@guest-pass.link>`. Must be a Resend-verified sender. Unused (and not required) when `MAIL_MODE=log`. |
-| `MAIL_MODE` | — | — | `log` prints magic links to stdout (dev / airgapped self-host); production uses Resend. Default is the Resend path. |
+| `MAIL_FROM` | ✅ unless `MAIL_MODE=log` | — | `From` address for invite emails, e.g. `GuestPass <invites@guest-pass.link>`. Required for both SMTP and Resend backends. |
+| `MAIL_MODE` | — | — | `log` prints magic links to stdout (dev / airgapped self-host). Default auto-detects: SMTP if `SMTP_HOST` is set, Resend otherwise. |
+| `SMTP_HOST` | ✅ for SMTP | — | SMTP relay hostname, e.g. `smtp.gmail.com` or `smtp-relay.brevo.com`. Setting this activates the SMTP backend. |
+| `SMTP_PORT` | — | — | SMTP port. `587` (STARTTLS, default) or `465` (implicit TLS). |
+| `SMTP_USER` | ✅ for SMTP | — | SMTP login username (typically your email address or account login). |
+| `SMTP_PASS` | ✅ for SMTP | **✅** | SMTP password or app-specific password. For Gmail, generate an App Password — do not use your account password. |
+| `RESEND_API_KEY` | ✅ for Resend | — | Invite delivery over the Resend HTTP API (D-2). Not required when using SMTP or `MAIL_MODE=log`. |
 | `ADMIN_EMAIL` | ✅ | — | The first sign-in matching this email is auto-approved as owner/admin (`is_admin`, D-14). |
 | `SIGNUP_MODE` | ✅ | — | `open` \| `approval` \| `allowlist` (see §4). Public instance = `open`. |
 | `STUN_URL` | optional | — | The self-hosted STUN server offered to every peer in the ICE config (`stun:`/`stuns:` scheme; a wrong scheme refuses to boot). STUN-only is the default posture (D-38); leave empty only for dev/loopback, where peers connect on host-local candidates. |

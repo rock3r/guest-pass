@@ -63,8 +63,12 @@ type Config struct {
 	JWTSecretPrevious  string // optional verify-only second key in the kid ring (EN-6); set during rotation
 	TokenSecret        string // STABLE HMAC key for magic-link/slot/host token hashing (EN-5)
 	ResendAPIKey       string
-	MailMode           string // "" => Resend (default); "log" => print magic links to stdout (D-2)
-	MailFrom           string // From address for Resend invites; required unless MAIL_MODE=log
+	MailMode           string // "" => auto-detect backend; "log" => print magic links to stdout (D-2)
+	MailFrom           string // From address (Resend or SMTP); required unless MAIL_MODE=log
+	SMTPHost           string // SMTP relay hostname; if set, SMTP is used instead of Resend
+	SMTPPort           string // SMTP port; defaults to "587" (STARTTLS); use "465" for implicit TLS
+	SMTPUser           string // SMTP login username
+	SMTPPass           string // SMTP login password
 	AdminEmail         string
 	SignupMode         string // open | approval | allowlist (§9.3)
 	STUNURL            string // stun:/stuns: URL offered to every peer in the ICE config (D-38); optional
@@ -129,6 +133,25 @@ const (
 	defaultRateTrustedStreams = 50                 // an aged host: at most 50
 )
 
+// Mail backend names returned by MailBackend.
+const (
+	MailBackendLog    = "log"
+	MailBackendSMTP   = "smtp"
+	MailBackendResend = "resend"
+)
+
+// MailBackend reports which mail delivery backend is active.
+// Priority: MAIL_MODE=log > SMTP_HOST set > Resend (default).
+func (c *Config) MailBackend() string {
+	if c.MailMode == MailModeLog {
+		return MailBackendLog
+	}
+	if c.SMTPHost != "" {
+		return MailBackendSMTP
+	}
+	return MailBackendResend
+}
+
 // TURNEnabled reports whether a TURN relay is configured. When false the deployment is
 // STUN-only (D-38) and TURN_SECRET is not required.
 func (c *Config) TURNEnabled() bool { return strings.TrimSpace(c.TURNURL) != "" }
@@ -158,6 +181,10 @@ func load(getenv func(string) string) (*Config, error) {
 		ResendAPIKey:       getenv("RESEND_API_KEY"),
 		MailMode:           strings.TrimSpace(getenv("MAIL_MODE")),
 		MailFrom:           strings.TrimSpace(getenv("MAIL_FROM")),
+		SMTPHost:           strings.TrimSpace(getenv("SMTP_HOST")),
+		SMTPPort:           strings.TrimSpace(getenv("SMTP_PORT")),
+		SMTPUser:           strings.TrimSpace(getenv("SMTP_USER")),
+		SMTPPass:           getenv("SMTP_PASS"),
 		AdminEmail:         strings.TrimSpace(getenv("ADMIN_EMAIL")),
 		SignupMode:         strings.TrimSpace(getenv("SIGNUP_MODE")),
 		STUNURL:            strings.TrimSpace(getenv("STUN_URL")),
@@ -370,7 +397,7 @@ func validateICEURL(name, raw string, schemes []string) error {
 // validateRequired enforces that required variables are present (CONVENTIONS §1.5:
 // a missing required var is a startup error, not a runtime surprise; DEPLOYMENT §3).
 // Two conditional exemptions: Google OAuth credentials are not required in a dev build
-// (AUTH_MODE=dev mints a fake session without Google, AD-8), and RESEND_API_KEY is not
+// (AUTH_MODE=dev mints a fake session without Google, AD-8), and mail credentials are not
 // required when MAIL_MODE=log prints magic links to stdout (D-2).
 func (c *Config) validateRequired() error {
 	required := []struct{ name, val string }{
@@ -384,13 +411,19 @@ func (c *Config) validateRequired() error {
 			struct{ name, val string }{"GOOGLE_CLIENT_SECRET", c.GoogleClientSecret},
 		)
 	}
-	if c.MailMode != MailModeLog {
-		// Real mail delivery (Resend) needs an API key and a verified From address; the
-		// log mode (D-2) prints magic links to stdout and needs neither.
+	switch c.MailBackend() {
+	case MailBackendSMTP:
+		required = append(required,
+			struct{ name, val string }{"SMTP_USER", c.SMTPUser},
+			struct{ name, val string }{"SMTP_PASS", c.SMTPPass},
+			struct{ name, val string }{"MAIL_FROM", c.MailFrom},
+		)
+	case MailBackendResend:
 		required = append(required,
 			struct{ name, val string }{"RESEND_API_KEY", c.ResendAPIKey},
 			struct{ name, val string }{"MAIL_FROM", c.MailFrom},
 		)
+		// MailBackendLog: no mail credentials needed.
 	}
 	for _, r := range required {
 		if strings.TrimSpace(r.val) == "" {
@@ -414,7 +447,7 @@ func (c *Config) validateBaseURLScheme() error {
 	return nil
 }
 
-// validateMailMode accepts only "" (Resend, default) or "log" (D-2).
+// validateMailMode accepts only "" (auto-detect backend) or "log" (D-2).
 func (c *Config) validateMailMode() error {
 	switch c.MailMode {
 	case "", MailModeLog:
