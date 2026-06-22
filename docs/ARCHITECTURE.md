@@ -578,7 +578,7 @@ JSON signaling frames and projecting room state — it does **no media processin
 | WebSockets | **`coder/websocket`** (AD-16), wrapped behind `internal/signaling/conn` as an in-process **test seam** | Actively maintained, context-first, ergonomic. Its self-serialization is *redundant* with our single-writer `writeLoop` (EN-12), not extra safety (RF-19). |
 | DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame stats** — `peers.used_turn` written once at disconnect. |
 | Auth | `golang.org/x/oauth2` (Google) + JWT cookie | See JWT contract below (EN-6). Google-only sign-in. |
-| Email | **Resend HTTP API** (D-2) + `MAIL_MODE=log` | One POST, no SMTP; `log` mode prints links to stdout for dev. Consumes Resend delivery webhooks for real mail-health signal (EN-22). |
+| Email | **Resend HTTP API** (D-2) or **generic SMTP relay** (STARTTLS port 587 / implicit TLS port 465) + `MAIL_MODE=log` | Backend auto-detected: `SMTP_HOST` set → SMTP (no new deps, stdlib `net/smtp`), else Resend; `log` mode prints links to stdout for dev. Consumes Resend delivery webhooks for real mail-health signal (EN-22). |
 | NAT traversal | **STUN-only by default** + optional BYO-TURN (D-38) | Operator/host may supply a TURN URL+secret fed to ICE; ephemeral HMAC creds, 60–120s TTL so kicks revoke (EN-4). |
 
 **JWT contract (EN-6).** The JWT carries **`host_id` only** — no roles, no status
@@ -606,7 +606,7 @@ internal/
   store/              modernc.org/sqlite; go:embed *.sql migrations (AD-6);
                       WAL+busy_timeout+FK conn hook + single-writer pool (EN-11)
   auth/               Google OAuth + JWT (kid two-key ring), live-DB authz mw (EN-6), AUTH_MODE=dev
-  mail/               Resend HTTP + MAIL_MODE=log; delivery-webhook intake (EN-22)
+  mail/               Resend HTTP + SMTP relay + MAIL_MODE=log; delivery-webhook intake (EN-22)
   turn/               ICE config assembly; ephemeral HMAC TURN creds 60–120s (EN-4); STUN default (D-38)
   signaling/          THE CORE (AD-2): hub + room + conn + roster/locks/slots/epochs/frames
     hub.go            room registry, conn routing, cross-room queries, one-live-session (AD-2a)

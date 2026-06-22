@@ -37,7 +37,7 @@ pin (AD-15) — the project tracks current deps, so the floor rose to 1.25 for
 | `internal/config` | env load into one struct; **fail-closed secrets** (EN-14, AD-8) | be mutated after load |
 | `internal/store` | `modernc.org/sqlite`; migrations; repos; conn-hook + single-writer pool (EN-11) | leak `*sql.DB` / SQL strings upward |
 | `internal/auth` | Google OAuth, JWT (kid two-key ring), live-DB authz middleware (EN-6), `AUTH_MODE=dev` (AD-8) | bake roles/status into the token |
-| `internal/mail` | Resend HTTP, `MAIL_MODE=log`, delivery-webhook intake (EN-22) | use SMTP |
+| `internal/mail` | Resend HTTP, generic SMTP relay (STARTTLS/implicit TLS), `MAIL_MODE=log`, delivery-webhook intake (EN-22) | add new mail providers outside this package |
 | `internal/turn` | ICE-config assembly; ephemeral HMAC TURN creds (EN-4); STUN default (D-38) | persist creds |
 | `internal/signaling` | **the core** (AD-2): hub + room + conn + roster/locks/slots/epochs/frames | touch the DB on a per-frame path; write a socket outside the conn's `writeLoop` |
 | `internal/web` | chi router, `html/template` render, route table, CSP/SRI/cookies (§7.5), OBS source pages | reach into another package's private state |
@@ -494,7 +494,7 @@ internal/
   config/             env load + fail-closed secrets
   store/              sqlite; repos; migrations/  (numbered *.sql, go:embed)
   auth/               OAuth + JWT + live-DB authz mw + AUTH_MODE=dev
-  mail/               Resend HTTP + MAIL_MODE=log + webhook intake
+  mail/               Resend HTTP + SMTP relay + MAIL_MODE=log + webhook intake
   turn/               ICE assembly + ephemeral TURN creds
   signaling/          hub.go room.go conn.go frames.go roster.go locks.go slots.go (+ *_test.go)
   web/                handlers, html/template, route table, CSP/SRI/cookies, OBS source pages
