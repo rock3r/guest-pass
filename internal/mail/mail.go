@@ -18,6 +18,7 @@ import (
 	netmail "net/mail"
 	"net/smtp"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -148,6 +149,14 @@ func (m *SMTPMailer) send(ctx context.Context, from, to string, msg []byte) erro
 		return fmt.Errorf("mail: smtp dial %s: %w", addr, err)
 	}
 
+	// Apply a deadline for the full exchange so a stalled relay cannot block the
+	// caller indefinitely. Prefer the context deadline when it is tighter.
+	deadline := time.Now().Add(30 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = conn.SetDeadline(deadline)
+
 	c, err := smtp.NewClient(conn, m.host)
 	if err != nil {
 		conn.Close()
@@ -196,16 +205,23 @@ func parseFromAddress(from string) (string, error) {
 }
 
 // buildSMTPMessage assembles a minimal RFC 5322 message with an HTML body.
+// Header values are sanitized: CR and LF are stripped to prevent header injection
+// from host-supplied text (stream titles, addresses) reaching the wire.
 func buildSMTPMessage(from, to, subject, htmlBody string) []byte {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "From: %s\r\n", from)
-	fmt.Fprintf(&buf, "To: %s\r\n", to)
-	fmt.Fprintf(&buf, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&buf, "From: %s\r\n", sanitizeHeader(from))
+	fmt.Fprintf(&buf, "To: %s\r\n", sanitizeHeader(to))
+	fmt.Fprintf(&buf, "Subject: %s\r\n", sanitizeHeader(subject))
 	fmt.Fprintf(&buf, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&buf, "Content-Type: text/html; charset=UTF-8\r\n")
 	fmt.Fprintf(&buf, "\r\n")
 	fmt.Fprint(&buf, htmlBody)
 	return buf.Bytes()
+}
+
+// sanitizeHeader removes CR and LF from a header value to prevent injection.
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
 
 // inviteHTML renders the invite body. The guest name/link are plain text values from the

@@ -423,7 +423,7 @@ func (c *Config) validateRequired() error {
 			struct{ name, val string }{"RESEND_API_KEY", c.ResendAPIKey},
 			struct{ name, val string }{"MAIL_FROM", c.MailFrom},
 		)
-	// MailBackendLog: no mail credentials needed.
+		// MailBackendLog: no mail credentials needed.
 	}
 	for _, r := range required {
 		if strings.TrimSpace(r.val) == "" {
