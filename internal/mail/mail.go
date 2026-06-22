@@ -195,7 +195,10 @@ func (m *SMTPMailer) send(ctx context.Context, from, to string, msg []byte) erro
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("mail: smtp close data writer: %w", err)
 	}
-	return c.Quit()
+	// Message accepted; QUIT is best-effort — a relay that closes the connection
+	// before replying should not be treated as a delivery failure.
+	_ = c.Quit()
+	return nil
 }
 
 // parseFromAddress extracts the bare email address from a From string which may be
