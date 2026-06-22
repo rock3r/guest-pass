@@ -199,9 +199,12 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		return nil, fmt.Errorf("building token hasher: %w", err)
 	}
 	var mailer mail.Mailer
-	if cfg.MailMode == config.MailModeLog {
+	switch cfg.MailBackend() {
+	case config.MailBackendLog:
 		mailer = mail.NewLogMailer(os.Stdout)
-	} else {
+	case config.MailBackendSMTP:
+		mailer = mail.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.MailFrom)
+	default:
 		mailer = mail.NewResendMailer(cfg.ResendAPIKey, cfg.MailFrom)
 	}
 
