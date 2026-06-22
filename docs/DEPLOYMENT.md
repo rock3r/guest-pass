@@ -505,3 +505,164 @@ be committed to this repo.
    (D-38). Public instance: stay STUN-only.
 4. **Public-instance operators must publish a privacy policy** (GDPR controller,
    §11).
+
+---
+
+## 13. Deploy — Proxmox LXC + Cloudflare Tunnel
+
+Both prod (`guest-pass.link`) and staging (`staging.guest-pass.link`) run from
+the **same `docker-compose.yml`**, distinguished entirely by their env file.
+`COMPOSE_PROJECT_NAME` in each env file namespaces all containers and Docker
+volumes so the two stacks coexist without collision — on the same LXC or on
+separate ones.
+
+| | Prod | Staging |
+|---|---|---|
+| Env file | `.env.prod` | `.env.staging` |
+| `COMPOSE_PROJECT_NAME` | `guestpass-prod` | `guestpass-staging` |
+| `BASE_URL` | `https://guest-pass.link` | `https://staging.guest-pass.link` |
+| `SIGNUP_MODE` | `open` | `allowlist` |
+| Data volume | `guestpass-prod_data` | `guestpass-staging_data` |
+| Cloudflare tunnel | separate tunnel | separate tunnel |
+| Cloudflare Access | not required (public) | required (private) |
+
+> All real secrets are supplied out-of-band in the env file on the host.
+> **Never commit them.**
+
+### 13.1 Cloudflare setup (once per environment)
+
+Repeat these steps for each environment (staging first, then prod when ready).
+
+1. **Create a tunnel** — Zero Trust → Networks → Tunnels → Create tunnel → Docker.
+   Name it `staging-guestpass` (or `prod-guestpass`). Copy the **tunnel token**.
+
+2. **Add a public hostname** in the tunnel configuration:
+   - Staging: subdomain `staging`, domain `guest-pass.link`
+   - Prod: no subdomain (apex), domain `guest-pass.link`
+   - Service: `HTTP`, URL: `guestpass:8137`
+
+   The URL uses the compose service name (`guestpass`), which is stable across
+   project names because cloudflared lives in the same compose network.
+
+3. **Staging only — create an Access Application** — Zero Trust → Access →
+   Applications → Self-hosted.
+   - Application domain: `staging.guest-pass.link`
+   - Policy: **Allow** → Include → **Emails** → add your address.
+
+4. **Add redirect URIs to your Google OAuth client** — Authorised redirect URIs:
+   - `https://staging.guest-pass.link/auth/google/callback`
+   - `https://guest-pass.link/auth/google/callback`
+
+   One OAuth client can carry both redirect URIs; or use separate clients.
+
+### 13.2 Host provisioning (Proxmox LXC)
+
+Create a Debian 12 / Ubuntu 24.04 LXC with at least 1 vCPU / 512 MB RAM /
+4 GB disk. Install Docker once:
+
+```sh
+apt-get update && apt-get install -y ca-certificates curl git
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+# follow https://docs.docker.com/engine/install/ for your distro
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+### 13.3 Clone the repo
+
+```sh
+git clone https://github.com/rock3r/guest-pass /opt/guestpass
+cd /opt/guestpass
+```
+
+### 13.4 Create env files
+
+```sh
+# Staging
+cp .env.staging.example .env.staging
+nano .env.staging   # fill in every placeholder
+
+# Prod (when ready)
+cp .env.prod.example .env.prod
+nano .env.prod      # fill in every placeholder
+```
+
+Generate strong secrets with `openssl rand -base64 48` — run it **separately**
+for `JWT_SECRET` and `TOKEN_SECRET` in each env file. Do not reuse secrets
+across environments.
+
+### 13.5 Build and start
+
+Pass `--env-file` to target the environment. `COMPOSE_PROJECT_NAME` inside the
+file scopes all containers and volumes automatically.
+
+```sh
+# Staging
+docker compose --env-file .env.staging --profile cf-tunnel up -d --build
+
+# Prod
+docker compose --env-file .env.prod --profile cf-tunnel up -d --build
+```
+
+`--build` compiles the Go binary and bundles the frontend. The `cf-tunnel`
+profile adds the cloudflared service that carries traffic from Cloudflare's edge.
+
+Check logs (pass `--env-file` so compose finds the right project):
+
+```sh
+docker compose --env-file .env.staging logs -f guestpass    # magic links appear here (MAIL_MODE=log)
+docker compose --env-file .env.staging logs -f cloudflared  # tunnel status
+```
+
+### 13.6 Verify (staging)
+
+1. Visit `https://staging.guest-pass.link` — Cloudflare Access prompts for login.
+2. After passing Access, the GuestPass sign-in page appears.
+3. Sign in with Google (the email in `ALLOWED_HOSTS`).
+4. With `MAIL_MODE=log`, the magic-link URL is in the guestpass log — paste it
+   in the browser to complete sign-in.
+
+### 13.7 Updates
+
+```sh
+cd /opt/guestpass
+git pull
+
+# Redeploy staging
+docker compose --env-file .env.staging --profile cf-tunnel up -d --build
+
+# Redeploy prod
+docker compose --env-file .env.prod --profile cf-tunnel up -d --build
+```
+
+`--build` rebuilds only changed layers. Each `guestpass` container is replaced
+with a graceful drain (SIGTERM → 25s → exit, RF-21).
+
+> **Pre-migration backup** (RF-20): if the update includes a DB migration, take
+> a WAL-consistent snapshot first. Volume names follow the project name:
+> ```sh
+> # Staging
+> sqlite3 /var/lib/docker/volumes/guestpass-staging_data/_data/guestpass.db \
+>   "VACUUM INTO '/opt/backup-staging-$(date +%F).db'"
+>
+> # Prod
+> sqlite3 /var/lib/docker/volumes/guestpass-prod_data/_data/guestpass.db \
+>   "VACUUM INTO '/opt/backup-prod-$(date +%F).db'"
+> ```
+
+### 13.8 Notes
+
+- **Isolation**: each environment's containers, volumes, and networks are
+  namespaced by `COMPOSE_PROJECT_NAME`. They share no state even when running
+  on the same host.
+- **STUN**: both envs default to `stun.cloudflare.com:3478` (public, no
+  port-forward needed). Guests on symmetric NAT see the "your network blocks P2P"
+  error — expected behaviour when no TURN relay is configured (D-38).
+- **TURN**: not configured by default. Add coturn (`--profile turn`) and a
+  `coturn.conf` with your public IP if you need TURN relay testing.
+- **Mail (staging)**: `MAIL_MODE=log` prints magic-link URLs to the log.
+  Switch to Resend by removing that line and setting `RESEND_API_KEY` + `MAIL_FROM`.
+- **Cloudflare Access vs. GuestPass auth**: Access is the outer gate (who can
+  reach the URL at all); GuestPass sign-in is the inner gate (who can create
+  streams). For staging, both are required. For prod, Access is omitted so
+  anyone can reach the public sign-in page.

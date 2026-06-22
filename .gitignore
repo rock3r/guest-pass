@@ -17,6 +17,9 @@ coverage.*
 # Frontend build output — esbuild → go:embed at release (AD-7), never committed
 /web/dist/
 
+# Cloudflare Tunnel credentials — never commit; created by scripts/cf-tunnel-setup.sh
+cloudflared/credentials.json
+
 # Local SQLite state
 *.db
 *.db-wal

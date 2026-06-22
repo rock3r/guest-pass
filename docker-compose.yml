@@ -1,0 +1,59 @@
+services:
+  guestpass:
+    build: .
+    restart: unless-stopped
+    environment:
+      BASE_URL: ${BASE_URL}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      TOKEN_SECRET: ${TOKEN_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      SIGNUP_MODE: ${SIGNUP_MODE:-allowlist}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      STUN_URL: ${STUN_URL:-}
+      TURN_URL: ${TURN_URL:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_MODE: ${MAIL_MODE:-}
+      DB_PATH: /app/data/guestpass.db
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8137/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Cloudflare Tunnel — set the cf-tunnel profile to include this service.
+  # Usage: docker compose --profile cf-tunnel up -d
+  # Prerequisites: run scripts/cf-tunnel-setup.sh once to create the tunnel and populate
+  # cloudflared/config.yml + cloudflared/credentials.json (gitignored).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
+    depends_on:
+      guestpass:
+        condition: service_healthy
+    profiles: ["cf-tunnel"]
+
+  # coturn — STUN + optional TURN relay.  Set the turn profile to include this service.
+  # Usage: docker compose --profile turn up -d
+  # Requires UDP 3478 reachable from the internet (port-forward / UPnP / public IP).
+  # Mount a coturn.conf with listening-ip set to the public IP.
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn.conf:/etc/coturn/turnserver.conf:ro
+    profiles: ["turn"]
+
+volumes:
+  data:

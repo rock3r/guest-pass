@@ -1,0 +1,23 @@
+# Build artefacts — generated at build time inside Docker.
+/web/dist/
+/guestpass
+/devsmoke
+
+# Local state — should never enter the image.
+*.db
+*.db-shm
+*.db-wal
+.smoke/
+.plans/
+.worktrees/
+.agents/
+.claude/
+.cal-industries/
+
+# Secrets — never bake into the image.
+.env
+.env.*
+!.env.*.example
+
+# macOS noise.
+.DS_Store
