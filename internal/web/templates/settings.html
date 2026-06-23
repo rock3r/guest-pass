@@ -1,6 +1,11 @@
 {{define "content"}}
-<section class="settings">
+<section class="settings settings-narrow">
+<div class="page-head">
+<div>
 <h1>Settings</h1>
+<p class="page-head-sub">Your account, defaults, and the knobs applied to every new stream.</p>
+</div>
+</div>
 
 {{if .Data.Saved}}<p class="settings-flash settings-flash-ok" data-flash="saved">Your name was updated.</p>{{end}}
 {{if .Data.NameError}}<p class="settings-flash settings-flash-error" data-flash="name-error">Your name can't be empty.</p>{{end}}
@@ -8,40 +13,81 @@
 {{if .Data.LastAdminError}}<p class="settings-flash settings-flash-error" data-flash="last-admin-error">You're the last admin — promote another host to admin before deleting your account.</p>{{end}}
 {{if .Data.ConfirmError}}<p class="settings-flash settings-flash-error" data-flash="confirm-error">Please confirm by checking the box before deleting your account.</p>{{end}}
 
-<div class="settings-card settings-account">
+<div class="settings-col">
+
+<div class="settings-section-card settings-account">
 <h2>Account</h2>
-<dl class="settings-fields">
-<dt>Email</dt><dd class="settings-email">{{.Data.Email}}</dd>
-<dt>Sign-in</dt><dd>Google</dd>
-</dl>
-<form class="settings-amend" method="post" action="/app/settings/amend" data-gdpr="amend">
-<label for="settings-name">Display name</label>
-<input id="settings-name" name="name" type="text" value="{{.Data.Name}}" maxlength="100" required>
-<button type="submit" class="btn">Save name</button>
-</form>
-<p class="settings-note">Your email and sign-in come from Google and are read-only here; your display name (rectification) is editable above.</p>
+<div class="row gap-4 settings-account-row">
+<span class="avatar avatar-lg av-{{.Host.AvatarIdx}}">{{.Host.AvatarInitials}}</span>
+<div class="grow">
+<div class="settings-account-name">{{.Host.Name}}</div>
+<div class="muted row gap-2 settings-account-email settings-email"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12.2c0-.7-.06-1.4-.18-2.06H12v3.9h5.6a4.8 4.8 0 0 1-2.08 3.15v2.6h3.36C20.84 18 22 15.4 22 12.2z"/><path fill="#34A853" d="M12 22.5c2.7 0 4.97-.9 6.63-2.43l-3.36-2.6c-.93.62-2.12.99-3.27.99-2.6 0-4.8-1.76-5.59-4.12H2.94v2.6A10 10 0 0 0 12 22.5z"/><path fill="#FBBC05" d="M6.41 14.34a6 6 0 0 1 0-3.84v-2.6H2.94a10 10 0 0 0 0 9.04z"/><path fill="#EA4335" d="M12 6.38c1.47 0 2.79.5 3.83 1.5l2.87-2.87C16.97 3.4 14.7 2.5 12 2.5A10 10 0 0 0 2.94 8.1l3.47 2.6C7.2 8.14 9.4 6.38 12 6.38z"/></svg> {{.Data.Email}}</div>
+</div>
+{{if .Host.IsAdmin}}<span class="badge badge-accent">Admin</span>{{end}}
+</div>
 </div>
 
-<div class="settings-card settings-quality">
-<h2>Stream quality</h2>
-<p>The program quality ceiling — resolution, frame rate, and bitrate — is set <strong>per stream</strong> in the greenroom's host controls while a stream is live. There's no account-wide quality setting.</p>
+<div class="settings-section-card">
+<h2>Display name</h2>
+<p class="muted">Your email and sign-in come from Google and are read-only; your display name is editable here.</p>
+<form class="settings-amend" method="post" action="/app/settings/amend" data-gdpr="amend">
+<label for="settings-name">Display name<input id="settings-name" name="name" type="text" value="{{.Data.Name}}" maxlength="100" required></label>
+<button type="submit" class="btn">Save name</button>
+</form>
+</div>
+
+<div class="settings-section-card">
+<h2>Scheduling defaults</h2>
+<p class="muted">Pre-filled when you create a new stream.</p>
+<label class="field settings-field-narrow"><span class="label">Default timezone</span>
+<select class="input" disabled><option>Europe/London</option></select>
+<span class="hint">Timezone defaults are coming soon.</span>
+</label>
+</div>
+
+<div class="settings-section-card">
+<h2>Your channels</h2>
+<p class="muted">Used for the optional "is the channel actually live?" check and quick links. We never post on your behalf.</p>
+<div class="col gap-4">
+<label class="field"><span class="label">YouTube channel</span><input class="input" type="url" placeholder="youtube.com/@yourchannel" disabled><span class="hint">Channel linking is coming soon.</span></label>
+<label class="field"><span class="label">Twitch channel</span><input class="input" type="url" placeholder="twitch.tv/yourchannel" disabled></label>
+</div>
+</div>
+
+<div class="settings-section-card">
+<h2>Video</h2>
+<p class="muted">Applied to new streams; override per-stream in OBS &amp; sources.</p>
+<label class="field settings-field-narrow"><span class="label">Codec</span>
+<select class="input" disabled><option>Auto · H.264 + VP8 (max compatibility)</option></select>
+<span class="hint">Codec and resolution controls are coming soon.</span>
+</label>
+</div>
+
+<div class="settings-section-card">
+<h2>Connection</h2>
+<p class="muted">By default GuestPass connects guests peer-to-peer with STUN only — no relay, nothing to run. If a guest's network blocks P2P, add your own TURN relay (it forwards encrypted packets it can't read).</p>
+<div class="row between settings-turn-row">
+<div>
+<div class="settings-turn-title">Bring your own TURN</div>
+<div class="muted settings-turn-sub">Custom TURN relay configuration is coming soon.</div>
+</div>
+<label class="switch"><input type="checkbox" disabled><span class="track"></span><span class="thumb"></span></label>
+</div>
 </div>
 
 {{/* GDPR host self-service (AC-3..5/D-37): functional export / amend (above) / delete. */}}
-<div class="settings-card settings-data" data-gdpr="self-service">
+<div class="settings-section-card" data-gdpr="self-service">
 <h2>Your data</h2>
-<p>GuestPass keeps the absolute minimum — your Google sign-in identity and the invites you create. No media is ever stored, and backstage chat is never recorded. A guest's name and email are <strong>automatically deleted within 24&nbsp;hours</strong> of a stream ending.</p>
-
-<h3>Export</h3>
-<p>Download everything we hold about you — your account, your streams, and the guest invites you've created — as a single JSON file.</p>
-<p><a class="btn btn-quiet" href="/api/me/export" download="guestpass-export.json" data-gdpr="export">Export my data</a></p>
-
-<h3>Delete my account</h3>
-<p>Permanently delete your account and <strong>all</strong> your data — your streams, invites, and any guest details not yet auto-purged. This cannot be undone. You can't delete your account while a stream is live — end it first.</p>
+<p class="muted">GuestPass keeps the absolute minimum — your Google sign-in identity and the invites you create. No media is ever stored, and backstage chat is never recorded. A guest's name and email are deleted within 24&nbsp;hours of a stream ending. These tools cover your own account data.</p>
+<div class="row gap-2 wrap settings-data-actions">
+<a class="btn btn-outline btn-sm" href="/api/me/export" download="guestpass-export.json" data-gdpr="export"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg> Export my data</a>
+</div>
 <form class="settings-delete" method="post" action="/app/settings/delete" data-gdpr="delete">
 <label class="settings-delete-confirm"><input type="checkbox" name="confirm" value="1" required> I understand this permanently deletes my account and all my data.</label>
-<button type="submit" class="btn btn-danger">Delete my account</button>
+<button type="submit" class="btn btn-danger btn-sm"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16M9 6.5V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 6.5l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg> Delete account &amp; all data</button>
 </form>
+</div>
+
 </div>
 </section>
 {{end}}

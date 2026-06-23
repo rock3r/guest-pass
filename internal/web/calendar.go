@@ -54,7 +54,7 @@ func (s *appServer) calendar(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	s.rd.render(w, r, "calendar.html", pageData{
-		Title: "Calendar", Nav: "calendar", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
+		Title: "Calendar", Nav: "calendar", Host: hostNav(host),
 		Data: buildCalendar(now, parseMonth(r.URL.Query().Get("month"), now), streams),
 	})
 }

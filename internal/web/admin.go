@@ -293,7 +293,7 @@ func (s *adminServer) adminConsole(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Flash, d.FlashError = adminFlash(r.URL.Query().Get("msg")), adminFlash(r.URL.Query().Get("error"))
 	s.rd.render(w, r, "admin.html", pageData{
-		Title: "Admin", Nav: "admin", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
+		Title: "Admin", Nav: "admin", Host: hostNav(host),
 		Data: d,
 	})
 }

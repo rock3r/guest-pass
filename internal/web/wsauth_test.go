@@ -170,7 +170,7 @@ func (h *wsHarness) seedCamSlot(t *testing.T, hostID string, idx int64) (string,
 		t.Fatalf("mint: %v", err)
 	}
 	sl, err := h.store.CreateSlot(context.Background(), store.CreateSlotParams{
-		HostID: hostID, Kind: store.SlotCam, Idx: &idx, SourceTokenHash: h.hasher.Hash(raw),
+		HostID: hostID, Kind: store.SlotCam, Idx: &idx, SourceTokenHash: h.hasher.Hash(raw), SourceTokenPlain: raw,
 	})
 	if err != nil {
 		t.Fatalf("CreateSlot: %v", err)
@@ -651,7 +651,7 @@ func TestWS_RotatedSourceTokenRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw)); err != nil {
+	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw), newRaw); err != nil {
 		t.Fatalf("RotateSlotToken: %v", err)
 	}
 
@@ -675,7 +675,7 @@ func TestWS_SourceStillValidRevalidation(t *testing.T) {
 		t.Fatal("a current source token should re-validate as valid")
 	}
 	newRaw, _ := token.Mint()
-	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw)); err != nil {
+	if err := h.store.RotateSlotToken(context.Background(), slot.ID, h.hasher.Hash(newRaw), newRaw); err != nil {
 		t.Fatalf("RotateSlotToken: %v", err)
 	}
 	if wr.sourceStillValid(context.Background(), srcRaw) {

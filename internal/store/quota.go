@@ -30,3 +30,26 @@ func (s *Store) CountStreamsByHost(ctx context.Context, hostID string) (int, err
 	}
 	return n, nil
 }
+
+// CountAllPassesByHost counts all invites ever created by the host across all streams.
+func (s *Store) CountAllPassesByHost(ctx context.Context, hostID string) (int, error) {
+	var n int
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM passes p JOIN streams st ON st.id = p.stream_id WHERE st.host_id = ?`, hostID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting host passes: %w", err)
+	}
+	return n, nil
+}
+
+// SumStreamMinutesByHost returns the total scheduled duration (in minutes) of all streams
+// owned by the host. Uses duration_min where set; unscheduled streams contribute 0.
+func (s *Store) SumStreamMinutesByHost(ctx context.Context, hostID string) (int, error) {
+	var n int
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(COALESCE(duration_min, 0)), 0) FROM streams WHERE host_id = ?`, hostID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("summing stream minutes: %w", err)
+	}
+	return n, nil
+}

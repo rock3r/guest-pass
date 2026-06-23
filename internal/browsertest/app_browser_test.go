@@ -90,65 +90,77 @@ func TestHostApp_DashboardCRUDRoundTrip(t *testing.T) {
 	})
 
 	Chrome(t, 90*time.Second, func(ctx context.Context) {
+		// Empty dashboard: the "up next" column shows its empty-state link.
 		var emptyText string
 		if err := chromedp.Run(ctx,
 			network.Enable(),
 			setHostCookie,
 			chromedp.Navigate(s.base+"/app"),
-			chromedp.WaitVisible(`.stream-create`, chromedp.ByQuery),
-			chromedp.Text(`.dash-empty`, &emptyText, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-dialog-open="new-stream-dialog"]`, chromedp.ByQuery),
+			chromedp.Text(`.dash-grid`, &emptyText, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("load empty dashboard: %v", err)
 		}
-		if !strings.Contains(emptyText, "No streams") {
+		if !strings.Contains(emptyText, "Schedule your first stream") {
 			t.Fatalf("empty dashboard text = %q, want the empty-state copy", emptyText)
 		}
 
-		// Create a stream from the server-rendered form.
+		// Create a stream via the New stream dialog (the v2 dashboard's create flow).
 		if err := chromedp.Run(ctx,
-			chromedp.SendKeys(`.stream-create input[name="title"]`, "First Stream", chromedp.ByQuery),
-			chromedp.Click(`.stream-create button[type="submit"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`.stream-title`, chromedp.ByQuery),
+			chromedp.Click(`[data-dialog-open="new-stream-dialog"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`#new-stream-dialog input[name="title"]`, chromedp.ByQuery),
+			chromedp.SendKeys(`#new-stream-dialog input[name="title"]`, "First Stream", chromedp.ByQuery),
+			chromedp.Click(`#new-stream-dialog button[type="submit"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.stream-tile-title`, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("create stream: %v", err)
 		}
-		var title string
-		if err := chromedp.Run(ctx, chromedp.Text(`.stream-title`, &title, chromedp.ByQuery)); err != nil {
-			t.Fatalf("read created title: %v", err)
+		var title, invitesHref string
+		if err := chromedp.Run(ctx,
+			chromedp.Text(`.stream-tile-title`, &title, chromedp.ByQuery),
+			chromedp.AttributeValue(`.stream-tile-title`, "href", &invitesHref, nil),
+		); err != nil {
+			t.Fatalf("read created stream: %v", err)
 		}
 		if !strings.Contains(title, "First Stream") {
-			t.Fatalf("dashboard title = %q, want it to list the created stream", title)
+			t.Fatalf("dashboard tile = %q, want it to list the created stream", title)
 		}
+		// The tile links to the stream's invites; derive the id to drive edit/delete, which the
+		// v2 design moves onto the stream edit page (the dashboard no longer has inline CRUD).
+		id := strings.TrimSuffix(strings.TrimPrefix(invitesHref, "/app/streams/"), "/invites")
+		editURL := s.base + "/app/streams/" + id + "/edit"
 
-		// Edit it: open the edit form, clear + retype the title, save.
+		// Edit on the stream edit page, then confirm the dashboard reflects the new title.
 		if err := chromedp.Run(ctx,
-			chromedp.Click(`.stream-card a.btn-quiet`, chromedp.ByQuery),
-			chromedp.WaitVisible(`.stream-edit input[name="title"]`, chromedp.ByQuery),
-			chromedp.Evaluate(`document.querySelector('.stream-edit input[name="title"]').value=''`, nil),
-			chromedp.SendKeys(`.stream-edit input[name="title"]`, "Renamed Stream", chromedp.ByQuery),
+			chromedp.Navigate(editURL),
+			chromedp.WaitVisible(`.stream-form input[name="title"]`, chromedp.ByQuery),
+			chromedp.Evaluate(`document.querySelector('.stream-form input[name="title"]').value=''`, nil),
+			chromedp.SendKeys(`.stream-form input[name="title"]`, "Renamed Stream", chromedp.ByQuery),
 			chromedp.Click(`.stream-form button[type="submit"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`.stream-title`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.stream-tile-title`, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("edit stream: %v", err)
 		}
 		var renamed string
-		if err := chromedp.Run(ctx, chromedp.Text(`.stream-title`, &renamed, chromedp.ByQuery)); err != nil {
+		if err := chromedp.Run(ctx, chromedp.Text(`.stream-tile-title`, &renamed, chromedp.ByQuery)); err != nil {
 			t.Fatalf("read renamed title: %v", err)
 		}
 		if !strings.Contains(renamed, "Renamed Stream") {
-			t.Fatalf("dashboard title after edit = %q, want Renamed Stream", renamed)
+			t.Fatalf("dashboard tile after edit = %q, want Renamed Stream", renamed)
 		}
 
-		// Delete it: the dashboard returns to the empty state.
+		// Delete from the edit page; the dashboard returns to the empty state.
 		var afterDelete string
 		if err := chromedp.Run(ctx,
-			chromedp.Click(`.stream-card .inline-form button[type="submit"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`.dash-empty`, chromedp.ByQuery),
-			chromedp.Text(`.dash-empty`, &afterDelete, chromedp.ByQuery),
+			chromedp.Navigate(editURL),
+			chromedp.WaitVisible(`.stream-delete button[type="submit"]`, chromedp.ByQuery),
+			chromedp.Click(`.stream-delete button[type="submit"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-dialog-open="new-stream-dialog"]`, chromedp.ByQuery),
+			chromedp.Text(`.dash-grid`, &afterDelete, chromedp.ByQuery),
 		); err != nil {
 			t.Fatalf("delete stream: %v", err)
 		}
-		if !strings.Contains(afterDelete, "No streams") {
+		if !strings.Contains(afterDelete, "Schedule your first stream") {
 			t.Fatalf("dashboard after delete = %q, want the empty state", afterDelete)
 		}
 	})

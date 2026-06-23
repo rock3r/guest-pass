@@ -17,7 +17,7 @@ import (
 func TestPublic_NoHorizontalOverflowOnPhone(t *testing.T) {
 	s := seedDeviceCheck(t)
 	pages := []struct{ name, path, wait string }{
-		{"landing", "/", `.hero`},
+		{"landing", "/", `.hero-section`},
 		{"signin", "/signin", `.signin`},
 		{"report", "/p/" + s.rawToken + "/report", `.report-form`},
 		{"error", "/no-such-page", `.error-screen`},

@@ -1,10 +1,339 @@
-{{define "content"}}
-<section class="hero">
-<span class="badge badge-accent hero-eyebrow">Free &amp; open-source</span>
-<h1>GuestPass</h1>
-<p>Bring guests onto your live stream with a click — no signup, no install. They open
-an emailed link, allow their camera, and appear in OBS as individual browser sources.
-All video is peer-to-peer; the server never sees your media.</p>
-<p><a class="btn btn-primary btn-lg cta" href="/signin">Host sign-in</a></p>
+<!doctype html>
+<html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · GuestPass</title>
+<link rel="stylesheet" href="/static/app.css"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}" crossorigin="anonymous"{{end}}>
+</head>
+<body class="landing">
+
+<header class="landing-nav">
+<div class="landing-nav-inner">
+<a class="logo" href="/" aria-label="GuestPass home"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></a>
+<nav class="landing-nav-links" aria-label="Sections">
+<a href="#how">How it works</a>
+<a href="#compare">Compare</a>
+<a href="{{.SourceURL}}" rel="noopener" class="row gap-1"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.3 21.5h11.4a2 2 0 0 0 1.8-3L14 9V3"/></svg> Source</a>
+</nav>
+<div class="landing-nav-cta">
+<form method="post" action="/theme">
+<input type="hidden" name="next" value="{{.Path}}">
+{{if eq .Theme "dark"}}<button type="submit" name="theme" value="system" class="theme-icon-btn" aria-label="Theme: Dark. Switch to system."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg></button>
+{{else if eq .Theme "light"}}<button type="submit" name="theme" value="dark" class="theme-icon-btn" aria-label="Theme: Light. Switch to dark."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.5v2.5M12 20v2.5M3.5 3.5l1.8 1.8M18.7 18.7l1.8 1.8M1.5 12H4M20 12h2.5M3.5 20.5l1.8-1.8M18.7 5.3l1.8-1.8"/></svg></button>
+{{else}}<button type="submit" name="theme" value="light" class="theme-icon-btn" aria-label="Theme: System. Switch to light."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.5v2.5M12 20v2.5M3.5 3.5l1.8 1.8M18.7 18.7l1.8 1.8M1.5 12H4M20 12h2.5M3.5 20.5l1.8-1.8M18.7 5.3l1.8-1.8"/></svg></button>{{end}}
+</form>
+<a class="btn btn-primary btn-sparkle" href="/signin">Get hosting</a>
+</div>
+</div>
+</header>
+
+<section class="hero-section">
+<div class="hero-aurora" aria-hidden="true"><b></b><b></b><b></b><b></b></div>
+<div class="hero-inner">
+<div class="hero-copy">
+<span class="section-kicker hero-eyebrow">Source-available · P2P WebRTC · free &amp; self-hostable</span>
+<h1 class="hero-h1">Hand out <span class="hero-pass-word">passes<span class="hero-underline" aria-hidden="true"></span></span>,<br>not <span class="flip"><span id="flip-word" class="flip-w">headaches.</span></span></h1>
+<p class="hero-lead">Bring guests into your live stream as real OBS browser sources. They click a magic link, allow their camera, and they're on. <strong>No account. No app. No nonsense.</strong></p>
+<div class="hero-ctas">
+<a class="btn btn-primary btn-lg btn-sparkle" href="/signin"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12.2c0-.7-.06-1.4-.18-2.06H12v3.9h5.6a4.8 4.8 0 0 1-2.08 3.15v2.6h3.36C20.84 18 22 15.4 22 12.2z"/><path fill="#34A853" d="M12 22.5c2.7 0 4.97-.9 6.63-2.43l-3.36-2.6c-.93.62-2.12.99-3.27.99-2.6 0-4.8-1.76-5.59-4.12H2.94v2.6A10 10 0 0 0 12 22.5z"/><path fill="#FBBC05" d="M6.41 14.34a6 6 0 0 1 0-3.84v-2.6H2.94a10 10 0 0 0 0 9.04z"/><path fill="#EA4335" d="M12 6.38c1.47 0 2.79.5 3.83 1.5l2.87-2.87C16.97 3.4 14.7 2.5 12 2.5A10 10 0 0 0 2.94 8.1l3.47 2.6C7.2 8.14 9.4 6.38 12 6.38z"/></svg> Get hosting — free</a>
+<a class="btn btn-outline btn-lg" href="#how"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><path d="M7.5 16.5a6 6 0 0 1 0-9M16.5 7.5a6 6 0 0 1 0 9M4.8 19.2a9.5 9.5 0 0 1 0-14.4M19.2 4.8a9.5 9.5 0 0 1 0 14.4"/></svg> Tour the greenroom</a>
+</div>
+<div class="hero-checks">
+<span class="hero-check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg> 100% free, no ads</span>
+<span class="hero-check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg> Peer-to-peer by default</span>
+<span class="hero-check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg> Source-available (UEL v1.0)</span>
+</div>
+</div>
+<div class="hero-visual-wrap">
+<span class="sticker tone-yellow" data-sticker="1">$0 forever 🤑</span>
+<span class="sticker tone-pink" data-sticker="2">no card, no catch</span>
+<div class="hero-visual float-slow">
+<div class="hero-visual-header">
+<div class="row gap-2"><span class="badge badge-live"><span class="badge-dot"></span>On air</span><span class="badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 20a6.5 6.5 0 0 0-2.5-5"/></svg> 3 guests</span></div>
+<span class="faint mono">12:48</span>
+</div>
+<div class="hero-visual-grid">
+<div class="hero-tile hero-tile-live"><span class="hero-tile-label">Avery · Host</span></div>
+<div class="hero-tile"><span class="hero-tile-label">Priya · Co-host</span></div>
+<div class="hero-tile"><span class="hero-tile-label">Marcus</span></div>
+<div class="hero-tile"><span class="hero-tile-label">Screen share</span></div>
+</div>
+<div class="hero-pass-chip">
+<span class="hero-pass-chip-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg></span>
+<span><span class="parody-name">Pass accepted</span><br><span class="faint mono">no signup · 0s</span></span>
+</div>
+</div>
+</div>
+</div>
 </section>
-{{end}}
+
+<div class="mq" aria-hidden="true"><div class="mq-track">
+<span class="mq-item">Actually free</span><span class="mq-item">No watermark</span><span class="mq-item">Your media never hits our server</span><span class="mq-item">Source-available · UEL v1.0</span><span class="mq-item">Zero signup for guests</span><span class="mq-item">Self-host in one command</span><span class="mq-item">No “pro” wall</span><span class="mq-item">Real OBS sources, not a baked grid</span>
+<span class="mq-item">Actually free</span><span class="mq-item">No watermark</span><span class="mq-item">Your media never hits our server</span><span class="mq-item">Source-available · UEL v1.0</span><span class="mq-item">Zero signup for guests</span><span class="mq-item">Self-host in one command</span><span class="mq-item">No “pro” wall</span><span class="mq-item">Real OBS sources, not a baked grid</span>
+</div></div>
+
+<section class="trust-strip">
+<p class="faint trust-kicker">Plays nicely with</p>
+<div class="trust-logos">
+<span class="trust-logo">OBS Studio</span><span class="trust-sep">·</span><span class="trust-logo">Streamlabs</span><span class="trust-sep">·</span><span class="trust-logo">vMix</span><span class="trust-sep">·</span><span class="trust-logo">Restream</span>
+</div>
+</section>
+
+<section id="how" class="how-section">
+<div class="how-inner">
+<div class="section-head">
+<h2 class="section-title">Live in three moves</h2>
+<p class="section-sub">From "want a guest" to "they're on screen" in about a minute.</p>
+</div>
+<div class="how-steps">
+<div class="card step-card tone-blue">
+<span class="step-ghost" aria-hidden="true">1</span>
+<div class="pillar-head"><span class="step-badge">1</span><span class="step-chip"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span></div>
+<span class="step-eyebrow">Step 01</span>
+<h3 class="step-title">Create a stream</h3>
+<p class="step-body">Pick a time, name the show. GuestPass spins up a private room and a set of OBS source URLs you'll drop in later.</p>
+</div>
+<div class="step-arrow" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></div>
+<div class="card step-card tone-pink">
+<span class="step-ghost" aria-hidden="true">2</span>
+<div class="pillar-head"><span class="step-badge">2</span><span class="step-chip"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg></span></div>
+<span class="step-eyebrow">Step 02</span>
+<h3 class="step-title">Send the passes</h3>
+<p class="step-body">Type a name and email. Each guest gets a magic link that signs them straight in — no password, no download, expires when you say.</p>
+</div>
+<div class="step-arrow" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></div>
+<div class="card step-card tone-teal">
+<span class="step-ghost" aria-hidden="true">3</span>
+<div class="pillar-head"><span class="step-badge">3</span><span class="step-chip"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><path d="M7.5 16.5a6 6 0 0 1 0-9M16.5 7.5a6 6 0 0 1 0 9M4.8 19.2a9.5 9.5 0 0 1 0-14.4M19.2 4.8a9.5 9.5 0 0 1 0 14.4"/></svg></span></div>
+<span class="step-eyebrow">Step 03</span>
+<h3 class="step-title">Go live together</h3>
+<p class="step-body">Meet in your private greenroom — invite-only — to soundcheck, then add each guest's browser source to OBS. Kick, mute, or re-issue passes anytime.</p>
+</div>
+</div>
+</div>
+</section>
+
+<section class="pillars-section">
+<div class="pillars-head">
+<span class="section-kicker">Why we're different</span>
+<h2 class="section-title">Free is the easy part.</h2>
+<p class="section-sub">Plenty of tools are free until they aren't. Here's the stuff we can actually back up — no asterisks, no "trust us."</p>
+</div>
+<div class="pillars-grid">
+<div class="card card-pad hover-lift pop-card stagger-item tone-pink">
+<div class="pillar-head"><span class="pillar-icon lift-icon"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg></span><span class="pillar-kicker">No price tag, no pivot</span></div>
+<h3 class="pillar-title">100% free. No ads, no “pro” wall.</h3>
+<p class="pillar-body">The whole thing is free — every guest slot, every feature. We're not warming you up for a paid tier or stuffing ads between your guests. The public instance is free because P2P media is genuinely cheap to run: a little signaling and a tiny database, and that's about it.</p>
+</div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-purple">
+<div class="pillar-head"><span class="pillar-icon lift-icon"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.3 21.5h11.4a2 2 0 0 0 1.8-3L14 9V3"/></svg></span><span class="pillar-kicker">Source-available · UEL v1.0</span></div>
+<h3 class="pillar-title">Read the code. Run the code. Keep it open.</h3>
+<p class="pillar-body">GuestPass is licensed under the UEL v1.0 — not just "you can look," but a copyleft that keeps modified versions open too. Fork it, improve it, self-host it. What you can't do is quietly turn it into a closed paid clone.</p>
+</div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-blue">
+<div class="pillar-head"><span class="pillar-icon lift-icon"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg></span><span class="pillar-kicker">P2P mesh</span></div>
+<h3 class="pillar-title">Your media goes browser-to-browser. We can't watch it.</h3>
+<p class="pillar-body">Camera and mic travel directly between participants, end-to-end encrypted with DTLS-SRTP — our server never decodes a frame. If a guest's network forces a relay, you can bring your own TURN; it forwards encrypted packets it can't read either. We're honest about the limit: connection metadata (who's in a room, when) exists, because routing needs it.</p>
+</div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-teal">
+<div class="pillar-head"><span class="pillar-icon lift-icon"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8 3v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10v-6z"/></svg></span><span class="pillar-kicker">Absolute-minimum data</span></div>
+<h3 class="pillar-title">The least we can keep and still work.</h3>
+<p class="pillar-body">Your Google identity to sign you in, a name and email per guest so passes can be sent, and ephemeral session metadata while a room is live. No media, no chat logs, no third-party trackers. Guest names and emails are deleted within 24 hours of a stream ending. It's not "zero data" — that'd be a lie — it's the minimum the thing physically needs.</p>
+</div>
+</div>
+</section>
+
+<section class="features-section">
+<div class="features-head">
+<h2 class="section-title">Everything the paid tools gate, none of the lock-in.</h2>
+<p class="muted feature-intro">Built on plain WebRTC with a paper-thin backend that only relays who's who and a bit of signaling. Your camera and mic flow browser-to-browser — the server is never in the media path.</p>
+</div>
+<div class="features-grid">
+<div class="card card-pad hover-lift pop-card stagger-item tone-pink"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 20a6.5 6.5 0 0 0-2.5-5"/></svg></span><h3 class="feature-title">Zero-signup guests</h3><p class="feature-body">Guests join from a browser tab with a magic link. No account, no install, works on a borrowed laptop.</p></div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-blue"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="13" rx="2.5"/><path d="M8.5 20.5h7M12 16.5v4"/></svg></span><h3 class="feature-title">Individual OBS sources</h3><p class="feature-body">Every guest is their own clean browser source — composite them however you like in OBS, no baked-in grid.</p></div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-orange"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="13" rx="2.5"/><path d="M12 7v6M9 10l3-3 3 3M8.5 20.5h7"/></svg></span><h3 class="feature-title">Permissioned screen share</h3><p class="feature-body">Flip a switch to let a guest share their screen. Off by default, revocable mid-stream.</p></div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-teal"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><path d="M7.5 16.5a6 6 0 0 1 0-9M16.5 7.5a6 6 0 0 1 0 9M4.8 19.2a9.5 9.5 0 0 1 0-14.4M19.2 4.8a9.5 9.5 0 0 1 0 14.4"/></svg></span><h3 class="feature-title">P2P, with a fallback</h3><p class="feature-body">Direct peer connections by default. Bring your own TURN relay for tricky networks; if a guest's network blocks peer-to-peer outright, they get a clear heads-up — never a silent hang.</p></div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-purple"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="18" r="2"/></svg></span><h3 class="feature-title">You own the dials</h3><p class="feature-body">Cap resolution, fps and bandwidth per stream so a flaky guest can't tank the whole broadcast.</p></div>
+<div class="card card-pad hover-lift pop-card stagger-item tone-yellow"><span class="feature-icon lift-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.3 21.5h11.4a2 2 0 0 0 1.8-3L14 9V3"/></svg></span><h3 class="feature-title">Actually source-available</h3><p class="feature-body">UEL v1.0. Run the free public instance at guest-pass.link, or self-host the same binary in one command. Read every line — and any hosted fork has to share its source too.</p></div>
+</div>
+</section>
+
+<section id="compare" class="compare-section">
+<div class="compare-inner">
+<div class="compare-head">
+<span class="section-kicker tone-blue">Receipts — no pricing-page fibs</span>
+<h2 class="section-title">How we stack up</h2>
+<p class="section-sub">The honest version. We're not going to quote anyone's pricing page at you — those change. This is the shape of the trade-off.</p>
+</div>
+<div class="card hover-lift compare-card">
+<div class="compare-header">
+<span class="faint mono cmp-label">What you're comparing</span>
+<span class="cmp-cell"><span class="logo logo-sm"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></span></span>
+<span class="cmp-cell-text">Typical paid tool</span>
+</div>
+<div class="cmp-row"><span class="cmp-label">Costs to use</span><span class="cmp-cell-text">Free</span><span class="cmp-cell-text">Paid</span></div>
+<div class="cmp-row"><span class="cmp-label">Ads / upsell nags</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></span><span class="cmp-cell-text">Sometimes</span></div>
+<div class="cmp-row"><span class="cmp-label">Open source you can self-host</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg></span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></span></div>
+<div class="cmp-row"><span class="cmp-label">Guests join with zero signup</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg></span><span class="cmp-cell-text">Varies</span></div>
+<div class="cmp-row"><span class="cmp-label">Each guest is its own OBS source</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg></span><span class="cmp-cell-text">Varies</span></div>
+<div class="cmp-row"><span class="cmp-label">Our server never decodes your media</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg></span><span class="cmp-cell-text">Varies</span></div>
+<div class="cmp-row"><span class="cmp-label">Works with any OBS / RTMP target</span><span class="cmp-cell"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.2l2.8 2.8L16.2 9"/></svg></span><span class="cmp-cell-text">Varies</span></div>
+</div>
+</div>
+</section>
+
+<section class="parody-section">
+<div class="hero-aurora parody-aurora" aria-hidden="true"><b></b><b></b><b></b><b></b></div>
+<div class="parody-inner">
+<div class="parody-head">
+<span class="section-kicker tone-pink">Five-star takes ★★★★★</span>
+<h2 class="parody-title">The creators are, uh, processing it.</h2>
+<p class="parody-sub">Reactions from absolutely nobody real.</p>
+</div>
+<div id="parody-carousel">
+<div class="parody-grid"></div>
+<div class="parody-controls">
+<button type="button" class="btn btn-icon parody-prev" aria-label="Previous quotes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg></button>
+<div class="row gap-2 parody-dots"></div>
+<button type="button" class="btn btn-icon parody-next" aria-label="Next quotes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
+</div>
+</div>
+<p class="parody-note">Parody — a fictional hype-influencer archetype, not any real individual. Nobody was quoted, endorsed, or harmed. We just think the genre is funny.</p>
+</div>
+</section>
+
+<section class="obs-section">
+<div class="card hover-lift obs-card">
+<div class="obs-copy">
+<span class="section-kicker">For the host</span>
+<h2 class="obs-title">Drop a URL into OBS. That's the integration.</h2>
+<p class="obs-lead">Add a Browser source, paste a slot URL, set the size. The URLs are keyed by slot, not guest — so you wire OBS <strong>once</strong> and reuse the same sources every stream. Transparent background, auto-reconnect, and a tiny on-screen nameplate you can hide.</p>
+<a class="btn btn-outline" href="{{.SourceURL}}" rel="noopener">Read the OBS setup guide <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></a>
+</div>
+<div class="obs-code">
+<div class="obs-comment">// OBS → Sources → + Browser</div>
+<div class="panel mono obs-code-panel">
+<span class="c-dim">URL </span><span class="c-accent">guest-pass.link/s/cam-3</span><br>
+<span class="c-dim">W </span>1280  <span class="c-dim">H </span>720  <span class="c-dim">FPS </span>30<br>
+<span class="c-good">✓ transparent ✓ auto-reconnect</span>
+</div>
+</div>
+</div>
+</section>
+
+<footer class="landing-footer">
+<div class="landing-footer-inner">
+<div class="row gap-3"><span class="logo logo-sm"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></span><span class="landing-footer-meta">· UEL v1.0 · guest-pass.link</span></div>
+<div class="landing-footer-links">
+<a href="{{.SourceURL}}" rel="noopener">Source</a>
+<a href="https://uelicense.eu" rel="noopener">License</a>
+<a href="/signin">Get hosting</a>
+</div>
+</div>
+</footer>
+
+<script nonce="{{.Nonce}}">
+(function () {
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Kinetic headline word.
+  var words = ["headaches.", "logins.", "downloads.", "invoices.", "watermarks."];
+  var pop = ["var(--pop-pink)", "var(--pop-blue)", "var(--pop-purple)", "var(--pop-orange)", "var(--pop-teal)"];
+  var el = document.getElementById("flip-word");
+  if (el && !reduce) {
+    var i = 0;
+    setInterval(function () {
+      i = (i + 1) % words.length;
+      el.textContent = words[i];
+      el.style.color = pop[i % pop.length];
+      el.classList.remove("flip-w");
+      void el.offsetWidth;
+      el.classList.add("flip-w");
+    }, 2100);
+  }
+
+  // Parody carousel — fictional personas (D-30).
+  var PARODY = [
+    { quote: "I can’t believe I used to pay for this. Set up a stream in literally 6 minutes.", name: "stream_king_99", flex: "Streamer, 47 subs", emoji: "🎭" },
+    { quote: "My guests just… showed up. No instructions. No support tickets. I think I’m going insane.", name: "podco_simone", flex: "Podcast host · ‘The Grind’", emoji: "🤯" },
+    { quote: "Told my co-host the invite link expired in 10 minutes. He opened it in 8.", name: "ChaoticNeutralPod", flex: "Chaotic but somehow live", emoji: "😅" },
+    { quote: "Every other tool wanted my credit card for this. Why is this free?", name: "tech_skeptic_max", flex: "Professional skeptic", emoji: "🧐" },
+    { quote: "It just works. I hate how much I love it.", name: "ItJustWorksGuy", flex: "Has trust issues, is coping", emoji: "😤" },
+    { quote: "Finally an open tool that doesn’t look like it was built in 2009.", name: "opensrc_olivia", flex: "FOSS evangelist, recovering pessimist", emoji: "💚" }
+  ];
+  var carousel = document.getElementById("parody-carousel");
+  if (carousel) {
+    var grid = carousel.querySelector(".parody-grid");
+    var dotsEl = carousel.querySelector(".parody-dots");
+    var perPage = window.matchMedia("(max-width: 860px)").matches ? 1 : 2;
+    var page = 0, paused = false;
+    var pages = Math.ceil(PARODY.length / perPage);
+
+    function makeCard(it) {
+      var card = document.createElement("div");
+      card.className = "card card-pad parody-card";
+      var icon = document.createElement("div");
+      icon.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-press)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H9l-4.5 4v-4H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5z"/></svg>';
+      card.appendChild(icon.firstChild);
+      var q = document.createElement("p");
+      q.className = "parody-quote";
+      q.textContent = "“" + it.quote + "”";
+      card.appendChild(q);
+      var persona = document.createElement("div");
+      persona.className = "parody-persona";
+      var av = document.createElement("div");
+      av.className = "parody-avatar";
+      av.textContent = it.emoji;
+      persona.appendChild(av);
+      var meta = document.createElement("div");
+      var nm = document.createElement("div"); nm.className = "parody-name"; nm.textContent = it.name; meta.appendChild(nm);
+      var fl = document.createElement("div"); fl.className = "parody-flex"; fl.textContent = it.flex; meta.appendChild(fl);
+      var dc = document.createElement("div"); dc.className = "parody-disclaimer"; dc.textContent = "fictional persona · not a real quote"; meta.appendChild(dc);
+      persona.appendChild(meta);
+      card.appendChild(persona);
+      return card;
+    }
+
+    function render() {
+      grid.textContent = "";
+      var start = page * perPage;
+      for (var k = 0; k < perPage; k++) {
+        var idx = start + k;
+        if (idx < PARODY.length) grid.appendChild(makeCard(PARODY[idx]));
+      }
+      dotsEl.textContent = "";
+      for (var d = 0; d < pages; d++) {
+        (function (di) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "parody-dot";
+          b.setAttribute("aria-label", "Quotes page " + (di + 1));
+          b.style.width = di === page ? "22px" : "8px";
+          b.style.background = di === page ? "var(--accent)" : "rgba(255,255,255,.3)";
+          b.addEventListener("click", function () { page = di; render(); });
+          dotsEl.appendChild(b);
+        })(d);
+      }
+    }
+    render();
+    carousel.querySelector(".parody-prev").addEventListener("click", function () { page = (page - 1 + pages) % pages; render(); });
+    carousel.querySelector(".parody-next").addEventListener("click", function () { page = (page + 1) % pages; render(); });
+    carousel.addEventListener("mouseenter", function () { paused = true; });
+    carousel.addEventListener("mouseleave", function () { paused = false; });
+    if (!reduce) setInterval(function () { if (!paused) { page = (page + 1) % pages; render(); } }, 5200);
+  }
+
+  // Scroll reveal for below-the-fold sections.
+  if ("IntersectionObserver" in window && !reduce) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { threshold: 0.12 });
+    document.querySelectorAll("section").forEach(function (s) {
+      if (s.getBoundingClientRect().top > window.innerHeight * 0.82) { s.classList.add("reveal"); io.observe(s); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/rock3r/guest-pass/internal/store"
 )
@@ -22,16 +23,17 @@ type pageData struct {
 	ScriptIntegrity string // SRI for the JS bundle the page loads (app.js, or obs.js for source pages)
 	DevLogin        bool
 	Nonce           string
-	StreamTitle     string   // pass landing page only
-	GuestName       string   // pass landing page only
-	WatchURL        string   // pass landing page only — public "watch live" link if the stream linked a channel (D-29)
-	ReportToken     string   // pass landing page only — raw magic-link token, for the "report this invite" link (D-42)
-	Slot            string   // OBS source page only — the opaque slot label (EN-15)
-	Host            *navHost // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
-	Nav             string   // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
-	Data            any      // host-app pages only — the page-specific payload, rendered server-side (D-32)
-	Theme           string   // explicit dark-mode choice ("light"/"dark") from the gp_theme cookie; "" = follow OS (D-9)
-	Path            string   // the current request path — the theme toggle returns here after setting the cookie (PRG)
+	StreamTitle     string     // pass landing page only
+	GuestName       string     // pass landing page only
+	WatchURL        string     // pass landing page only — public "watch live" link if the stream linked a channel (D-29)
+	ReportToken     string     // pass landing page only — raw magic-link token, for the "report this invite" link (D-42)
+	Slot            string     // OBS source page only — the opaque slot label (EN-15)
+	Host            *navHost   // host-app pages only — the signed-in host for the shell nav (nil elsewhere)
+	Nav             string     // host-app pages only — the active nav item ("dashboard"/"calendar"/"settings")
+	CurrentStream   *navStream // host-app stream-scoped pages only — the active stream for the nav breadcrumb (nil elsewhere)
+	Data            any        // host-app pages only — the page-specific payload, rendered server-side (D-32)
+	Theme           string     // explicit dark-mode choice ("light"/"dark") from the gp_theme cookie; "" = follow OS (D-9)
+	Path            string     // the current request path — the theme toggle returns here after setting the cookie (PRG)
 }
 
 // themeCookie holds the host/guest's explicit dark-mode choice ("light"/"dark"); absent means follow
@@ -48,31 +50,90 @@ func themeChoice(r *http.Request) string {
 }
 
 // navHost is the authenticated host's identity surfaced in the host-app shell nav. It
-// carries only the display name the host chose at Google sign-in — never the email or any
-// token (EN-16/D-37).
+// carries the display name and avatar fields for the nav avatar chip, but never email or any
+// token in nav-unsafe positions (EN-16/D-37). AvatarColor is a CSS color derived from the
+// host's name via the avColors hash (matching the UI's avColor() function). AvatarInitials
+// is up to 2 uppercase initials extracted from the name's space-separated words. Email is
+// included for the "signed in as" tooltip (host's own page only — not a cross-host leak, EN-8).
 type navHost struct {
-	Name    string
-	IsAdmin bool // shows the admin-console nav link (D-14); admin is a host flag, not a separate identity
+	Name           string
+	IsAdmin        bool // shows the admin-console nav link (D-14); admin is a host flag, not a separate identity
+	Email          string
+	AvatarColor    string // CSS color computed from name using avColors hash (for client-side parity)
+	AvatarIdx      int    // index into avColors → the .av-N CSS class (SSR avatars can't use inline style; CSP style-src 'self')
+	AvatarInitials string // up to 2 uppercase initials from the name
+}
+
+// avColors is the fixed palette used by the UI's avColor() function (ui.jsx). The Go
+// implementation must stay in sync with the JS one so SSR and CSR produce the same avatar.
+var avColors = []string{
+	"#ff7a59", "#5b8def", "#34a26b", "#c061cb", "#e0a82e", "#3bb2c9", "#e0617a", "#7a6cf0", "#d77a32",
+}
+
+// hostNav builds a navHost from a store.Host record. It derives AvatarColor and
+// AvatarInitials using the same algorithm as the UI's avColor()/initials() functions.
+func hostNav(h *store.Host) *navHost {
+	// avColor: h=0; for each char c: h = (h*31 + int(c)) % len(avColors)
+	hv := 0
+	for _, c := range h.Name {
+		hv = (hv*31 + int(c)) % len(avColors)
+	}
+	color := avColors[hv]
+
+	// Initials: first char of each space-separated word, up to 2, uppercase.
+	var initials []byte
+	for _, word := range strings.Fields(h.Name) {
+		if len(initials) >= 2 {
+			break
+		}
+		if len(word) > 0 {
+			r := rune(word[0])
+			if r >= 'a' && r <= 'z' {
+				r -= 32
+			}
+			initials = append(initials, byte(r))
+		}
+	}
+
+	return &navHost{
+		Name:           h.Name,
+		IsAdmin:        h.IsAdmin,
+		Email:          h.Email,
+		AvatarColor:    color,
+		AvatarIdx:      hv,
+		AvatarInitials: string(initials),
+	}
+}
+
+// navStream carries the current stream's identity for stream-specific pages (e.g.
+// streamdetail, sources). Templates can use it to render the stream title in the nav
+// breadcrumb without re-passing it through detailData. Non-nil only on stream-scoped pages.
+type navStream struct {
+	ID     string
+	Title  string
+	IsLive bool
 }
 
 // renderer holds the parsed page templates and the per-build constants injected into
 // every render. manifest maps each emitted bundle to its SRI hash (empty when no build
 // manifest is present, e.g. in tests, so pages render without integrity attributes).
 type renderer struct {
-	pages     map[string]*template.Template
-	obsTmpl   *template.Template
-	sourceURL string
-	manifest  map[string]string
-	devLogin  bool
+	pages       map[string]*template.Template
+	obsTmpl     *template.Template
+	landingTmpl *template.Template
+	sourceURL   string
+	manifest    map[string]string
+	devLogin    bool
 }
 
 // pageFiles are the public/guest server-rendered pages composed into base.html (each
 // defines a "content" template). The OBS source page is NOT one of these — it is a
-// standalone, chromeless, font-free page (EN-13) with its own template.
+// standalone, chromeless, font-free page (EN-13) with its own template. The landing page is
+// also NOT in this list — it is a standalone template parsed separately (like obs.html).
 // error.html (the denial/error screens, M5.5) is composed into base.html — the PUBLIC shell, NOT
 // appbase.html: a suspended/pending/non-admin host must not see a host nav whose every link would
 // itself 403. It still carries the source-link footer (EN-17).
-var pageFiles = []string{"landing.html", "signin.html", "pass.html", "greenroom.html", "report.html", "error.html"}
+var pageFiles = []string{"signin.html", "pass.html", "greenroom.html", "report.html", "error.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
 // appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the
@@ -103,10 +164,21 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 	if err != nil {
 		return nil, err
 	}
+	landing, err := template.New("landing.html").ParseFS(templateFS, "templates/landing.html")
+	if err != nil {
+		return nil, err
+	}
 	if manifest == nil {
 		manifest = map[string]string{}
 	}
-	return &renderer{pages: pages, obsTmpl: obs, sourceURL: sourceURL, manifest: manifest, devLogin: devLogin}, nil
+	return &renderer{
+		pages:       pages,
+		obsTmpl:     obs,
+		landingTmpl: landing,
+		sourceURL:   sourceURL,
+		manifest:    manifest,
+		devLogin:    devLogin,
+	}, nil
 }
 
 // render executes a base-composed page with a 200 OK status. See renderStatus.
@@ -142,8 +214,25 @@ func (rd *renderer) renderStatus(w http.ResponseWriter, r *http.Request, page st
 	_, _ = buf.WriteTo(w)
 }
 
+// landing renders the public marketing / product landing page as a standalone template
+// (no base.html chrome — the landing has its own full-page layout).
 func (rd *renderer) landing(w http.ResponseWriter, r *http.Request) {
-	rd.render(w, r, "landing.html", pageData{Title: "Guest management for live streams"})
+	data := pageData{
+		Title:           "Guest management for live streams",
+		SourceURL:       rd.sourceURL,
+		StyleIntegrity:  rd.manifest["app.css"],
+		ScriptIntegrity: rd.manifest["app.js"],
+		Nonce:           NonceFromContext(r.Context()),
+		Theme:           themeChoice(r),
+		Path:            r.URL.RequestURI(),
+	}
+	var buf bytes.Buffer
+	if err := rd.landingTmpl.Execute(&buf, data); err != nil {
+		http.Error(w, "render error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 func (rd *renderer) signin(w http.ResponseWriter, r *http.Request) {

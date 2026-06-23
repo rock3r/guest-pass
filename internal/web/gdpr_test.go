@@ -245,7 +245,15 @@ func TestGDPR_SettingsPageHasFunctionalControls(t *testing.T) {
 			t.Fatalf("settings page missing %q", want)
 		}
 	}
-	if strings.Contains(body, "lands in a later release") || strings.Contains(body, "disabled") {
-		t.Fatalf("settings page still shows the M4 disabled stubs:\n%s", body)
+	// The GDPR self-service block must be live, not a disabled placeholder. (The M5.6 design adds
+	// deliberately-stubbed "coming soon" cards for unrelated future features — scheduling defaults,
+	// channels, video, TURN — which DO carry disabled inputs; those are owner-approved stubs and are
+	// not what this test guards. So we scope the check to the GDPR self-service card itself.)
+	if strings.Contains(body, "lands in a later release") {
+		t.Fatalf("settings page still shows the M4 disabled GDPR stubs:\n%s", body)
+	}
+	gdpr := body[strings.Index(body, `data-gdpr="self-service"`):]
+	if strings.Contains(gdpr, "disabled") {
+		t.Fatalf("GDPR self-service controls must not be disabled:\n%s", gdpr)
 	}
 }

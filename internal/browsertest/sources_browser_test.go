@@ -50,9 +50,10 @@ func TestHostApp_SourcesTab(t *testing.T) {
 	})
 
 	Chrome(t, 60*time.Second, func(ctx context.Context) {
-		// First open provisions the pool and reveals the URLs.
+		// Opening the Sources tab provisions the pool and shows each slot's OBS URL (always
+		// visible now — stored plaintext alongside the hash, not a one-time reveal).
 		var cardCount int
-		var revealHTML, bodyText string
+		var slotURLs string
 		if err := chromedp.Run(ctx,
 			network.Enable(),
 			setHostCookie,
@@ -60,16 +61,15 @@ func TestHostApp_SourcesTab(t *testing.T) {
 			chromedp.WaitVisible(`.slot-list`, chromedp.ByQuery),
 			chromedp.WaitVisible(`.app-links a[aria-current="page"]`, chromedp.ByQuery),
 			chromedp.Evaluate(`document.querySelectorAll('.slot-card').length`, &cardCount),
-			chromedp.OuterHTML(`.reveal-all`, &revealHTML, chromedp.ByQuery),
-			chromedp.Evaluate(`document.body.innerText`, &bodyText),
+			chromedp.Evaluate(`[...document.querySelectorAll('.slot-card .issued-link')].map(i=>i.value).join('\n')`, &slotURLs),
 		); err != nil {
 			t.Fatalf("first sources open: %v", err)
 		}
 		if cardCount != 9 {
 			t.Fatalf("slot cards = %d, want 9 (cam 1–8 + screenshare)", cardCount)
 		}
-		if !strings.Contains(revealHTML, "/s/cam-1?token=") || !strings.Contains(revealHTML, "/s/screen?token=") {
-			t.Fatalf("copy-all reveal did not contain the cam-1 + screen OBS URLs; got:\n%s", revealHTML)
+		if !strings.Contains(slotURLs, "/s/cam-1?token=") || !strings.Contains(slotURLs, "/s/screen?token=") {
+			t.Fatalf("slot cards did not show the cam-1 + screen OBS URLs; got:\n%s", slotURLs)
 		}
 		// The on-air pill is present (three-state; status-unavailable on the no-JS page).
 		var onairCount int
@@ -80,9 +80,6 @@ func TestHostApp_SourcesTab(t *testing.T) {
 			t.Fatalf("on-air pills = %d, want 9", onairCount)
 		}
 		// EN-26: no editable production controls; the card links to the greenroom.
-		if !strings.Contains(bodyText, "greenroom") && !strings.Contains(revealHTML, "greenroom") {
-			// fall through to an explicit link check below
-		}
 		var hasGreenroomLink, hasForbiddenControl bool
 		if err := chromedp.Run(ctx,
 			chromedp.Evaluate(`!!document.querySelector('.sources a[href="/greenroom"]')`, &hasGreenroomLink),
@@ -110,23 +107,22 @@ func TestHostApp_SourcesTab(t *testing.T) {
 	}
 
 	Chrome(t, 60*time.Second, func(ctx context.Context) {
-		var occText string
-		var hasReveal bool
+		var occText, reopenURLs string
 		if err := chromedp.Run(ctx,
 			network.Enable(),
 			setHostCookie,
 			chromedp.Navigate(sources),
 			chromedp.WaitVisible(`.slot-list`, chromedp.ByQuery),
 			chromedp.Text(`.slot-card .slot-occupant`, &occText, chromedp.ByQuery),
-			chromedp.Evaluate(`!!document.querySelector('.reveal-all')`, &hasReveal),
+			chromedp.Evaluate(`[...document.querySelectorAll('.slot-card .issued-link')].map(i=>i.value).join('\n')`, &reopenURLs),
 		); err != nil {
 			t.Fatalf("re-open sources: %v", err)
 		}
 		if !strings.Contains(occText, "Sam Guest") {
 			t.Fatalf("cam-1 occupant = %q, want Sam Guest", occText)
 		}
-		if hasReveal {
-			t.Fatal("re-opening the Sources tab re-revealed the URLs (reveal must be once)")
+		if !strings.Contains(reopenURLs, "/s/cam-1?token=") {
+			t.Fatal("re-opening the Sources tab no longer shows the slot URL (URLs are always visible now)")
 		}
 	})
 }

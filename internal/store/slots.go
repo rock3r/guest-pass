@@ -12,10 +12,11 @@ import (
 // generates the id. Epoch starts at 0 (RF-6: authoritative in-memory, persisted at
 // lifecycle edges).
 type CreateSlotParams struct {
-	HostID          string
-	Kind            string // cam | host | screenshare
-	Idx             *int64 // cam slots 1..8; nil for host/screenshare
-	SourceTokenHash string // HMAC(secret, token) (EN-5)
+	HostID           string
+	Kind             string // cam | host | screenshare
+	Idx              *int64 // cam slots 1..8; nil for host/screenshare
+	SourceTokenHash  string // HMAC(secret, token) (EN-5)
+	SourceTokenPlain string // raw token for display
 }
 
 // CreateSlot inserts a new slot in a host's global pool (D-20).
@@ -25,17 +26,18 @@ func (s *Store) CreateSlot(ctx context.Context, p CreateSlotParams) (*Slot, erro
 		return nil, err
 	}
 	sl := &Slot{
-		ID:              id,
-		HostID:          p.HostID,
-		Kind:            p.Kind,
-		Idx:             p.Idx,
-		SourceTokenHash: p.SourceTokenHash,
-		Epoch:           0,
+		ID:               id,
+		HostID:           p.HostID,
+		Kind:             p.Kind,
+		Idx:              p.Idx,
+		SourceTokenHash:  p.SourceTokenHash,
+		SourceTokenPlain: p.SourceTokenPlain,
+		Epoch:            0,
 	}
 	_, err = s.writer.ExecContext(ctx,
-		`INSERT INTO slots (id, host_id, kind, idx, source_token_hash, epoch)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		sl.ID, sl.HostID, sl.Kind, sl.Idx, sl.SourceTokenHash, sl.Epoch)
+		`INSERT INTO slots (id, host_id, kind, idx, source_token_hash, source_token_plain, epoch)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sl.ID, sl.HostID, sl.Kind, sl.Idx, sl.SourceTokenHash, sl.SourceTokenPlain, sl.Epoch)
 	if err != nil {
 		return nil, fmt.Errorf("inserting slot: %w", err)
 	}
@@ -45,9 +47,10 @@ func (s *Store) CreateSlot(ctx context.Context, p CreateSlotParams) (*Slot, erro
 // SlotSpec is one desired slot in the host-global pool, with a caller-minted hashed token
 // (the store never does crypto, EN-5). Used by EnsureSlotPool.
 type SlotSpec struct {
-	Kind            string
-	Idx             *int64
-	SourceTokenHash string
+	Kind             string
+	Idx              *int64
+	SourceTokenHash  string
+	SourceTokenPlain string
 }
 
 // EnsureSlotPool idempotently provisions a host's slot pool (D-20): in a SINGLE transaction
@@ -72,9 +75,9 @@ func (s *Store) EnsureSlotPool(ctx context.Context, hostID string, specs []SlotS
 			return nil, err
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO slots (id, host_id, kind, idx, source_token_hash, epoch)
-			 VALUES (?, ?, ?, ?, ?, 0)`,
-			id, hostID, sp.Kind, sp.Idx, sp.SourceTokenHash)
+			`INSERT OR IGNORE INTO slots (id, host_id, kind, idx, source_token_hash, source_token_plain, epoch)
+			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
+			id, hostID, sp.Kind, sp.Idx, sp.SourceTokenHash, sp.SourceTokenPlain)
 		if err != nil {
 			return nil, fmt.Errorf("ensuring slot pool: %w", err)
 		}
@@ -95,32 +98,38 @@ func (s *Store) EnsureSlotPool(ctx context.Context, hostID string, specs []SlotS
 // EN-5), and the leak-detection metadata (last_used_at/last_source_ip) is cleared since it
 // described the now-dead token. The caller mints the new token and tears down any live
 // /s/{slot} subscription with a token-rotated terminate.
-func (s *Store) RotateSlotToken(ctx context.Context, slotID, newTokenHash string) error {
+func (s *Store) RotateSlotToken(ctx context.Context, slotID, newTokenHash, newTokenPlain string) error {
 	res, err := s.writer.ExecContext(ctx,
-		`UPDATE slots SET source_token_hash = ?, source_token_last_used_at = NULL,
-		 source_token_last_source_ip = NULL WHERE id = ?`,
-		newTokenHash, slotID)
+		`UPDATE slots SET source_token_hash = ?, source_token_plain = ?,
+		 source_token_last_used_at = NULL, source_token_last_source_ip = NULL WHERE id = ?`,
+		newTokenHash, newTokenPlain, slotID)
 	if err != nil {
 		return fmt.Errorf("rotating slot token: %w", err)
 	}
 	return errIfNoRows(res)
 }
 
+// SlotTokenUpdate carries the new hash and plain token for a single slot rotation.
+type SlotTokenUpdate struct {
+	Hash  string
+	Plain string
+}
+
 // RotateSlotTokens rotates several slots' source tokens in ONE transaction — the rotate-all
 // "my URLs leaked" panic (D-22). Either every hash is overwritten (all old URLs dead) or none
 // is, so a mid-batch failure never leaves some slots on fresh, un-revealed tokens. Each entry
 // must name an existing slot (ErrNotFound otherwise rolls the whole batch back).
-func (s *Store) RotateSlotTokens(ctx context.Context, newHashByID map[string]string) error {
+func (s *Store) RotateSlotTokens(ctx context.Context, updatesByID map[string]SlotTokenUpdate) error {
 	tx, err := s.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("rotating slot tokens: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after a successful commit
-	for id, hash := range newHashByID {
+	for id, upd := range updatesByID {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE slots SET source_token_hash = ?, source_token_last_used_at = NULL,
-			 source_token_last_source_ip = NULL WHERE id = ?`,
-			hash, id)
+			`UPDATE slots SET source_token_hash = ?, source_token_plain = ?,
+			 source_token_last_used_at = NULL, source_token_last_source_ip = NULL WHERE id = ?`,
+			upd.Hash, upd.Plain, id)
 		if err != nil {
 			return fmt.Errorf("rotating slot tokens: %w", err)
 		}
@@ -190,12 +199,12 @@ func (s *Store) ListSlotsByHost(ctx context.Context, hostID string) ([]*Slot, er
 	return out, nil
 }
 
-const slotSelect = `SELECT id, host_id, kind, idx, source_token_hash,
+const slotSelect = `SELECT id, host_id, kind, idx, source_token_hash, source_token_plain,
 	source_token_last_used_at, source_token_last_source_ip, epoch FROM slots`
 
 func scanSlotFrom(sc streamScanner) (*Slot, error) {
 	var sl Slot
-	err := sc.Scan(&sl.ID, &sl.HostID, &sl.Kind, &sl.Idx, &sl.SourceTokenHash,
+	err := sc.Scan(&sl.ID, &sl.HostID, &sl.Kind, &sl.Idx, &sl.SourceTokenHash, &sl.SourceTokenPlain,
 		&sl.SourceTokenLastUsedAt, &sl.SourceTokenLastSourceIP, &sl.Epoch)
 	if err != nil {
 		return nil, err

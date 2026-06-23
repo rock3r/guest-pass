@@ -44,11 +44,27 @@ type dashStream struct {
 	Status      string
 	ScheduledAt string // formatted absolute UTC; empty when unscheduled
 	HasSchedule bool
+	MonthShort  string // e.g. "Jun"; empty when unscheduled
+	DayNum      string // e.g. "15"; empty when unscheduled
+	TimeShort   string // e.g. "18:00 UTC"; empty when unscheduled
 }
 
 type dashboardData struct {
-	Streams    []dashStream
-	QuotaError bool // ?error=stream-quota — the host hit their progressive-trust stream cap (D-36)
+	Streams         []dashStream
+	UpcomingStreams []dashStream      // draft or scheduled, for the "Up next" panel
+	RecentStreams   []dashStream      // ended, for the "Recent" panel
+	QuotaError      bool              // ?error=stream-quota — the host hit their progressive-trust stream cap (D-36)
+	UpcomingCount   int               // streams that are draft or scheduled
+	PassCount       int               // all-time passes issued by this host
+	HoursStreamed   string            // formatted total scheduled hours, e.g. "46h" or "0h"
+	LiveStream      *liveStreamBanner // non-nil when the host has an active live session
+}
+
+// liveStreamBanner carries the minimal identity of a currently live stream for the dashboard
+// live-stream banner. It is populated only when the host has a live session.
+type liveStreamBanner struct {
+	ID    string
+	Title string
 }
 
 // settingsData backs the host's account settings page (AC-3..5): the host's own Google identity
@@ -77,7 +93,7 @@ func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	s.rd.render(w, r, "settings.html", pageData{
-		Title: "Settings", Nav: "settings", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
+		Title: "Settings", Nav: "settings", Host: hostNav(host),
 		Data: settingsData{
 			Name:           host.Name,
 			Email:          host.Email,
@@ -114,18 +130,65 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]dashStream, 0, len(streams))
+	var upcoming, recent []dashStream
+	var upcomingCount int
+	var liveStream *liveStreamBanner
 	for _, st := range streams {
-		rows = append(rows, dashStream{
+		ds := dashStream{
 			ID:          st.ID,
 			Title:       st.Title,
 			Status:      st.Status,
 			ScheduledAt: formatSchedule(st.ScheduledAt),
 			HasSchedule: st.ScheduledAt != nil,
-		})
+		}
+		if st.ScheduledAt != nil {
+			t := time.Unix(*st.ScheduledAt, 0).UTC()
+			ds.MonthShort = t.Format("Jan")
+			ds.DayNum = t.Format("2")
+			ds.TimeShort = t.Format("15:04 UTC")
+		}
+		rows = append(rows, ds)
+		switch st.Status {
+		case "draft", "scheduled":
+			upcomingCount++
+			if len(upcoming) < 3 {
+				upcoming = append(upcoming, ds)
+			}
+		case "ended":
+			if len(recent) < 3 {
+				recent = append(recent, ds)
+			}
+		case "live":
+			if liveStream == nil {
+				liveStream = &liveStreamBanner{ID: st.ID, Title: st.Title}
+			}
+		}
 	}
+
+	passCount, err := s.store.CountAllPassesByHost(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load dashboard stats", http.StatusInternalServerError)
+		return
+	}
+	totalMins, err := s.store.SumStreamMinutesByHost(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load dashboard stats", http.StatusInternalServerError)
+		return
+	}
+	hoursStreamed := strconv.Itoa(totalMins/60) + "h"
+
 	s.rd.render(w, r, "dashboard.html", pageData{
-		Title: "Your streams", Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
-		Data: dashboardData{Streams: rows, QuotaError: r.URL.Query().Get("error") == "stream-quota"},
+		Title: "Your streams", Nav: "dashboard", Host: hostNav(host),
+		Data: dashboardData{
+			Streams:         rows,
+			UpcomingStreams: upcoming,
+			RecentStreams:   recent,
+			QuotaError:      r.URL.Query().Get("error") == "stream-quota",
+			UpcomingCount:   upcomingCount,
+			PassCount:       passCount,
+			HoursStreamed:   hoursStreamed,
+			LiveStream:      liveStream,
+		},
 	})
 }
 
@@ -164,7 +227,7 @@ func (s *appServer) editStreamForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.rd.render(w, r, "streamedit.html", pageData{
-		Title: "Edit stream", Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
+		Title: "Edit stream", Nav: "dashboard", Host: hostNav(host),
 		Data: streamFormData{
 			ID:          st.ID,
 			Title:       st.Title,

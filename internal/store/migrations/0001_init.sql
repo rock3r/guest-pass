@@ -40,7 +40,8 @@ CREATE TABLE slots (                            -- host-global pool, wired into 
     host_id           TEXT    NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
     kind              TEXT    NOT NULL CHECK (kind IN ('cam','host','screenshare')),
     idx               INTEGER,                  -- cam slots 1..8; NULL for host/screenshare
-    source_token_hash TEXT    NOT NULL,         -- HMAC(secret,token); permanent, host-only (EN-5)
+    source_token_hash  TEXT    NOT NULL,         -- HMAC(secret,token); permanent, host-only (EN-5)
+    source_token_plain TEXT    NOT NULL,         -- raw token for display (host can always copy URL)
     source_token_last_used_at   INTEGER,        -- leak-detection metadata (EN-5/AD-23)
     source_token_last_source_ip TEXT,           -- leak-detection metadata (EN-5/AD-23)
     epoch             INTEGER NOT NULL DEFAULT 0, -- in-memory authoritative; persisted at lifecycle edges only (RF-6)

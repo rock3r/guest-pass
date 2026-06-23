@@ -96,7 +96,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("mint src: %v", err)
 	}
 	camSlot, err := st.CreateSlot(ctx, store.CreateSlotParams{
-		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw),
+		HostID: host.ID, Kind: store.SlotCam, Idx: ptr(int64(1)), SourceTokenHash: hasher.Hash(srcRaw), SourceTokenPlain: srcRaw,
 	})
 	if err != nil {
 		t.Fatalf("CreateSlot: %v", err)
@@ -110,7 +110,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("mint screen src: %v", err)
 	}
 	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
-		HostID: host.ID, Kind: store.SlotScreenshare, SourceTokenHash: hasher.Hash(srcScreenRaw),
+		HostID: host.ID, Kind: store.SlotScreenshare, SourceTokenHash: hasher.Hash(srcScreenRaw), SourceTokenPlain: srcScreenRaw,
 	}); err != nil {
 		t.Fatalf("CreateSlot screenshare: %v", err)
 	}

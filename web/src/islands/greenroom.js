@@ -119,6 +119,10 @@ function Greenroom() {
   // entry.boundSlot (roster-driven), so a rejected PUT snaps the picker back AND shows why
   // (e.g. 404 when slots aren't provisioned yet — the host must open the Sources tab first).
   const [bindError, setBindError] = useState("");
+  // infoOpen toggles the "Bump quality now" explainer popover (host-facing help, not a control).
+  const [infoOpen, setInfoOpen] = useState(false);
+  /** @type {{current: HTMLDivElement|null}} */
+  const recoverGroupRef = useRef(null);
   // boundOverrides keeps a picker selection visible when the bind persisted but produced NO roster
   // frame — i.e. a DB-only (pre-live) bind: boundSlot is derived from LIVE occupancy, so before the
   // host goes live nothing updates entry.boundSlot and the controlled select would snap back. Keyed
@@ -435,6 +439,24 @@ function Greenroom() {
     };
   }, []);
 
+  // Light-dismiss the "Bump quality now" explainer popover: a click outside the group or Escape
+  // closes it. Only wired while it's open, so there's no idle global listener.
+  useEffect(() => {
+    if (!infoOpen) return undefined;
+    function onDown(e) {
+      if (recoverGroupRef.current && !recoverGroupRef.current.contains(e.target)) setInfoOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setInfoOpen(false);
+    }
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [infoOpen]);
+
   // bindSlot is the host-only People control (AC-6/D-20): (re)assign a guest to a cam slot (or
   // "" to unassign) over the REST endpoint. The server persists passes.slot_id AND live-re-routes
   // /s/{slot} with no OBS edit, then re-broadcasts the roster — so entry.boundSlot (and the
@@ -634,6 +656,11 @@ function Greenroom() {
       });
   }
 
+  // anyDegraded drives the "Bump quality now" enabled state: a guest's roster entry carries a
+  // non-null `degraded` only while that publisher is actively shedding or still climbing back
+  // (AD-21). With nothing degraded there's nothing to bump, so the button is disabled.
+  const anyDegraded = tiles.some((t) => t.entry && t.entry.degraded);
+
   return (
     <div class="greenroom" data-state={state}>
       {/* Connection banners (M5.5/AC-4): a transient drop AUTO-RECONNECTS, showing a recoverable
@@ -669,15 +696,44 @@ function Greenroom() {
       ) : null}
       <div class="gr-toolbar">
         {/* Host-only "bump quality now" (AD-21/D-34): broadcasts {t:recover-quality} so every
-            publisher recovers immediately, overriding the slow recover hysteresis. */}
-        <button
-          type="button"
-          class="gr-recover"
-          disabled={state !== "live"}
-          onClick={() => roomRef.current?.send({ t: "recover-quality" })}
-        >
-          Bump quality now
-        </button>
+            publisher recovers immediately, overriding the slow recover hysteresis. Shown only
+            while live, and clickable only when a guest is actually degraded — there's nothing to
+            bump at full quality. The ⓘ opens an explainer popover. */}
+        {state === "live" ? (
+          <div class="gr-recover-group" ref={recoverGroupRef}>
+            <button
+              type="button"
+              class="gr-recover"
+              disabled={!anyDegraded}
+              title={
+                anyDegraded
+                  ? "Restore full quality for every guest now"
+                  : "Quality is already at the maximum — nothing to bump"
+              }
+              onClick={() => roomRef.current?.send({ t: "recover-quality" })}
+            >
+              Bump quality now
+            </button>
+            <button
+              type="button"
+              class="gr-recover-info"
+              aria-label="What does “Bump quality now” do?"
+              aria-expanded={infoOpen}
+              onClick={() => setInfoOpen((v) => !v)}
+            >
+              <span aria-hidden="true">i</span>
+            </button>
+            {infoOpen ? (
+              <div class="gr-recover-pop" role="tooltip">
+                When a guest&rsquo;s connection or CPU is under strain, GuestPass automatically lowers
+                their video quality, then eases it back up slowly so it doesn&rsquo;t flap. &ldquo;Bump
+                quality now&rdquo; skips that wait and asks every guest&rsquo;s browser to jump straight
+                back to full quality. If the strain is still there, it eases back down on its own. It
+                only does something while a guest is degraded.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {ceiling ? <CeilingControl ceiling={ceiling} onApply={applyCeiling} /> : null}
         {/* Verified-live signal (D-29/AC-8): folds the linked channel's live status into the D-24
             broadcast surface, alongside the OBS-reflected on-air. Shown only when a channel is linked. */}

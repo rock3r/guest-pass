@@ -27,7 +27,7 @@ func (a *apiHarness) seedSlotAndPass(t *testing.T, hostID, streamID, tokenSeed s
 	}
 	idx := int64(1)
 	slot, err := a.store.CreateSlot(ctx, store.CreateSlotParams{
-		HostID: hostID, Kind: store.SlotCam, Idx: &idx, SourceTokenHash: a.hasher.Hash("slot-" + tokenSeed),
+		HostID: hostID, Kind: store.SlotCam, Idx: &idx, SourceTokenHash: a.hasher.Hash("slot-" + tokenSeed), SourceTokenPlain: "slot-" + tokenSeed,
 	})
 	if err != nil {
 		t.Fatalf("CreateSlot: %v", err)

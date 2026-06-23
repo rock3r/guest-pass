@@ -11,14 +11,13 @@ import (
 // create/re-issue redirect.
 const revealTTL = 2 * time.Minute
 
-// revealStore briefly holds a just-minted secret (a magic-link invite, or a set of rotated
-// slot OBS URLs) so the minting handler can POST-redirect-GET — a refresh or back/forward
-// never re-mints a pass or re-rotates a token (Cursor Bugbot, M4 PR-3) — while the follow-up
-// GET still reveals the secret exactly once. It is keyed by a random nonce, NOT by any token,
-// so nothing secret rides the redirect URL (no token in browser history or a Referer).
-// Entries are single-use and TTL-bounded; the raw token lives only inside the stored value,
-// in memory, briefly. The value is `any` so both the invite reveal (issuedLink) and the
-// sources reveal (sourcesReveal) share one store.
+// revealStore briefly holds a just-minted magic-link invite so the minting handler can
+// POST-redirect-GET — a refresh or back/forward never re-mints a pass (Cursor Bugbot, M4
+// PR-3) — while the follow-up GET still reveals the secret exactly once. It is keyed by a
+// random nonce, NOT by any token, so nothing secret rides the redirect URL (no token in
+// browser history or a Referer). Entries are single-use and TTL-bounded; the raw token lives
+// only inside the stored value, in memory, briefly. The value is `any` to keep the store
+// agnostic of the stored payload (currently the invite reveal, issuedLink).
 type revealStore struct {
 	mu      sync.Mutex
 	entries map[string]revealRecord

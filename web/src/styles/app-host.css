@@ -93,6 +93,62 @@ body.app {
   padding: 0 4px;
 }
 
+/* New sidebar user row (avatar + name + email + logout icon) */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background .13s;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+.sidebar-user:hover { background: color-mix(in srgb, var(--surface) 60%, transparent); }
+.sidebar-user-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.2;
+}
+.sidebar-user-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-user-email {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-logout-icon { color: var(--ink-3); flex-shrink: 0; }
+
+/* Theme icon button in sidebar (sun/moon toggle, icon-only) */
+.theme-icon-btn-sidebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background .13s, color .13s;
+  flex-shrink: 0;
+}
+.theme-icon-btn-sidebar:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
 /* ============ Content column ============ */
 .content {
   padding: 30px 28px 16px;
@@ -227,6 +283,195 @@ body.app {
   margin: 0 0 28px;
   font-size: 15px;
 }
+
+/* ---- Dashboard / calendar page-head (host app) ---- */
+.page-head { margin-bottom: 24px; }
+
+/* ============ Dashboard stat cards ============ */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.stat-card {
+  border-radius: var(--r-lg);
+  padding: 20px;
+}
+.stat-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  margin-bottom: 14px;
+}
+.stat-card-accent .stat-icon {
+  background: var(--accent-soft);
+  color: var(--accent-press);
+}
+.stat-value {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 30px;
+  line-height: 1;
+}
+.stat-label {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+
+/* ---- Live banner on dashboard ---- */
+.live-banner {
+  border-radius: var(--r-lg);
+  padding: 22px;
+  margin-bottom: 24px;
+  border: 1.5px solid color-mix(in srgb, var(--live) 40%, var(--line));
+  background: linear-gradient(100deg, var(--accent-soft), var(--surface) 60%);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.live-banner-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-md);
+  background: var(--live);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.live-banner-body { flex: 1; min-width: 240px; }
+.live-banner-title {
+  font-weight: 800;
+  font-size: 19px;
+  font-family: var(--font-display);
+}
+
+/* ---- Dashboard two-column grid ---- */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 24px;
+}
+.dash-section-title { font-size: 18px; }
+
+/* ---- Stream tile card (date tile + title + actions) ---- */
+.stream-tile-card {
+  border-radius: var(--r-md);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+}
+.stream-tile-card:hover { border-color: var(--line); background: var(--surface-2); }
+.stream-tile-date {
+  width: 54px;
+  flex-shrink: 0;
+  text-align: center;
+  padding: 8px 0;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.stream-tile-mon {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.stream-tile-day {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 20px;
+  color: var(--ink);
+}
+.stream-tile-title {
+  font-weight: 700;
+  font-size: 15.5px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.stream-tile-title:hover { color: var(--accent-press); }
+.stream-tile-titlerow { margin-bottom: 3px; }
+.stream-tile-when { font-size: 13px; }
+
+/* ---- Dashboard section heads + recent list ---- */
+.dash-upnext-head { margin-bottom: 14px; }
+.dash-recent-head { margin-bottom: 14px; }
+.dash-viewall { font-size: 13.5px; font-weight: 600; text-decoration: none; }
+.dash-viewall:hover { color: var(--ink); }
+.stream-recent-card { border-radius: var(--r-md); overflow: hidden; padding: 0; }
+.stream-recent-row { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.stream-recent-row:last-child { border-bottom: 0; }
+.stream-recent-title { font-weight: 700; font-size: 14.5px; }
+.stream-recent-when { font-size: 12.5px; }
+.stream-recent-empty { padding: 14px 16px; margin: 0; }
+
+/* ---- New stream dialog ---- */
+.new-stream-dialog {
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 28px;
+  max-width: 520px;
+  width: calc(100% - 40px);
+  box-shadow: var(--shadow-lg);
+}
+.new-stream-dialog::backdrop {
+  background: color-mix(in srgb, var(--ink) 40%, transparent);
+  backdrop-filter: blur(3px);
+}
+.new-stream-dialog h2 { font-size: 19px; margin: 0 0 4px; }
+.new-stream-dialog .dialog-sub { font-size: 13.5px; color: var(--ink-2); margin: 0 0 20px; }
+.new-stream-dialog .dialog-row { display: flex; gap: 12px; }
+.new-stream-dialog .dialog-row .field { flex: 1; }
+.new-stream-dialog .dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+/* ---- Settings section cards ---- */
+.settings-section-card {
+  border-radius: var(--r-lg);
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+}
+.settings-section-card > h2 {
+  font-size: 17px;
+  margin: 0 0 16px;
+}
+.settings-section-card > h2 + .muted {
+  font-size: 13.5px;
+  margin: -10px 0 16px;
+}
+.settings-col { display: flex; flex-direction: column; gap: 20px; }
+.settings-narrow { max-width: 760px; margin-inline: auto; }
+.settings-section-card .muted { font-size: 13.5px; margin: 0 0 16px; }
+.settings-account-row { align-items: center; }
+.settings-account-name { font-weight: 700; font-size: 16px; }
+.settings-account-email { font-size: 13.5px; align-items: center; }
+.settings-field-narrow { max-width: 340px; }
+.settings-turn-row { align-items: center; }
+.settings-turn-title { font-weight: 700; font-size: 14px; }
+.settings-turn-sub { font-size: 13px; }
+.settings-data-actions { margin-bottom: 16px; }
 
 /* Status pill (stream-status / slot states / invite status). */
 .stream-status,
@@ -1079,6 +1324,8 @@ body.app {
     padding: 22px 20px 12px;
     min-height: 0;
   }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .dash-grid { grid-template-columns: 1fr; }
 }
 
 /* ============ Dark refinement: the host nav active item ============ */
