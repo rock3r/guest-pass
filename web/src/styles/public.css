@@ -615,21 +615,6 @@ body.landing { overflow-x: hidden; }
   user-select: none;
 }
 
-/* ---- Section eyebrow ---- */
-.eyebrow-pop {
-  display: inline-block;
-  font-family: var(--font-body);
-  font-weight: 800;
-  font-size: 12px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  padding: 7px 13px;
-  border-radius: 99px;
-  border: 2px solid var(--edge);
-  box-shadow: 2px 2px 0 var(--edge);
-  rotate: -1.5deg;
-}
-
 /* ---- Hover lift for cards ---- */
 .hover-lift {
   transition: translate .2s ease, box-shadow .2s ease, border-color .2s ease;
@@ -638,9 +623,6 @@ body.landing { overflow-x: hidden; }
 .lift-icon { transition: scale .2s ease, rotate .2s ease; }
 .hover-lift:hover .lift-icon { scale: 1.08; rotate: -4deg; }
 .pop-card:hover .lift-icon { rotate: -8deg; scale: 1.12; }
-
-/* ---- tone-chip: bold colour chip ---- */
-.tone-chip { border: 2px solid var(--edge); box-shadow: 2px 2px 0 var(--edge); }
 
 /* ---- Values / pillars grid ---- */
 .pillars-section {
@@ -925,11 +907,7 @@ body.landing { overflow-x: hidden; }
 .tone-teal   { --tone: var(--pop-teal); }
 .tone-purple { --tone: var(--pop-purple); }
 .tone-orange { --tone: var(--pop-orange); }
-.tone-yellow { --tone: var(--pop-yellow); --tone-ink: var(--ink); }
-
-/* Solid colour icon chip + section eyebrow read the tone (white text, ink on yellow) */
-.tone-chip   { background: var(--tone, var(--accent)); color: var(--tone-ink, #fff); }
-.eyebrow-pop { background: var(--tone, var(--accent)); color: var(--tone-ink, #fff); }
+.tone-yellow { --tone: var(--pop-yellow); }
 
 /* Bare colour-glyph icons (no box) for feature / pillar cards */
 .feature-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--tone, var(--accent)); margin-bottom: 26px; flex: none; }
