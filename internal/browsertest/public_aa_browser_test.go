@@ -30,7 +30,7 @@ func TestPublic_TextMeetsAA(t *testing.T) {
 		// pass silently by reporting a high ratio (codex/bugbot).
 		const ratio = (sel) => { const el = document.querySelector(sel); if (!el) return -1;
 			const fg = lum(toRGB(getComputedStyle(el).color)); const hi=Math.max(fg,bg),lo=Math.min(fg,bg); return (hi+0.05)/(lo+0.05); };
-		return [ratio('.hero h1'), ratio('.hero p'), ratio('.site-footer p')];
+		return [ratio('.hero-h1'), ratio('.hero-lead'), ratio('.landing-footer-links a')];
 	})()`
 
 	Chrome(t, 90*time.Second, func(ctx context.Context) {
@@ -41,13 +41,13 @@ func TestPublic_TextMeetsAA(t *testing.T) {
 			acts := append([]chromedp.Action{}, setup...)
 			acts = append(acts,
 				chromedp.Navigate(s.base+"/"),
-				chromedp.WaitVisible(`.hero`, chromedp.ByQuery),
+				chromedp.WaitVisible(`.hero-section`, chromedp.ByQuery),
 				chromedp.Evaluate(contrastJS, &ratios),
 			)
 			if err := chromedp.Run(ctx, acts...); err != nil {
 				t.Fatalf("%s: %v", mode, err)
 			}
-			names := []string{".hero h1", ".hero p", ".site-footer p"}
+			names := []string{".hero-h1", ".hero-lead", ".landing-footer-links a"}
 			for i, r := range ratios {
 				if r < 0 {
 					t.Errorf("%s: %s not found in page — selector renamed/broken, AA not measured", mode, names[i])

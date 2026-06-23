@@ -28,8 +28,8 @@ func TestApp_RegenerateSlotRotatesToken(t *testing.T) {
 		t.Fatalf("regenerate = %d, want 303; body %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/app/streams/"+id+"/sources?reveal=") {
-		t.Fatalf("regenerate Location = %q, want a reveal of the sources tab", loc)
+	if loc != "/app/streams/"+id+"/sources" {
+		t.Fatalf("regenerate Location = %q, want direct sources redirect", loc)
 	}
 	if strings.Contains(loc, "token=") || strings.Contains(loc, oldToken) {
 		t.Fatalf("regenerate redirect URL leaked a token: %q", loc)
@@ -40,9 +40,9 @@ func TestApp_RegenerateSlotRotatesToken(t *testing.T) {
 		t.Fatalf("old slot token still resolves after regenerate: %v", err)
 	}
 
-	// Following the reveal shows a NEW cam-1 URL whose token resolves to the same slot.
-	reveal := a.req(t, http.MethodGet, loc, "", alice).Body.String()
-	newToken := extractSlotToken(t, reveal, "cam-1")
+	// Loading sources shows the NEW cam-1 URL whose token resolves to the same slot.
+	body2 := a.req(t, http.MethodGet, loc, "", alice).Body.String()
+	newToken := extractSlotToken(t, body2, "cam-1")
 	if newToken == oldToken {
 		t.Fatal("regenerate did not rotate the token")
 	}
@@ -73,7 +73,7 @@ func TestApp_RegenerateAllRotatesEverySlot(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("regenerate-all = %d, want 303", rec.Code)
 	}
-	reveal := a.req(t, http.MethodGet, rec.Header().Get("Location"), "", alice).Body.String()
+	reveal := a.req(t, http.MethodGet, "/app/streams/"+id+"/sources", "", alice).Body.String()
 
 	for label, old := range oldTokens {
 		// Old token invalidated.

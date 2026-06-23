@@ -48,14 +48,14 @@ func (a *apiHarness) slotByLabel(t *testing.T, hostID, kind string, idx *int64) 
 }
 
 // AC-4: opening the Sources tab idempotently provisions the host's slot pool (cam 1–8 +
-// screenshare) and reveals each slot's permanent OBS URL ONCE (the token is stored hashed,
-// EN-5, so it can only be surfaced at mint). A second open does not duplicate the pool nor
-// re-reveal the tokens.
-func TestApp_SourcesProvisionsPoolAndRevealsOnce(t *testing.T) {
+// screenshare) and always shows each slot's OBS URL (the plaintext token is stored alongside
+// the hash). A second open does not duplicate the pool and shows the same tokens.
+func TestApp_SourcesProvisionsPool(t *testing.T) {
 	a := newAPIHarness(t)
 	host, alice := a.host(t, "alice")
 
-	rec := a.req(t, http.MethodGet, "/app/streams/"+a.createStream(t, alice, "Show")+"/sources", "", alice)
+	id := a.createStream(t, alice, "Show")
+	rec := a.req(t, http.MethodGet, "/app/streams/"+id+"/sources", "", alice)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET sources = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -68,18 +68,18 @@ func TestApp_SourcesProvisionsPoolAndRevealsOnce(t *testing.T) {
 	if len(slots) != 9 {
 		t.Fatalf("provisioned %d slots, want 9 (cam 1–8 + screenshare)", len(slots))
 	}
-	// Every slot's URL is revealed, and the revealed token actually resolves the slot.
+	// Every slot's URL is shown, and the token resolves to the slot.
 	for _, label := range []string{"cam-1", "cam-8", "screen"} {
 		raw := extractSlotToken(t, body, label)
 		if raw == "" {
-			t.Fatalf("empty token revealed for %s", label)
+			t.Fatalf("empty token for %s", label)
 		}
 		if _, err := a.store.GetSlotBySourceTokenHash(context.Background(), a.hasher.Hash(raw)); err != nil {
-			t.Fatalf("revealed %s token does not resolve to a slot: %v", label, err)
+			t.Fatalf("%s token does not resolve to a slot: %v", label, err)
 		}
 	}
 
-	// Re-open: still 9 slots (idempotent), and the tokens are NOT re-revealed.
+	// Re-open: still 9 slots (idempotent), same tokens shown.
 	id2 := a.createStream(t, alice, "Other")
 	rec2 := a.req(t, http.MethodGet, "/app/streams/"+id2+"/sources", "", alice)
 	if rec2.Code != http.StatusOK {
@@ -88,8 +88,11 @@ func TestApp_SourcesProvisionsPoolAndRevealsOnce(t *testing.T) {
 	if slots2, _ := a.store.ListSlotsByHost(context.Background(), host.ID); len(slots2) != 9 {
 		t.Fatalf("re-open changed the pool to %d slots (not idempotent)", len(slots2))
 	}
-	if strings.Contains(rec2.Body.String(), "?token=") {
-		t.Fatalf("re-opening the Sources tab re-revealed a slot token (reveal must be once)")
+	// Same cam-1 token on re-open (pool is not re-provisioned with new tokens).
+	cam1First := extractSlotToken(t, body, "cam-1")
+	cam1Second := extractSlotToken(t, rec2.Body.String(), "cam-1")
+	if cam1First != cam1Second {
+		t.Fatal("re-opening sources changed the slot token (pool must be stable)")
 	}
 }
 

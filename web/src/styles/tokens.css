@@ -241,3 +241,13 @@ select {
   color: var(--accent-ink);
   border-color: var(--accent);
 }
+
+/* Pop palette — landing page & accents */
+:root {
+  --pop-yellow: #FFCE3A;
+  --pop-teal:   #06D6A0;
+  --pop-blue:   #2D9CDB;
+  --pop-pink:   #EF476F;
+  --pop-purple: #9B5DE5;
+  --pop-orange: #FF7A45;
+}

@@ -1,12 +1,19 @@
 {{define "content"}}
 <section class="cal">
-<div class="cal-head">
-<h1>Calendar</h1>
+<div class="page-head">
+<div>
+<h1>Streams</h1>
+<p class="page-head-sub">Plan shows, line up guests, and keep an eye on what's coming.</p>
+</div>
+<div class="page-head-actions">
+<button type="button" class="btn btn-primary" data-dialog-open="new-stream-dialog"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New stream</button>
+</div>
+</div>
+
 <div class="cal-nav">
 <a class="btn btn-quiet" href="/app/calendar?month={{.Data.PrevMonth}}">← Prev</a>
 <span class="cal-month">{{.Data.MonthLabel}}</span>
 <a class="btn btn-quiet" href="/app/calendar?month={{.Data.NextMonth}}">Next →</a>
-</div>
 </div>
 
 <div class="cal-grid" aria-label="{{.Data.MonthLabel}}">
@@ -37,4 +44,35 @@
 {{end}}
 </section>
 </section>
+
+<dialog id="new-stream-dialog" class="new-stream-dialog">
+<h2>New stream</h2>
+<p class="dialog-sub">The boring bits. You can change all of this later.</p>
+<form method="post" action="/app/streams" class="col gap-4">
+<label class="field"><span class="label">Show name</span><input class="input" name="title" placeholder="e.g. Indie Hackers Live #15" maxlength="200" required></label>
+<label class="field"><span class="label">Scheduled start (UTC)</span><input class="input" type="datetime-local" name="scheduled_at"></label>
+<label class="field"><span class="label">Length (minutes)</span><input class="input" type="number" name="duration_min" min="1" max="1440" value="90"></label>
+<div class="dialog-footer">
+<button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+<button type="submit" class="btn btn-primary">Create &amp; add guests</button>
+</div>
+</form>
+</dialog>
+
+<script nonce="{{.Nonce}}">
+(function () {
+  document.querySelectorAll("[data-dialog-open]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var d = document.getElementById(btn.getAttribute("data-dialog-open"));
+      if (d && d.showModal) d.showModal();
+    });
+  });
+  document.querySelectorAll("[data-dialog-close]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var d = btn.closest("dialog");
+      if (d) d.close();
+    });
+  });
+})();
+</script>
 {{end}}

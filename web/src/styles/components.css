@@ -569,6 +569,72 @@
   outline-offset: 2px;
 }
 
+/* ---- navlabel — sidebar section label ---- */
+.navlabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 16px 12px 6px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ---- avatar — color circle with initials ---- */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  user-select: none;
+  letter-spacing: -.01em;
+}
+/* Avatar sizes (SSR can't size via inline style; CSP style-src 'self') */
+.avatar-sm { width: 30px; height: 30px; font-size: 11.5px; }
+.avatar-lg { width: 56px; height: 56px; font-size: 20px; }
+/* Avatar colour palette — index matches render.go avColors / ui.jsx avColor() */
+.av-0 { background: #ff7a59; }
+.av-1 { background: #5b8def; }
+.av-2 { background: #34a26b; }
+.av-3 { background: #c061cb; }
+.av-4 { background: #e0a82e; }
+.av-5 { background: #3bb2c9; }
+.av-6 { background: #e0617a; }
+.av-7 { background: #7a6cf0; }
+.av-8 { background: #d77a32; }
+
+/* ---- page-head — standard content page header row ---- */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.page-head h1 {
+  font-size: clamp(22px, 3.5vw, 28px);
+  line-height: 1.1;
+  margin: 0;
+}
+.page-head .page-head-sub {
+  font-size: 14px;
+  color: var(--ink-2);
+  margin: 4px 0 0;
+}
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* ============ Dark refinements — flat depth (no offset shadows). The design keys these on
    [data-theme="dark"]; the product stamps the explicit choice on :root[data-theme="dark"] and the
    OS-preference path is the prefers-color-scheme media query (only when the user hasn't chosen

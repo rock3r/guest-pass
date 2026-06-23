@@ -75,14 +75,6 @@ guests never see them. Editing who's in a slot, nameplates, and the quality ceil
 <button type="submit" class="btn btn-danger">Regenerate all URLs (my URLs leaked)</button>
 </form>
 
-{{if .Data.HasReveal}}
-<div class="issued" role="status">
-<p><strong>Copy your OBS source URLs now</strong> — for security they're shown only once, at setup.
-Lost them later? Regenerate the slot to get a fresh URL.</p>
-<textarea class="issued-link reveal-all" readonly rows="9" aria-label="All OBS source URLs">{{.Data.RevealAll}}</textarea>
-</div>
-{{end}}
-
 <ul class="slot-list">
 {{range .Data.Slots}}
 <li class="slot-card">
@@ -91,11 +83,7 @@ Lost them later? Regenerate the slot to get a fresh URL.</p>
 <span class="slot-onair" data-onair="{{.OnAir}}">on-air: {{.OnAir}}</span>
 </div>
 <div class="slot-occupant">Occupant: {{if .HasOccupant}}<strong>{{.Occupant}}</strong>{{else}}<span class="muted">empty</span>{{end}}</div>
-{{if .Revealed}}
 <label class="slot-url-label">OBS source URL<input class="issued-link" type="text" readonly value="{{.URL}}" aria-label="{{.Title}} OBS source URL"></label>
-{{else}}
-<p class="slot-url-hidden muted">URL shown once at setup. Regenerate this slot to reveal a fresh URL.</p>
-{{end}}
 <div class="slot-actions">
 <a class="slot-manage" href="/greenroom">Manage in greenroom →</a>
 <form method="post" action="/app/streams/{{$.Data.StreamID}}/sources/slots/{{.SlotID}}/regenerate" class="inline-form">

@@ -338,7 +338,15 @@ func TestDegradationTransparency_HostBadgeAndRecoverNow(t *testing.T) {
 		t.Fatalf("'bump quality now' did not reach the guest's recover-now path: %v", err)
 	}
 
+	// cpu is still forced, so guest A sheds again and the host tile's degrading badge returns —
+	// which is also what re-enables the (degradation-gated) "bump quality now" button. Wait for it
+	// before the second click so the button is clickable.
+	if err := chromedp.Run(hCtx, chromedp.WaitVisible(tileA+` .gr-degraded`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("guest A did not re-degrade after the first bump (cpu still forced): %v", err)
+	}
 	// And with the pressure cleared, a recover-now restores the guest's own state (degraded clears).
+	// The button stays enabled across the clear: A is still shedding (climbing back slowly), so its
+	// roster entry keeps a non-null `degraded` until fully recovered.
 	if err := chromedp.Run(aCtx, chromedp.Evaluate(`window.__gpForceLimit = null`, nil)); err != nil {
 		t.Fatalf("clear cpu: %v", err)
 	}

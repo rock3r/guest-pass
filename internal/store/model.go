@@ -80,6 +80,7 @@ type Slot struct {
 	Kind                    string // cam | host | screenshare
 	Idx                     *int64 // cam slots 1..8; NULL for host/screenshare
 	SourceTokenHash         string // HMAC(secret, token) (EN-5)
+	SourceTokenPlain        string // raw token for display (host can always copy URL)
 	SourceTokenLastUsedAt   *int64
 	SourceTokenLastSourceIP *string
 	Epoch                   int64

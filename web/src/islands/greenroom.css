@@ -277,6 +277,64 @@ section.greenroom > .gr-privacy-note {
   color: var(--danger);
 }
 
+/* "Bump quality now" + its explainer popover. The group anchors the popover. */
+.gr-recover-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Disabled = quality already at max: nothing to bump. Read as inert, not destructive. */
+.gr-recover:disabled {
+  cursor: default;
+  opacity: 0.5;
+  box-shadow: none;
+}
+.gr-recover:disabled:hover {
+  transform: none;
+  box-shadow: none;
+  background: var(--surface);
+}
+.gr-recover-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-style: italic;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.gr-recover-info:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.gr-recover-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: 2.5px 2.5px 0 var(--edge);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
 .gr-ceiling {
   display: flex;
   align-items: center;

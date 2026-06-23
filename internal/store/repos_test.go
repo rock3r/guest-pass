@@ -294,7 +294,7 @@ func TestSlotRepo_RotateToken(t *testing.T) {
 		t.Fatalf("RecordSlotTokenUse: %v", err)
 	}
 
-	if err := st.RotateSlotToken(ctx, sl.ID, "new"); err != nil {
+	if err := st.RotateSlotToken(ctx, sl.ID, "new", "new-plain"); err != nil {
 		t.Fatalf("RotateSlotToken: %v", err)
 	}
 	if _, err := st.GetSlotBySourceTokenHash(ctx, "old"); !errors.Is(err, ErrNotFound) {
@@ -308,7 +308,7 @@ func TestSlotRepo_RotateToken(t *testing.T) {
 		t.Fatalf("rotation must clear leak-detection metadata, got used=%v ip=%v",
 			got.SourceTokenLastUsedAt, got.SourceTokenLastSourceIP)
 	}
-	if err := st.RotateSlotToken(ctx, "no-such-slot", "x"); err == nil {
+	if err := st.RotateSlotToken(ctx, "no-such-slot", "x", "x-plain"); err == nil {
 		t.Fatal("rotating a missing slot should error")
 	}
 }
@@ -323,7 +323,7 @@ func TestSlotRepo_RotateTokensBatch(t *testing.T) {
 	c1, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotCam, Idx: i64(1), SourceTokenHash: "c1-old"})
 	scr, _ := st.CreateSlot(ctx, CreateSlotParams{HostID: h.ID, Kind: SlotScreenshare, SourceTokenHash: "scr-old"})
 
-	if err := st.RotateSlotTokens(ctx, map[string]string{c1.ID: "c1-new", scr.ID: "scr-new"}); err != nil {
+	if err := st.RotateSlotTokens(ctx, map[string]SlotTokenUpdate{c1.ID: {Hash: "c1-new", Plain: "c1-plain"}, scr.ID: {Hash: "scr-new", Plain: "scr-plain"}}); err != nil {
 		t.Fatalf("RotateSlotTokens: %v", err)
 	}
 	for _, old := range []string{"c1-old", "scr-old"} {
@@ -338,7 +338,7 @@ func TestSlotRepo_RotateTokensBatch(t *testing.T) {
 	}
 
 	// A batch naming a missing slot rolls back entirely — the existing slots keep "*-new".
-	if err := st.RotateSlotTokens(ctx, map[string]string{c1.ID: "c1-doomed", "ghost": "x"}); !errors.Is(err, ErrNotFound) {
+	if err := st.RotateSlotTokens(ctx, map[string]SlotTokenUpdate{c1.ID: {Hash: "c1-doomed", Plain: "p"}, "ghost": {Hash: "x", Plain: "x"}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("batch with a missing slot = %v, want ErrNotFound", err)
 	}
 	if _, err := st.GetSlotBySourceTokenHash(ctx, "c1-new"); err != nil {

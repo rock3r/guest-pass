@@ -42,9 +42,7 @@ type detailData struct {
 	// Progressive-trust (D-36)
 	InviteQuotaError bool // ?error=invite-quota — the host hit their per-window invite cap
 	// Sources tab (read-only, EN-26)
-	Slots     []slotCard
-	RevealAll string // newline-joined freshly-minted OBS URLs for the copy-all block ("" if none)
-	HasReveal bool
+	Slots []slotCard
 }
 
 // passRow is a guest pass as the invites table renders it (display-ready).
@@ -127,8 +125,9 @@ func (s *appServer) renderDetail(w http.ResponseWriter, r *http.Request, host *s
 	d.ChannelError = q.Get("error") == "channel"
 	d.InviteQuotaError = q.Get("error") == "invite-quota"
 	s.rd.render(w, r, "streamdetail.html", pageData{
-		Title: st.Title, Nav: "dashboard", Host: &navHost{Name: host.Name, IsAdmin: host.IsAdmin},
-		Data: d,
+		Title: st.Title, Nav: "invites", Host: hostNav(host),
+		CurrentStream: &navStream{ID: st.ID, Title: st.Title, IsLive: st.Status == "live"},
+		Data:          d,
 	})
 }
 

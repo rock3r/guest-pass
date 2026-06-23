@@ -4,34 +4,44 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · GuestPass</title>
-<link rel="stylesheet" href="/static/app.css"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}" crossorigin="anonymous"{{end}}>{{/* integrity added when the build manifest is present */}}
+<link rel="stylesheet" href="/static/app.css"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}" crossorigin="anonymous"{{end}}>
 </head>
 <body class="app">
 <div class="appshell">
 <aside class="sidebar">
-<a class="logo logo-sm app-brand sidebar-logo" href="/app" aria-label="GuestPass home"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></a>
+<a class="logo logo-sm sidebar-logo" href="/app" aria-label="GuestPass home"><span class="logo-mark"><span></span></span><span>Guest<span>Pass</span></span></a>
 <nav class="app-links" aria-label="Host navigation">
-<a class="navitem" href="/app"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
-<a class="navitem" href="/app/calendar"{{if eq .Nav "calendar"}} aria-current="page"{{end}}>Calendar</a>
-<a class="navitem" href="/app/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}>Settings</a>
-{{if and .Host .Host.IsAdmin}}<a class="navitem" href="/admin"{{if eq .Nav "admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
-</nav>
+<a class="navitem{{if eq .Nav "dashboard"}} on{{end}}" href="/app"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span class="grow">Dashboard</span></a>
+<a class="navitem{{if eq .Nav "calendar"}} on{{end}}" href="/app/calendar"{{if eq .Nav "calendar"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg><span class="grow">Streams</span></a>
+{{if .CurrentStream}}
+<div class="navlabel">This stream · {{.CurrentStream.Title}}</div>
+<a class="navitem" href="/greenroom"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><path d="M7.5 16.5a6 6 0 0 1 0-9M16.5 7.5a6 6 0 0 1 0 9M4.8 19.2a9.5 9.5 0 0 1 0-14.4M19.2 4.8a9.5 9.5 0 0 1 0 14.4"/></svg><span class="grow">Greenroom</span>{{if .CurrentStream.IsLive}}<span class="badge badge-live"><span class="badge-dot"></span>live</span>{{end}}</a>
+<a class="navitem{{if eq .Nav "invites"}} on{{end}}" href="/app/streams/{{.CurrentStream.ID}}/invites"{{if eq .Nav "invites"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg><span class="grow">Invites</span></a>
+<a class="navitem{{if eq .Nav "sources"}} on{{end}}" href="/app/streams/{{.CurrentStream.ID}}/sources"{{if eq .Nav "sources"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="13" rx="2.5"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span class="grow">OBS &amp; sources</span></a>
+{{end}}
 <div class="grow"></div>
+<div class="navlabel">Workspace</div>
+{{if and .Host .Host.IsAdmin}}<a class="navitem{{if eq .Nav "admin"}} on{{end}}" href="/admin"{{if eq .Nav "admin"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8 3v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10v-6z"/></svg><span class="grow">Admin</span></a>{{end}}
+<a class="navitem{{if eq .Nav "settings"}} on{{end}}" href="/app/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg><span class="grow">Settings</span></a>
+</nav>
 <hr class="divider sidebar-divider">
-<div class="app-account sidebar-account">
-{{if .Host}}<div class="sidebar-account-id"><span class="app-host sidebar-account-name">{{.Host.Name}}</span></div>{{end}}
-<form method="post" action="/auth/logout" class="app-signout-form"><button type="submit" class="btn btn-quiet btn-sm btn-block">Sign out</button></form>
+<div class="sidebar-user">
+{{if .Host}}<span class="avatar avatar-sm av-{{.Host.AvatarIdx}}">{{.Host.AvatarInitials}}</span>
+<div class="sidebar-user-text grow">
+<div class="sidebar-user-name">{{.Host.Name}}</div>
+<div class="sidebar-user-email">{{.Host.Email}}</div>
+</div>{{end}}
+<form method="post" action="/auth/logout"><button type="submit" class="btn btn-ghost btn-icon sidebar-logout-icon" aria-label="Sign out"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4M16 16l4-4-4-4M20 12H9"/></svg></button></form>
 </div>
-{{/* Dark-mode toggle (D-9), no-JS: cycles System → Light → Dark via a PRG POST that sets gp_theme. */}}
-<form method="post" action="/theme" class="theme-toggle sidebar-theme">
+<form method="post" action="/theme" class="sidebar-theme">
 <input type="hidden" name="next" value="{{.Path}}">
-{{if eq .Theme "dark"}}<button type="submit" name="theme" value="system" class="theme-btn" aria-label="Theme: Dark. Switch to system.">Theme: Dark</button>
-{{else if eq .Theme "light"}}<button type="submit" name="theme" value="dark" class="theme-btn" aria-label="Theme: Light. Switch to dark.">Theme: Light</button>
-{{else}}<button type="submit" name="theme" value="light" class="theme-btn" aria-label="Theme: follow system. Switch to light.">Theme: System</button>{{end}}
+{{if eq .Theme "dark"}}<button type="submit" name="theme" value="system" class="theme-icon-btn-sidebar" aria-label="Theme: Dark. Switch to system."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg></button>
+{{else if eq .Theme "light"}}<button type="submit" name="theme" value="dark" class="theme-icon-btn-sidebar" aria-label="Theme: Light. Switch to dark."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.5v2.5M12 20v2.5M3.5 3.5l1.8 1.8M18.7 18.7l1.8 1.8M1.5 12H4M20 12h2.5M3.5 20.5l1.8-1.8M18.7 5.3l1.8-1.8"/></svg></button>
+{{else}}<button type="submit" name="theme" value="light" class="theme-icon-btn-sidebar" aria-label="Theme: System. Switch to light."><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.5v2.5M12 20v2.5M3.5 3.5l1.8 1.8M18.7 18.7l1.8 1.8M1.5 12H4M20 12h2.5M3.5 20.5l1.8-1.8M18.7 5.3l1.8-1.8"/></svg></button>{{end}}
 </form>
 </aside>
 <main class="app-main content">{{template "content" .}}
-<footer class="app-footer">GuestPass is free, open-source software licensed
+<footer class="app-footer">GuestPass is free, source-available software licensed
 <a href="https://uelicense.eu" rel="noopener">UEL v1.0</a>.
 <a href="{{.SourceURL}}" rel="noopener">Get the source for this build</a>.</footer>
 </main>

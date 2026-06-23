@@ -22,7 +22,7 @@ import (
 // rather than staying a hard-coded white (P1) — both regressions caught by codex.
 func TestTheme_TogglePersistsNoFOUC(t *testing.T) {
 	s := seedHostApp(t)
-	// A stream so the dashboard renders a .stream-card surface to check in dark mode (P1).
+	// A stream so the dashboard renders a .stream-tile-card surface to check in dark mode (P1).
 	if _, err := s.store.CreateStream(context.Background(), store.CreateStreamParams{HostID: s.hostID, Title: "Themed Show"}); err != nil {
 		t.Fatalf("CreateStream: %v", err)
 	}
@@ -34,16 +34,16 @@ func TestTheme_TogglePersistsNoFOUC(t *testing.T) {
 		var initial, paperDark, bodyBgDark string
 		if err := chromedp.Run(ctx,
 			chromedp.Navigate(s.base+"/"),
-			chromedp.WaitVisible(`.theme-btn`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.theme-icon-btn`, chromedp.ByQuery),
 			// No cookie yet → no explicit data-theme (the page follows the OS).
 			chromedp.Evaluate(`document.documentElement.getAttribute('data-theme') || ""`, &initial),
 			// Cycle System → Light. The toggle submits → PRG → the page reloads; waiting on the NEW
 			// page's <html data-theme="…"> attribute selector is the deterministic signal (it can't
 			// match the old page, so it waits out the navigation — unlike a bare button WaitVisible).
-			chromedp.Click(`.theme-btn`, chromedp.ByQuery),
+			chromedp.Click(`.theme-icon-btn`, chromedp.ByQuery),
 			chromedp.WaitVisible(`html[data-theme="light"]`, chromedp.ByQuery),
 			// Cycle Light → Dark.
-			chromedp.Click(`.theme-btn`, chromedp.ByQuery),
+			chromedp.Click(`.theme-icon-btn`, chromedp.ByQuery),
 			chromedp.WaitVisible(`html[data-theme="dark"]`, chromedp.ByQuery),
 			chromedp.Evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--paper').trim()`, &paperDark),
 			// P2: the public <body> actually consumes the token — its painted background is the dark
@@ -82,13 +82,13 @@ func TestTheme_TogglePersistsNoFOUC(t *testing.T) {
 		if err := chromedp.Run(ctx,
 			setHostCookie,
 			chromedp.Navigate(s.base+"/app"),
-			chromedp.WaitVisible(`.stream-card`, chromedp.ByQuery),
-			chromedp.Evaluate(`getComputedStyle(document.querySelector('.stream-card')).backgroundColor`, &cardBgDark),
+			chromedp.WaitVisible(`.stream-tile-card`, chromedp.ByQuery),
+			chromedp.Evaluate(`getComputedStyle(document.querySelector('.stream-tile-card')).backgroundColor`, &cardBgDark),
 		); err != nil {
 			t.Fatalf("host dashboard in dark: %v", err)
 		}
 		if !strings.Contains(cardBgDark, "29, 33, 21") {
-			t.Fatalf("host .stream-card background in dark = %q, want the dark surface rgb(29, 33, 21) — not white", cardBgDark)
+			t.Fatalf("host .stream-tile-card background in dark = %q, want the dark surface rgb(29, 33, 21) — not white", cardBgDark)
 		}
 	})
 }
