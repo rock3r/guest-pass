@@ -11,6 +11,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/rock3r/guest-pass/internal/assets"
+	"github.com/rock3r/guest-pass/internal/guide"
 )
 
 func main() {
@@ -39,5 +40,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("built web/dist (app + obs entries) + SRI manifest")
+	if err := guide.Compile(root, dist); err != nil {
+		fmt.Fprintln(os.Stderr, "guide:", err)
+		os.Exit(1)
+	}
+	fmt.Println("built web/dist (app + obs entries + user guide) + SRI manifest")
 }

@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rock3r/guest-pass/internal/guide"
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
@@ -121,6 +124,8 @@ type renderer struct {
 	pages       map[string]*template.Template
 	obsTmpl     *template.Template
 	landingTmpl *template.Template
+	guideTmpl   *template.Template
+	guideSite   *guide.Site // compiled user guide; nil when not built (then /guide 404s)
 	sourceURL   string
 	manifest    map[string]string
 	devLogin    bool
@@ -168,6 +173,10 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 	if err != nil {
 		return nil, err
 	}
+	guideT, err := template.New("guide.html").ParseFS(templateFS, "templates/guide.html")
+	if err != nil {
+		return nil, err
+	}
 	if manifest == nil {
 		manifest = map[string]string{}
 	}
@@ -175,10 +184,74 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 		pages:       pages,
 		obsTmpl:     obs,
 		landingTmpl: landing,
+		guideTmpl:   guideT,
 		sourceURL:   sourceURL,
 		manifest:    manifest,
 		devLogin:    devLogin,
 	}, nil
+}
+
+// loadGuide loads the compiled user guide from dir (web/dist/guide). A failure (guide not
+// built) leaves guideSite nil, so the /guide routes answer 404 rather than erroring.
+func (rd *renderer) loadGuide(dir string) {
+	if s, err := guide.Load(dir); err == nil {
+		rd.guideSite = s
+	}
+}
+
+// guidePageData backs the standalone guide template (public, no auth). Body is the compiled
+// Markdown HTML for the current page; Groups drives the section nav.
+type guidePageData struct {
+	Title          string
+	Theme          string
+	Path           string
+	StyleIntegrity string
+	SourceURL      string
+	Groups         []guide.Group
+	Current        string
+	PageTitle      string
+	Body           template.HTML
+}
+
+// guideIndex redirects /guide to the first page so every guide page lives under /guide/<slug>
+// (keeps the Markdown's relative inter-page links resolving correctly).
+func (rd *renderer) guideIndex(w http.ResponseWriter, r *http.Request) {
+	if rd.guideSite == nil {
+		rd.notFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/guide/"+rd.guideSite.First(), http.StatusFound)
+}
+
+// guidePage renders one compiled guide page wrapped in the design chrome.
+func (rd *renderer) guidePage(w http.ResponseWriter, r *http.Request) {
+	if rd.guideSite == nil {
+		rd.notFound(w, r)
+		return
+	}
+	p, ok := rd.guideSite.Page(chi.URLParam(r, "slug"))
+	if !ok {
+		rd.notFound(w, r)
+		return
+	}
+	data := guidePageData{
+		Title:          p.Title + " · Guide",
+		Theme:          themeChoice(r),
+		Path:           r.URL.RequestURI(),
+		StyleIntegrity: rd.manifest["app.css"],
+		SourceURL:      rd.sourceURL,
+		Groups:         rd.guideSite.Groups,
+		Current:        p.Slug,
+		PageTitle:      p.Title,
+		Body:           p.Body,
+	}
+	var buf bytes.Buffer
+	if err := rd.guideTmpl.Execute(&buf, data); err != nil {
+		http.Error(w, "render error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 // render executes a base-composed page with a 200 OK status. See renderStatus.
