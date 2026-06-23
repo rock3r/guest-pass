@@ -1,0 +1,27 @@
+{
+  "groups": [
+    {
+      "title": "For hosts",
+      "pages": [
+        { "slug": "quickstart", "title": "Quickstart" },
+        { "slug": "inviting-guests", "title": "Inviting guests" },
+        { "slug": "wiring-obs-sources", "title": "Wiring OBS sources" },
+        { "slug": "the-greenroom", "title": "The greenroom" },
+        { "slug": "performance-and-bandwidth", "title": "Performance & bandwidth" },
+        { "slug": "connections-and-networking", "title": "Connections & networking" },
+        { "slug": "settings", "title": "Settings & your data" },
+        { "slug": "troubleshooting-hosts", "title": "Troubleshooting" }
+      ]
+    },
+    {
+      "title": "For guests",
+      "pages": [
+        { "slug": "joining-as-a-guest", "title": "Joining from your pass" },
+        { "slug": "in-the-greenroom", "title": "In the greenroom" },
+        { "slug": "your-privacy", "title": "Your privacy & data" },
+        { "slug": "reporting-an-invite", "title": "Reporting an invite" },
+        { "slug": "troubleshooting-guests", "title": "Troubleshooting" }
+      ]
+    }
+  ]
+}

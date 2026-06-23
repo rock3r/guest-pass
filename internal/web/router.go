@@ -3,6 +3,7 @@ package web
 import (
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -58,6 +59,11 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Load the compiled user guide (web/dist/guide) so /guide can serve it. A minimal config
+	// (no StaticDir, or guide not built) leaves it unmounted — guideIndex/guidePage 404 then.
+	if cfg.StaticDir != "" {
+		rd.loadGuide(filepath.Join(cfg.StaticDir, "guide"))
+	}
 
 	// Render denials (RequireHost/RequireAdmin) as explanatory HTML screens for navigations
 	// (suspended/pending/non-admin/sign-in), while fetch/XHR callers keep the terse plain body
@@ -88,6 +94,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/", rd.landing)
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
+	// Public user guide (no auth): /guide redirects to the first page; each page lives at
+	// /guide/{slug}. Compiled from docs/user-guide Markdown at build time.
+	r.Get("/guide", rd.guideIndex)
+	r.Get("/guide/{slug}", rd.guidePage)
 	// Dark-mode choice (D-9): the no-JS footer toggle POSTs here to set/clear the gp_theme cookie,
 	// then PRG-redirects back. Public + CSRF-safe (SameSite-Lax cosmetic cookie; no state changed).
 	r.Post("/theme", themeHandler(cfg.Secure))

@@ -8,6 +8,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/evanw/esbuild v0.28.1
 	github.com/go-chi/chi/v5 v5.3.0
+	github.com/yuin/goldmark v1.8.2
 	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.52.0
 )
