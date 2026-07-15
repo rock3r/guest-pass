@@ -222,6 +222,12 @@ func (s *appServer) reissueInvite(w http.ResponseWriter, r *http.Request) {
 	name, email := passNameEmail(pass)
 	link := s.baseURL + "/p/" + raw
 	delivered := s.deliverInvite(r.Context(), st, name, email, link) == nil
+	if delivered {
+		if err := s.store.AddCounter(r.Context(), store.CounterInvitesSent, 1); err != nil {
+			http.Error(w, "invite sent but could not record statistics", http.StatusInternalServerError)
+			return
+		}
+	}
 	s.redirectWithReveal(w, r, st.ID, issuedLink{Email: email, Link: link, Delivered: delivered})
 }
 
@@ -279,6 +285,7 @@ func (s *appServer) mintInvite(ctx context.Context, st *store.Stream, name, emai
 	// Delivery succeeded. Stamp "sent" best-effort: if this write fails the invite still went
 	// out and the pass exists, so we reveal the link rather than failing the request and
 	// hiding it — the pass simply stays "created" until a re-issue re-stamps it.
+	_ = s.store.AddCounter(ctx, store.CounterInvitesSent, 1)
 	_ = s.store.SetPassStatus(ctx, pass.ID, store.PassSent)
 	return link, true, nil
 }

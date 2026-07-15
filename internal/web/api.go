@@ -239,6 +239,10 @@ func (a *apiServer) createPass(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "pass created but invite delivery failed")
 		return
 	}
+	if err := a.store.AddCounter(r.Context(), store.CounterInvitesSent, 1); err != nil {
+		writeError(w, http.StatusInternalServerError, "invite sent but could not record statistics")
+		return
+	}
 	if err := a.store.SetPassStatus(r.Context(), pass.ID, store.PassSent); err != nil {
 		// The invite was delivered but we couldn't record it. Surface the failure rather
 		// than returning a misleading "created" status with no sent_at, which would invite

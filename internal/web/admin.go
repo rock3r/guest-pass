@@ -11,6 +11,11 @@ import (
 	"github.com/rock3r/guest-pass/internal/store"
 )
 
+// processStartedAt intentionally lives in memory: M6 reports current-process
+// uptime, not a persisted availability percentage that could overstate health
+// across restarts.
+var processStartedAt = time.Now()
+
 // formatInstant renders a unix-seconds timestamp as an absolute UTC string for the admin tables
 // (the columns are always present, unlike the optional scheduled_at handled by formatSchedule).
 func formatInstant(ts int64) string {
@@ -59,9 +64,17 @@ type turnRelayView struct {
 }
 
 type adminStatsView struct {
-	LiveSessions int           `json:"live_sessions"`
-	LivePeers    int           `json:"live_peers"`
-	TurnRelay    turnRelayView `json:"turn_relay"`
+	LiveSessions   int           `json:"live_sessions"`
+	LivePeers      int           `json:"live_peers"`
+	TurnRelay      turnRelayView `json:"turn_relay"`
+	StreamsRun     int64         `json:"streams_run"`
+	GuestMinutes   int64         `json:"guest_minutes"`
+	TotalHosts     int64         `json:"total_hosts"`
+	ActiveHosts    int64         `json:"active_hosts"`
+	InvitesSent    int64         `json:"invites_sent"`
+	ReportsFiled   int64         `json:"reports_filed"`
+	PeakConcurrent int64         `json:"peak_concurrent"`
+	UptimeSeconds  int64         `json:"uptime_seconds"`
 }
 
 // gatherSessions loads the cross-host live sessions and attaches each one's live participant count
@@ -102,7 +115,37 @@ func (s *adminServer) gatherStats(r *http.Request) (adminStatsView, error) {
 	if tr.Available {
 		tr.Percent = math.Round(float64(relayed)/float64(total)*1000) / 10 // one decimal place
 	}
-	return adminStatsView{LiveSessions: len(sessions), LivePeers: peers, TurnRelay: tr}, nil
+	read := func(key string) (int64, error) { return s.store.Counter(r.Context(), key) }
+	streams, err := read(store.CounterStreamsRun)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	seconds, err := read(store.CounterGuestConnectedSeconds)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	hosts, err := read(store.CounterTotalHosts)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	invites, err := read(store.CounterInvitesSent)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	reports, err := read(store.CounterReportsFiled)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	peak, err := read(store.CounterPeakConcurrent)
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	active, err := s.store.CountActiveHosts(r.Context())
+	if err != nil {
+		return adminStatsView{}, err
+	}
+	uptimeSeconds := int64(time.Since(processStartedAt).Seconds())
+	return adminStatsView{LiveSessions: len(sessions), LivePeers: peers, TurnRelay: tr, StreamsRun: streams, GuestMinutes: seconds / 60, TotalHosts: hosts, ActiveHosts: active, InvitesSent: invites, ReportsFiled: reports, PeakConcurrent: peak, UptimeSeconds: uptimeSeconds}, nil
 }
 
 func (s *adminServer) gatherHosts(r *http.Request) ([]adminHostView, error) {
@@ -188,14 +231,22 @@ type adminReportGroup struct {
 }
 
 type adminData struct {
-	LiveSessions int
-	LivePeers    int
-	RelayLabel   string // "12.5%" or "n/a" when no connection data has been recorded yet
-	Sessions     []adminSessionRow
-	Hosts        []adminHostRow
-	Reports      []adminReportGroup
-	Flash        string // PRG result banner (e.g. "Host suspended.")
-	FlashError   string // PRG error banner (e.g. "You can't suspend your own account.")
+	LiveSessions   int
+	LivePeers      int
+	RelayLabel     string // "12.5%" or "n/a" when no connection data has been recorded yet
+	StreamsRun     int64
+	GuestMinutes   int64
+	TotalHosts     int64
+	ActiveHosts    int64
+	InvitesSent    int64
+	ReportsFiled   int64
+	PeakConcurrent int64
+	Uptime         string
+	Sessions       []adminSessionRow
+	Hosts          []adminHostRow
+	Reports        []adminReportGroup
+	Flash          string // PRG result banner (e.g. "Host suspended.")
+	FlashError     string // PRG error banner (e.g. "You can't suspend your own account.")
 }
 
 // labelForReportCategory maps a stored category to its human label (falls back to the raw value).
@@ -273,7 +324,7 @@ func (s *adminServer) adminConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d := adminData{LiveSessions: stats.LiveSessions, LivePeers: stats.LivePeers, RelayLabel: "n/a", Reports: reports}
+	d := adminData{LiveSessions: stats.LiveSessions, LivePeers: stats.LivePeers, RelayLabel: "n/a", Reports: reports, StreamsRun: stats.StreamsRun, GuestMinutes: stats.GuestMinutes, TotalHosts: stats.TotalHosts, ActiveHosts: stats.ActiveHosts, InvitesSent: stats.InvitesSent, ReportsFiled: stats.ReportsFiled, PeakConcurrent: stats.PeakConcurrent, Uptime: (time.Duration(stats.UptimeSeconds) * time.Second).String()}
 	if stats.TurnRelay.Available {
 		d.RelayLabel = strconv.FormatFloat(stats.TurnRelay.Percent, 'f', 1, 64) + "%"
 	}

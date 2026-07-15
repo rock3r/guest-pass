@@ -39,11 +39,22 @@ func (s *Store) CreateHost(ctx context.Context, p CreateHostParams) (*Host, erro
 		Status:    status,
 		CreatedAt: time.Now().Unix(),
 	}
-	_, err = s.writer.ExecContext(ctx,
+	tx, err := s.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("inserting host: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO hosts (id, google_sub, email, name, picture, is_admin, status, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		h.ID, h.GoogleSub, h.Email, h.Name, h.Picture, boolToInt(h.IsAdmin), h.Status, h.CreatedAt)
 	if err != nil {
+		return nil, fmt.Errorf("inserting host: %w", err)
+	}
+	if err := addCounterTx(ctx, tx, CounterTotalHosts, 1, time.Now().UTC().Format(time.DateOnly)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("inserting host: %w", err)
 	}
 	return h, nil
@@ -79,10 +90,10 @@ func (s *Store) SetHostName(ctx context.Context, id, name string) error {
 
 // DeleteHost erases a host and, via ON DELETE CASCADE, ALL of the host's data — streams (→ their
 // passes, sessions, host_source_tokens, and transitively peers + pass_locks) and slots. This is
-// the GDPR erasure path (DELETE /api/me, AC-5/D-37/D-M5-3): a clean host-scoped wipe. No anonymous
-// counters exist yet to step around (DEF-COUNTERS); when they land, this path must be revised to
-// preserve them. Returns ErrNotFound if no such host. (foreign_keys=ON is set per-conn, EN-11, so
-// the cascade fires.)
+// the GDPR erasure path (DELETE /api/me, AC-5/D-37/D-M5-3): a clean host-scoped wipe. Anonymous
+// counters have no foreign keys and are deliberately outside this cascade: contributions remain
+// after the account is erased. Returns ErrNotFound if no such host. (foreign_keys=ON is set
+// per-conn, EN-11, so the cascade fires.)
 func (s *Store) DeleteHost(ctx context.Context, id string) error {
 	res, err := s.writer.ExecContext(ctx, "DELETE FROM hosts WHERE id = ?", id)
 	if err != nil {

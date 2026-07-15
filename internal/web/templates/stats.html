@@ -1,0 +1,16 @@
+{{define "content"}}
+<main class="public-page stats-page">
+  <p class="eyebrow">Transparency</p>
+  <h1>Anonymous instance totals</h1>
+  <p class="lede">GuestPass keeps only aggregate usage numbers here. They are never tied to a host, stream, guest, or IP.</p>
+  <section class="stats-grid" aria-label="Anonymous instance totals">
+    <article class="card"><strong>{{.Data.StreamsRun}}</strong><span>streams hosted</span></article>
+    <article class="card"><strong>{{.Data.GuestMinutes}}</strong><span>guest-minutes</span></article>
+    <article class="card"><strong>{{.Data.InvitesSent}}</strong><span>invites delivered</span></article>
+    <article class="card"><strong>{{.Data.ReportsFiled}}</strong><span>reports filed</span></article>
+    <article class="card"><strong>{{.Data.PeakConcurrent}}</strong><span>peak concurrent participants</span></article>
+    <article class="card"><strong>{{.Data.TotalHosts}}</strong><span>hosts created</span></article>
+  </section>
+  <section class="card stats-trend"><h2>Daily streams</h2>{{if .Data.DailyStreams}}<table><thead><tr><th>UTC day</th><th>Streams</th></tr></thead><tbody>{{range .Data.DailyStreams}}<tr><td>{{.Day}}</td><td>{{.Value}}</td></tr>{{end}}</tbody></table>{{else}}<p>No completed streams have been recorded yet.</p>{{end}}</section>
+</main>
+{{end}}

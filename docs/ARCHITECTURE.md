@@ -740,6 +740,9 @@ peers     id, session_id, pass_id?,                          -- stable pass_id k
           connected_at, disconnected_at,
           used_turn                                           -- NO on_stage (D-11); written once at disconnect
 
+counters  key, value                                           -- anonymous lifetime aggregate, NO foreign keys
+counters_daily key, day, value                                 -- anonymous UTC trend bucket, NO foreign keys
+
 pass_locks pass_id, modality, applier_rank_floor, applier_pass_id?, created_at  -- locks survive restart (AD-22)
 
 reports   id, host_id, stream_id?, reporter_email?,            -- abuse report (D-42/EN-24); reporter admin-only,
@@ -1455,13 +1458,15 @@ backstage media or chat**. Enforced as tests:
 - **The chat relay path has no DB or file writer in scope** — backstage chat is
   relay-only, structurally unpersistable (EN-20).
 
-**Console wiring (M5 PR-7, read-only).** The console is a host-app page at `/admin`
+**Console wiring (M6, read-only).** The console is a host-app page at `/admin`
 plus three JSON endpoints (`GET /api/admin/stats|sessions|hosts`), all mounted behind
 `RequireAdmin` (RequireHost + live `is_admin`, EN-6). It surfaces, **metadata only**:
 cross-host live sessions (owning host + stream title + start time + the in-memory
-participant count from the signaling hub), the anonymous TURN-relay aggregate
-(`peers.used_turn`; rendered `n/a` until per-connection recording lands), and the hosts
-list (identity + status + role — never `google_sub`). The handlers read only
+participant count from the signaling hub), anonymous global counters (streams,
+guest-minutes, hosts, invitations, reports, peak participants), live active-host and
+current-process-uptime gauges, the anonymous TURN-relay aggregate (`peers.used_turn`;
+rendered `n/a` until client candidate reporting lands), and the hosts list (identity +
+status + role — never `google_sub`). The handlers read only
 host/session/stream rows — never `passes` (guest PII) and never a room's media/chat — so
 the privacy boundary above holds by construction; a `web` test seeds a foreign live
 session with a PII-bearing guest and asserts no admin surface leaks that guest's name,

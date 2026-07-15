@@ -280,11 +280,16 @@ room/session state is in-memory only and rebuilt on reconnect (AD-3); chat is
   sends (EN-16), without weakening Origin checks for host/guest connections.
   One-connection-per-identity eviction + reconnect rate-limit bound scanning and
   connection-storm abuse.
-- **Admin console metrics are live / transient only:** active sessions + peers,
-  TURN-relay %, force-end / suspend controls. Endpoints return **metadata only,
-  never media or chat** (D-14, §7.7 of DESIGN).
+- **Admin console metrics** combine live gauges (active sessions + peers, active
+  hosts, current-process uptime) with anonymous global counters; force-end / suspend
+  controls remain metadata-only. Endpoints return **metadata only, never media or
+  chat** (D-14, §7.7 of DESIGN).
 - **Long-term retention is anonymous aggregates only** (streams run,
-  guest-minutes, TURN-relay %, uptime) — never per-person-trackable (D-37).
+  guest-minutes, peak concurrency, hosts, invitations, reports) — never
+  per-person-trackable (D-37). The public `/stats` page renders only these global
+  no-FK aggregates. Uptime is a non-persisted current-process gauge in the admin
+  console; TURN relay percentage remains unavailable until clients report their
+  selected ICE candidate type.
   Prefer increment-only counters over retained event logs.
 - **No persisted audit log in v1** (D-26) — privileged actions are visible live
   (the host sees co-host moderation in the roster; admin actions show a notice).

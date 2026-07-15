@@ -66,10 +66,27 @@ func (s *Store) StartSession(ctx context.Context, streamID, hostID string) (*Ses
 // EndActiveSession closes the host's active session, stamping ended_at. It is idempotent: ending
 // when nothing is live is a no-op (no error), so a double "end" or an end after an idle reap is safe.
 func (s *Store) EndActiveSession(ctx context.Context, hostID string) error {
-	_, err := s.writer.ExecContext(ctx,
+	tx, err := s.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ending session: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
 		"UPDATE sessions SET status = ?, ended_at = ? WHERE host_id = ? AND status = ?",
 		SessionEnded, time.Now().Unix(), hostID, SessionActive)
 	if err != nil {
+		return fmt.Errorf("ending session: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ending session: %w", err)
+	}
+	if changed > 0 {
+		if err := addCounterTx(ctx, tx, CounterStreamsRun, 1, time.Now().UTC().Format(time.DateOnly)); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("ending session: %w", err)
 	}
 	return nil

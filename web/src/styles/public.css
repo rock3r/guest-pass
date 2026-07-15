@@ -1013,6 +1013,20 @@ body.landing { overflow-x: hidden; }
   .how-steps { flex-direction: column; }
   .step-arrow { display: none; }
 }
+
+/* ---- Public aggregate transparency ---- */
+.stats-page { width: min(100% - 40px, 960px); margin: 72px auto; }
+.stats-page h1 { margin: 6px 0 12px; font-size: clamp(38px, 6vw, 58px); line-height: 1; letter-spacing: -.035em; }
+.stats-page .lede { max-width: 660px; margin: 0; font-size: 18px; line-height: 1.55; color: var(--ink-2); }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 34px 0; }
+.stats-grid .card { min-height: 132px; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+.stats-grid strong { color: var(--accent-press); font-family: var(--font-display); font-size: clamp(34px, 4vw, 50px); line-height: 1; }
+.stats-grid span { color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.stats-trend { padding: 24px; }
+.stats-trend h2 { margin: 0 0 16px; }
+.stats-trend table { width: 100%; border-collapse: collapse; }
+.stats-trend th, .stats-trend td { padding: 10px 0; text-align: left; border-top: 1px solid var(--line-2); }
+@media (max-width: 720px) { .stats-page { width: min(100% - 28px, 960px); margin: 44px auto; } .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) {
   .features-grid { grid-template-columns: 1fr; }
   .hero-h1 { font-size: 34px; }

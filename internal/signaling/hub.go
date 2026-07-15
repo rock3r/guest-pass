@@ -22,6 +22,7 @@ type Hub struct {
 	// graceWindow is the slot-binding grace on a transient guest drop (D-40), handed to every room
 	// the hub spawns. <=0 lets newRoom fall back to defaultGraceWindow.
 	graceWindow time.Duration
+	metrics     Metrics
 }
 
 // HubOption configures a Hub at construction. Variadic so existing callers (and the many tests that
@@ -34,6 +35,9 @@ type HubOption func(*Hub)
 func WithGraceWindow(d time.Duration) HubOption {
 	return func(h *Hub) { h.graceWindow = d }
 }
+
+// WithMetrics installs the anonymous lifecycle aggregate recorder.
+func WithMetrics(metrics Metrics) HubOption { return func(h *Hub) { h.metrics = metrics } }
 
 // NewHub builds the room supervisor. lockStore persists suppression locks (AD-22); pass nil to
 // disable persistence (the pure transport/reducer tests). log may be nil (rooms default to slog).
@@ -57,7 +61,7 @@ func (h *Hub) Room(session string) *Room {
 	}
 	r := h.rooms[session]
 	if r == nil {
-		r = newRoom(session, h.locks, h.log, h.graceWindow)
+		r = newRoom(session, h.locks, h.log, h.graceWindow, h.metrics)
 		go r.run()
 		h.rooms[session] = r
 	}
