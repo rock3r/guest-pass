@@ -53,6 +53,12 @@ func TestGDPR_RoutesRequireAuth(t *testing.T) {
 func TestGDPR_ExportHostScopedNoTokens(t *testing.T) {
 	a := newAPIHarness(t)
 	host, cookie := a.host(t, "exporter")
+	if err := a.store.SetHostPreferences(context.Background(), store.HostPreferences{
+		HostID: host.ID, Timezone: "Europe/Rome", YouTubeChannel: "guestpasslive", DefaultChannelPlatform: "youtube",
+		MaxRes: 1080, MaxFPS: 60, MaxBitrateKbps: 4500, CustomTURNEnabled: true, CustomTURNURL: "turns:turn.example.test:5349", CustomTURNSecretEncrypted: "must-not-export",
+	}); err != nil {
+		t.Fatalf("SetHostPreferences: %v", err)
+	}
 	streamID := a.createStream(t, cookie, "My Show")
 	a.seedGuestPass(t, streamID, "Greta", "greta@example.com", "secret-pass-hash-AAAA")
 
@@ -74,6 +80,12 @@ func TestGDPR_ExportHostScopedNoTokens(t *testing.T) {
 	// No token hash (the crown jewels) leaks into the export — neither the JSON key nor any value.
 	if strings.Contains(body, "token_hash") || strings.Contains(body, "secret-pass-hash") {
 		t.Fatalf("export leaked a token hash:\n%s", body)
+	}
+	if strings.Contains(body, "custom_turn_secret_encrypted") || strings.Contains(body, "must-not-export") {
+		t.Fatalf("export leaked the TURN shared secret:\n%s", body)
+	}
+	if !strings.Contains(body, `"preferences"`) || !strings.Contains(body, "Europe/Rome") || !strings.Contains(body, "turns:turn.example.test:5349") {
+		t.Fatalf("export omitted non-secret host preferences:\n%s", body)
 	}
 	// Another host's data must not appear (host-scoped, EN-8).
 	if strings.Contains(body, "otto@example.com") || strings.Contains(body, "Other Show") {

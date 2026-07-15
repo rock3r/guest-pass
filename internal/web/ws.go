@@ -29,6 +29,12 @@ type ICEConfigurer interface {
 	ICEFrame(peerID string) (signaling.Frame, bool)
 }
 
+// hostICEConfigurer is the optional host-scoped extension used by BYO-TURN. Keeping it separate
+// preserves the original global provider seam for focused WebSocket tests and self-host defaults.
+type hostICEConfigurer interface {
+	ICEFrameFor(ctx context.Context, peerID, hostID string) (signaling.Frame, bool)
+}
+
 // wsHandler serves GET /ws, the one signaling WebSocket. Each connection is
 // authenticated by credential (session cookie → host, ?pass= → guest/cohost, ?src= →
 // OBS source) and the role/peer/session are derived from that credential against live DB
@@ -110,7 +116,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	// built per-peer so a TURN entry carries a fresh ephemeral credential (EN-4); skipped
 	// when no servers are configured (dev/loopback).
 	if h.ice != nil {
-		if iceFrame, ok := h.ice.ICEFrame(string(id.peer)); ok {
+		if iceFrame, ok := h.iceFrame(ctx, id); ok {
 			out <- iceFrame
 		}
 	}
@@ -192,7 +198,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		if err := wsjson.Read(ctx, c, &f); err != nil {
 			break
 		}
-		h.dispatch(room, id, f)
+		h.dispatch(ctx, room, id, f)
 	}
 
 	// Leave closes out (on the room goroutine), which ends the writer. Called here, not via
@@ -205,7 +211,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 // dispatch routes a client frame to the room, enforcing role authority (EN-7): only a
 // host (re)binds slots; only an OBS source reflects on-air program state; any peer may
 // relay signaling. The role comes from the credential, never the frame.
-func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Frame) {
+func (h *wsHandler) dispatch(ctx context.Context, room *signaling.Room, id wsIdentity, f signaling.Frame) {
 	switch f.T {
 	case "signal":
 		room.Signal(id.peer, f) // relayed verbatim; server never inspects (D-23)
@@ -283,7 +289,7 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 		// Delivered through the room so the send runs on the room goroutine and can't race
 		// this connection's out-channel close.
 		if h.ice != nil {
-			if iceFrame, ok := h.ice.ICEFrame(string(id.peer)); ok {
+			if iceFrame, ok := h.iceFrame(ctx, id); ok {
 				room.DeliverTo(id.peer, iceFrame)
 			}
 		}
@@ -340,6 +346,13 @@ func (h *wsHandler) dispatch(room *signaling.Room, id wsIdentity, f signaling.Fr
 			room.ScreenSelect(id.peer, signaling.PeerID(f.PeerID))
 		}
 	}
+}
+
+func (h *wsHandler) iceFrame(ctx context.Context, id wsIdentity) (signaling.Frame, bool) {
+	if scoped, ok := h.ice.(hostICEConfigurer); ok {
+		return scoped.ICEFrameFor(ctx, string(id.peer), id.session)
+	}
+	return h.ice.ICEFrame(string(id.peer))
 }
 
 // forceModality maps a force frame type to the lock modality it suppresses (D-13).

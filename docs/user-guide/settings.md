@@ -1,6 +1,6 @@
 # Settings & your data
 
-Your **Settings** page covers your account and the controls for your own data. Quality and channel settings that depend on a specific stream live with that stream, not here — more on that below.
+Your **Settings** page covers your account, the controls for your own data, and defaults used when you create a stream.
 
 ## Account
 
@@ -18,11 +18,14 @@ GuestPass keeps the bare minimum: your Google identity, the streams you create, 
 - **Delete account** — permanently removes your account and all its data. Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
 - **Guest data is auto-purged.** A guest's name and email are deleted **within 24 hours** of a stream ending — automatically, with no action from you.
 
-## What lives elsewhere
+## Stream defaults
 
-A couple of things are set in context rather than on this page:
+Set an IANA **timezone** once and GuestPass interprets new stream times in that timezone while storing the exact UTC instant. The editor and calendar use that same timezone, so a late-night show stays on the date you chose. You can still edit a stream later.
 
-- **Stream quality ceiling** — resolution, frame rate, and bitrate are set **per stream**, while you're live, from the [greenroom](the-greenroom). That's where the controls can act on the running session. See [Performance & bandwidth](performance-and-bandwidth).
-- **Channel live-check** — if you want the "is the channel actually live?" badge, that's linked **per stream** on the stream's page.
+Add your YouTube and Twitch channel names and choose one as the default live-check link for new streams. GuestPass never posts to either service. A specific stream can still use a different channel or none.
 
-Account-level defaults for scheduling, linked channels, video codec, and a bring-your-own TURN relay are on the roadmap; where you see them greyed out in Settings, that's what's coming.
+Choose a default program-quality ceiling (resolution, frame rate, and bitrate). It is copied to new streams; the host can still adjust an individual live stream in the [greenroom](the-greenroom). GuestPass keeps codec negotiation automatic — H.264 where available, with VP8 fallback — rather than exposing an unreliable forced-codec switch.
+
+## Bring your own TURN
+
+Most shows use direct peer-to-peer connections with STUN alone. If your guests regularly use restrictive networks, enable **Bring your own TURN**, provide your relay URL and its coturn shared secret, and save. Use a standard ICE URL such as `turn:turn.example.com:3478` or `turns:turn.example.com:5349?transport=tcp`. GuestPass stores the secret encrypted and sends browsers only short-lived relay credentials. Leave the secret blank when editing to keep the saved value.

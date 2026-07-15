@@ -52,6 +52,15 @@ func TestSecurityHeaders_TURNHostIncluded(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders_PermitsHostOwnedTURNRelays(t *testing.T) {
+	h := SecurityHeaders(SecurityOptions{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "turn: turns:") {
+		t.Errorf("CSP must allow a host-configured TURN relay; got %q", csp)
+	}
+}
+
 func TestSecurityHeaders_WSSchemeByOrigin(t *testing.T) {
 	csp := func(secure bool) string {
 		h := SecurityHeaders(SecurityOptions{Secure: secure})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))

@@ -94,6 +94,7 @@ func TestHostApp_DashboardCRUDRoundTrip(t *testing.T) {
 		var emptyText string
 		if err := chromedp.Run(ctx,
 			network.Enable(),
+			chromedp.EmulateViewport(1440, 900),
 			setHostCookie,
 			chromedp.Navigate(s.base+"/app"),
 			chromedp.WaitVisible(`[data-dialog-open="new-stream-dialog"]`, chromedp.ByQuery),
@@ -103,6 +104,24 @@ func TestHostApp_DashboardCRUDRoundTrip(t *testing.T) {
 		}
 		if !strings.Contains(emptyText, "Schedule your first stream") {
 			t.Fatalf("empty dashboard text = %q, want the empty-state copy", emptyText)
+		}
+
+		// The two dashboard columns use the same visual section rhythm: their first
+		// surfaces must begin on one horizontal line. Keep this as a browser-level
+		// assertion because the defect is caused by the interaction of default h2
+		// margins, a flex heading wrapper, and the grid layout.
+		var cardTopDelta float64
+		if err := chromedp.Run(ctx,
+			chromedp.Evaluate(`(() => {
+				const upcoming = document.querySelector('.stream-tile-card');
+				const recent = document.querySelector('.stream-recent-card');
+				return Math.abs(upcoming.getBoundingClientRect().top - recent.getBoundingClientRect().top);
+			})()`, &cardTopDelta),
+		); err != nil {
+			t.Fatalf("measure empty dashboard card alignment: %v", err)
+		}
+		if cardTopDelta > 1 {
+			t.Fatalf("dashboard first-card top delta = %.1fpx, want ≤ 1px", cardTopDelta)
 		}
 
 		// Create a stream via the New stream dialog (the v2 dashboard's create flow).

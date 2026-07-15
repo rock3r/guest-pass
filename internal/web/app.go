@@ -24,17 +24,21 @@ import (
 // carries it (auth/session.go), so no separate CSRF token is needed. Every route is
 // mounted behind RequireHost, which gates pending/suspended hosts (EN-6).
 type appServer struct {
-	store     *store.Store
-	rd        *renderer
-	hasher    *token.Hasher       // magic-link + slot token hashing (EN-5)
-	mailer    mail.Mailer         // invite delivery
-	baseURL   string              // absolute origin for building magic links + OBS source URLs
-	reveals   *revealStore        // one-time post-redirect reveal of a just-minted secret
-	hub       *signaling.Hub      // to tear down a live OBS source on slot-token rotation (D-22); may be nil
-	binds     *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
-	auth      *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
-	liveCheck LiveChecker         // D-29 live-verify (validate + persist a linked channel); may be nil
-	trust     auth.TrustPolicy    // D-36 progressive-trust invite/stream quotas; zero value = disabled
+	store          *store.Store
+	rd             *renderer
+	hasher         *token.Hasher       // magic-link + slot token hashing (EN-5)
+	mailer         mail.Mailer         // invite delivery
+	baseURL        string              // absolute origin for building magic links + OBS source URLs
+	reveals        *revealStore        // one-time post-redirect reveal of a just-minted secret
+	hub            *signaling.Hub      // to tear down a live OBS source on slot-token rotation (D-22); may be nil
+	binds          *bindingLocks       // serialize Go-live's pre-live binding replay with /ws joins + picker PUTs (D-20)
+	auth           *auth.Authenticator // clears the session cookie on account erasure (settings delete form, AC-5)
+	liveCheck      LiveChecker         // D-29 live-verify (validate + persist a linked channel); may be nil
+	trust          auth.TrustPolicy    // D-36 progressive-trust invite/stream quotas; zero value = disabled
+	settingsCipher interface {
+		Encrypt(string) (string, error)
+		Decrypt(string) (string, error)
+	}
 }
 
 // dashStream is one stream row as the dashboard renders it (display-ready).
@@ -90,6 +94,7 @@ type dashboardData struct {
 	PassCount       int               // all-time passes issued by this host
 	HoursStreamed   string            // formatted total scheduled hours, e.g. "46h" or "0h"
 	LiveStream      *liveStreamBanner // non-nil when the host has an active live session
+	Timezone        string            // IANA timezone used to interpret new-stream datetime-local values
 }
 
 // liveStreamBanner carries the minimal identity of a currently live stream for the dashboard
@@ -103,13 +108,16 @@ type liveStreamBanner struct {
 // (Email is read-only; Name is editable via the amend form) plus PRG flash flags from the GDPR
 // forms. Email is the host's OWN account email on their own page (not a cross-host leak, EN-8).
 type settingsData struct {
-	Name           string
-	Email          string
-	Saved          bool // ?saved=1 after a successful amend
-	NameError      bool // ?error=name — the amend name was empty
-	LiveError      bool // ?error=live — delete refused while a live session exists (D-M5-3)
-	LastAdminError bool // ?error=last-admin — delete refused: host is the only active admin (AC-9)
-	ConfirmError   bool // ?error=confirm — delete POST arrived without the confirmation field
+	Name             string
+	Email            string
+	Saved            bool // ?saved=1 after a successful amend
+	NameError        bool // ?error=name — the amend name was empty
+	LiveError        bool // ?error=live — delete refused while a live session exists (D-M5-3)
+	LastAdminError   bool // ?error=last-admin — delete refused: host is the only active admin (AC-9)
+	ConfirmError     bool // ?error=confirm — delete POST arrived without the confirmation field
+	Preferences      *store.HostPreferences
+	PreferencesSaved bool // ?preferences=saved after settings defaults are persisted
+	PreferencesError bool // ?preferences=invalid after server-side validation rejects a form
 }
 
 // settings renders the host's account settings page (AC-3..5): a READ-ONLY account card (the host's
@@ -123,19 +131,183 @@ func (s *appServer) settings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load settings", http.StatusInternalServerError)
+		return
+	}
 	q := r.URL.Query()
 	s.rd.render(w, r, "settings.html", pageData{
 		Title: "Settings", Nav: "settings", Host: hostNav(host),
 		Data: settingsData{
-			Name:           host.Name,
-			Email:          host.Email,
-			Saved:          q.Get("saved") == "1",
-			NameError:      q.Get("error") == "name",
-			LiveError:      q.Get("error") == "live",
-			LastAdminError: q.Get("error") == "last-admin",
-			ConfirmError:   q.Get("error") == "confirm",
+			Name:             host.Name,
+			Email:            host.Email,
+			Saved:            q.Get("saved") == "1",
+			NameError:        q.Get("error") == "name",
+			LiveError:        q.Get("error") == "live",
+			LastAdminError:   q.Get("error") == "last-admin",
+			ConfirmError:     q.Get("error") == "confirm",
+			Preferences:      prefs,
+			PreferencesSaved: q.Get("preferences") == "saved",
+			PreferencesError: q.Get("preferences") == "invalid",
 		},
 	})
+}
+
+// savePreferences persists the host's defaults that should be copied into future streams. It is a
+// normal server-rendered POST/redirect/GET form: no browser-only state is trusted for validation.
+func (s *appServer) savePreferences(w http.ResponseWriter, r *http.Request) {
+	host, ok := auth.HostFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	current, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load settings", http.StatusInternalServerError)
+		return
+	}
+	prefs, err := s.parseHostPreferences(r, current)
+	if err != nil {
+		http.Redirect(w, r, "/app/settings?preferences=invalid", http.StatusSeeOther)
+		return
+	}
+	if err := s.store.SetHostPreferences(r.Context(), *prefs); err != nil {
+		http.Error(w, "could not save settings", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/settings?preferences=saved", http.StatusSeeOther)
+}
+
+func (s *appServer) parseHostPreferences(r *http.Request, current *store.HostPreferences) (*store.HostPreferences, error) {
+	if err := r.ParseForm(); err != nil {
+		return nil, errors.New("invalid form")
+	}
+	prefs := *current
+	prefs.Timezone = strings.TrimSpace(r.PostFormValue("timezone"))
+	if prefs.Timezone == "" {
+		prefs.Timezone = "UTC"
+	}
+	if _, err := time.LoadLocation(prefs.Timezone); err != nil {
+		return nil, errors.New("invalid timezone")
+	}
+
+	var valid bool
+	if prefs.YouTubeChannel = strings.TrimSpace(r.PostFormValue("youtube_channel")); prefs.YouTubeChannel != "" {
+		if s.liveCheck == nil {
+			return nil, errors.New("channel validation unavailable")
+		}
+		prefs.YouTubeChannel, valid = s.liveCheck.Normalize("youtube", prefs.YouTubeChannel)
+		if !valid {
+			return nil, errors.New("invalid YouTube channel")
+		}
+	}
+	if prefs.TwitchChannel = strings.TrimSpace(r.PostFormValue("twitch_channel")); prefs.TwitchChannel != "" {
+		if s.liveCheck == nil {
+			return nil, errors.New("channel validation unavailable")
+		}
+		prefs.TwitchChannel, valid = s.liveCheck.Normalize("twitch", prefs.TwitchChannel)
+		if !valid {
+			return nil, errors.New("invalid Twitch channel")
+		}
+	}
+	prefs.DefaultChannelPlatform = strings.TrimSpace(r.PostFormValue("default_channel_platform"))
+	switch prefs.DefaultChannelPlatform {
+	case "":
+	case "youtube":
+		if prefs.YouTubeChannel == "" {
+			return nil, errors.New("youtube default without a channel")
+		}
+	case "twitch":
+		if prefs.TwitchChannel == "" {
+			return nil, errors.New("twitch default without a channel")
+		}
+	default:
+		return nil, errors.New("invalid default channel platform")
+	}
+
+	maxRes, err := parsePreferenceInt(r.PostFormValue("max_res"), minMaxRes, maxMaxRes)
+	if err != nil {
+		return nil, err
+	}
+	maxFPS, err := parsePreferenceInt(r.PostFormValue("max_fps"), minMaxFps, maxMaxFps)
+	if err != nil {
+		return nil, err
+	}
+	maxBitrate, err := parsePreferenceInt(r.PostFormValue("max_bitrate_kbps"), minMaxBitrateKbps, maxMaxBitrateKbps)
+	if err != nil {
+		return nil, err
+	}
+	prefs.MaxRes, prefs.MaxFPS, prefs.MaxBitrateKbps = int64(maxRes), int64(maxFPS), int64(maxBitrate)
+	prefs.CustomTURNEnabled = r.PostFormValue("custom_turn_enabled") == "1"
+	if !prefs.CustomTURNEnabled {
+		prefs.CustomTURNURL = ""
+		prefs.CustomTURNSecretEncrypted = ""
+		return &prefs, nil
+	}
+	prefs.CustomTURNURL = strings.TrimSpace(r.PostFormValue("custom_turn_url"))
+	if !validTURNURL(prefs.CustomTURNURL) {
+		return nil, errors.New("invalid TURN URL")
+	}
+	if secret := strings.TrimSpace(r.PostFormValue("custom_turn_secret")); secret != "" {
+		if s.settingsCipher == nil {
+			return nil, errors.New("TURN settings unavailable")
+		}
+		encrypted, err := s.settingsCipher.Encrypt(secret)
+		if err != nil {
+			return nil, errors.New("could not secure TURN secret")
+		}
+		prefs.CustomTURNSecretEncrypted = encrypted
+	}
+	if prefs.CustomTURNSecretEncrypted == "" {
+		return nil, errors.New("TURN secret required")
+	}
+	return &prefs, nil
+}
+
+func parsePreferenceInt(raw string, min, max int) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < min || n > max {
+		return 0, errors.New("invalid quality default")
+	}
+	return n, nil
+}
+
+func validTURNURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	var endpoint string
+	switch {
+	case strings.HasPrefix(raw, "turn:"):
+		endpoint = raw[len("turn:"):]
+	case strings.HasPrefix(raw, "turns:"):
+		endpoint = raw[len("turns:"):]
+	default:
+		return false
+	}
+	endpoint = strings.TrimPrefix(endpoint, "//")
+	if i := strings.IndexByte(endpoint, '?'); i >= 0 {
+		endpoint = endpoint[:i]
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	// ICE URLs conventionally omit //, unlike HTTP URLs. Reject credentials, paths, and a
+	// missing hostname while accepting both standard spellings: turn:host and turn://host.
+	if endpoint == "" || strings.ContainsAny(endpoint, "@/#\t\r\n ") {
+		return false
+	}
+	if strings.HasPrefix(endpoint, "[") {
+		end := strings.IndexByte(endpoint, ']')
+		if end <= 1 {
+			return false
+		}
+		return endpoint[end+1:] == "" || validTURNPort(strings.TrimPrefix(endpoint[end+1:], ":"))
+	}
+	host, port, hasPort := strings.Cut(endpoint, ":")
+	return host != "" && (!hasPort || validTURNPort(port))
+}
+
+func validTURNPort(raw string) bool {
+	port, err := strconv.Atoi(raw)
+	return err == nil && port > 0 && port <= 65535
 }
 
 // streamFormData backs the edit form; Title/ScheduledAt/DurationMin are pre-formatted for
@@ -145,6 +317,7 @@ type streamFormData struct {
 	Title       string
 	ScheduledAt string
 	DurationMin string
+	Timezone    string
 	Error       string
 }
 
@@ -156,6 +329,12 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load stream defaults", http.StatusInternalServerError)
+		return
+	}
+	loc := timezoneLocation(prefs.Timezone)
 	streams, err := s.store.ListStreamsByHost(r.Context(), host.ID)
 	if err != nil {
 		http.Error(w, "could not load streams", http.StatusInternalServerError)
@@ -170,14 +349,14 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 			ID:          st.ID,
 			Title:       st.Title,
 			Status:      st.Status,
-			ScheduledAt: formatSchedule(st.ScheduledAt),
+			ScheduledAt: formatScheduleIn(st.ScheduledAt, loc),
 			HasSchedule: st.ScheduledAt != nil,
 		}
 		if st.ScheduledAt != nil {
-			t := time.Unix(*st.ScheduledAt, 0).UTC()
+			t := time.Unix(*st.ScheduledAt, 0).In(loc)
 			ds.MonthShort = t.Format("Jan")
 			ds.DayNum = t.Format("2")
-			ds.TimeShort = t.Format("15:04 UTC")
+			ds.TimeShort = t.Format("15:04 MST")
 		}
 		rows = append(rows, ds)
 		switch st.Status {
@@ -220,6 +399,7 @@ func (s *appServer) dashboard(w http.ResponseWriter, r *http.Request) {
 			PassCount:       passCount,
 			HoursStreamed:   hoursStreamed,
 			LiveStream:      liveStream,
+			Timezone:        prefs.Timezone,
 		},
 	})
 }
@@ -232,7 +412,12 @@ func (s *appServer) createStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	title, sched, dur, err := parseStreamForm(r)
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load settings", http.StatusInternalServerError)
+		return
+	}
+	title, sched, dur, err := parseStreamForm(r, prefs.Timezone)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -243,9 +428,15 @@ func (s *appServer) createStream(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/app?error=stream-quota", http.StatusSeeOther)
 		return
 	}
-	if _, err := s.store.CreateStream(r.Context(), store.CreateStreamParams{
+	params := store.CreateStreamParams{
 		HostID: host.ID, Title: title, ScheduledAt: sched, DurationMin: dur,
-	}); err != nil {
+		MaxRes: int64Pointer(prefs.MaxRes), MaxFPS: int64Pointer(prefs.MaxFPS), MaxBitrateKbps: int64Pointer(prefs.MaxBitrateKbps),
+	}
+	if channel := defaultChannelForPreferences(prefs); channel != "" {
+		params.TwitchYTPlatform = stringPointer(prefs.DefaultChannelPlatform)
+		params.TwitchYTChannel = stringPointer(channel)
+	}
+	if _, err := s.store.CreateStream(r.Context(), params); err != nil {
 		http.Error(w, "could not create stream", http.StatusInternalServerError)
 		return
 	}
@@ -258,24 +449,35 @@ func (s *appServer) editStreamForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load settings", http.StatusInternalServerError)
+		return
+	}
 	s.rd.render(w, r, "streamedit.html", pageData{
 		Title: "Edit stream", Nav: "dashboard", Host: hostNav(host),
 		Data: streamFormData{
 			ID:          st.ID,
 			Title:       st.Title,
-			ScheduledAt: formatDateTimeLocal(st.ScheduledAt),
+			ScheduledAt: formatDateTimeLocalIn(st.ScheduledAt, prefs.Timezone),
 			DurationMin: formatDurationField(st.DurationMin),
+			Timezone:    prefs.Timezone,
 		},
 	})
 }
 
 // updateStream applies the edit form to an owned stream, then redirects to the dashboard.
 func (s *appServer) updateStream(w http.ResponseWriter, r *http.Request) {
-	_, st, ok := s.ownedStream(w, r)
+	host, st, ok := s.ownedStream(w, r)
 	if !ok {
 		return
 	}
-	title, sched, dur, err := parseStreamForm(r)
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load settings", http.StatusInternalServerError)
+		return
+	}
+	title, sched, dur, err := parseStreamForm(r, prefs.Timezone)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -338,7 +540,7 @@ func (s *appServer) ownedStream(w http.ResponseWriter, r *http.Request) (*store.
 // parseStreamForm reads and validates the shared create/edit stream form. Title is
 // required (after trimming) and length-capped; schedule and duration are optional. An
 // empty field clears its column (the form is the full editable state).
-func parseStreamForm(r *http.Request) (title string, scheduledAt, durationMin *int64, err error) {
+func parseStreamForm(r *http.Request, timezone string) (title string, scheduledAt, durationMin *int64, err error) {
 	if perr := r.ParseForm(); perr != nil {
 		return "", nil, nil, errors.New("invalid form")
 	}
@@ -350,7 +552,7 @@ func parseStreamForm(r *http.Request) (title string, scheduledAt, durationMin *i
 		return "", nil, nil, errors.New("title is too long")
 	}
 	if v := strings.TrimSpace(r.PostFormValue("scheduled_at")); v != "" {
-		ts, perr := parseDateTimeLocal(v)
+		ts, perr := parseDateTimeLocalIn(v, timezone)
 		if perr != nil {
 			return "", nil, nil, errors.New("invalid scheduled time")
 		}
@@ -372,14 +574,18 @@ const (
 )
 
 // datetimeLocalLayouts are the formats an <input type="datetime-local"> submits — without
-// seconds, and (some browsers) with. The value carries no timezone, so we interpret it as
-// UTC and store absolute UTC seconds (EN-25); the edit form formats back in UTC too, so
-// the value round-trips. Host-local rendering is deferred polish (DEF-2).
+// seconds, and (some browsers) with. The value carries no timezone, so handlers interpret it
+// in the host's saved IANA timezone and store an absolute UTC instant (EN-25). The edit form
+// formats that instant back in the same timezone, so the value round-trips.
 var datetimeLocalLayouts = []string{"2006-01-02T15:04", "2006-01-02T15:04:05"}
 
-func parseDateTimeLocal(v string) (int64, error) {
+func parseDateTimeLocalIn(v, timezone string) (int64, error) {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return 0, errors.New("unrecognized timezone")
+	}
 	for _, layout := range datetimeLocalLayouts {
-		if t, err := time.Parse(layout, v); err == nil {
+		if t, err := time.ParseInLocation(layout, v, loc); err == nil {
 			return t.Unix(), nil
 		}
 	}
@@ -388,18 +594,49 @@ func parseDateTimeLocal(v string) (int64, error) {
 
 // formatSchedule renders a stored schedule for display on the dashboard (absolute UTC).
 func formatSchedule(ts *int64) string {
-	if ts == nil {
-		return ""
-	}
-	return time.Unix(*ts, 0).UTC().Format("Mon Jan 2, 2006 15:04 UTC")
+	return formatScheduleIn(ts, time.UTC)
 }
 
-// formatDateTimeLocal renders a stored schedule for a datetime-local input value (UTC).
-func formatDateTimeLocal(ts *int64) string {
+func formatScheduleIn(ts *int64, loc *time.Location) string {
 	if ts == nil {
 		return ""
 	}
-	return time.Unix(*ts, 0).UTC().Format("2006-01-02T15:04")
+	return time.Unix(*ts, 0).In(loc).Format("Mon Jan 2, 2006 15:04 MST")
+}
+
+func timezoneLocation(timezone string) *time.Location {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// formatDateTimeLocalIn renders a stored schedule for a datetime-local input in the given timezone.
+func formatDateTimeLocalIn(ts *int64, timezone string) string {
+	if ts == nil {
+		return ""
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	return time.Unix(*ts, 0).In(loc).Format("2006-01-02T15:04")
+}
+
+func int64Pointer(v int64) *int64 { return &v }
+
+func stringPointer(v string) *string { return &v }
+
+func defaultChannelForPreferences(prefs *store.HostPreferences) string {
+	switch prefs.DefaultChannelPlatform {
+	case "youtube":
+		return prefs.YouTubeChannel
+	case "twitch":
+		return prefs.TwitchChannel
+	default:
+		return ""
+	}
 }
 
 // formatDurationField renders a stored duration for a number input value.

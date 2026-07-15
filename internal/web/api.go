@@ -93,9 +93,21 @@ func (a *apiServer) createStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("stream limit reached (%d) for your account", limit))
 		return
 	}
-	s, err := a.store.CreateStream(r.Context(), store.CreateStreamParams{
+	prefs, err := a.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load stream defaults")
+		return
+	}
+	params := store.CreateStreamParams{
 		HostID: host.ID, Title: req.Title, ScheduledAt: req.ScheduledAt, DurationMin: req.DurationMin,
-	})
+		MaxRes: int64Pointer(prefs.MaxRes), MaxFPS: int64Pointer(prefs.MaxFPS),
+		MaxBitrateKbps: int64Pointer(prefs.MaxBitrateKbps),
+	}
+	if channel := defaultChannelForPreferences(prefs); channel != "" {
+		params.TwitchYTChannel = stringPointer(channel)
+		params.TwitchYTPlatform = stringPointer(prefs.DefaultChannelPlatform)
+	}
+	s, err := a.store.CreateStream(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create stream")
 		return

@@ -5,7 +5,7 @@
 {{if .Data.Error}}<p class="form-error" role="alert">{{.Data.Error}}</p>{{end}}
 <form method="post" action="/app/streams/{{.Data.ID}}" class="stream-form">
 <label>Title<input type="text" name="title" value="{{.Data.Title}}" required maxlength="200" autocomplete="off"></label>
-<label>Scheduled start<input type="datetime-local" name="scheduled_at" value="{{.Data.ScheduledAt}}"></label>
+<label>Scheduled start ({{.Data.Timezone}})<input type="datetime-local" name="scheduled_at" value="{{.Data.ScheduledAt}}"></label>
 <label>Duration (minutes)<input type="number" name="duration_min" min="0" max="1440" step="1" value="{{.Data.DurationMin}}"></label>
 <button type="submit" class="btn btn-primary">Save changes</button>
 </form>

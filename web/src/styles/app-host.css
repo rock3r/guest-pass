@@ -361,7 +361,17 @@ body.app {
   grid-template-columns: 1.5fr 1fr;
   gap: 24px;
 }
-.dash-section-title { font-size: 18px; }
+.dash-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+.dash-section-title {
+  font-size: 18px;
+  margin: 0;
+}
 
 /* ---- Stream tile card (date tile + title + actions) ---- */
 .stream-tile-card {
@@ -409,8 +419,6 @@ body.app {
 .stream-tile-when { font-size: 13px; }
 
 /* ---- Dashboard section heads + recent list ---- */
-.dash-upnext-head { margin-bottom: 14px; }
-.dash-recent-head { margin-bottom: 14px; }
 .dash-viewall { font-size: 13.5px; font-weight: 600; text-decoration: none; }
 .dash-viewall:hover { color: var(--ink); }
 .stream-recent-card { border-radius: var(--r-md); overflow: hidden; padding: 0; }
@@ -468,9 +476,17 @@ body.app {
 .settings-account-name { font-weight: 700; font-size: 16px; }
 .settings-account-email { font-size: 13.5px; align-items: center; }
 .settings-field-narrow { max-width: 340px; }
+.settings-preferences { display: flex; flex-direction: column; gap: 20px; }
+.settings-preferences-save { align-self: flex-start; }
+.settings-video-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
 .settings-turn-row { align-items: center; }
 .settings-turn-title { font-weight: 700; font-size: 14px; }
 .settings-turn-sub { font-size: 13px; }
+.settings-turn-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .settings-data-actions { margin-bottom: 16px; }
 
 /* Status pill (stream-status / slot states / invite status). */
@@ -1326,6 +1342,8 @@ body.app {
   }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-grid { grid-template-columns: 1fr; }
+  .settings-video-grid { grid-template-columns: 1fr; }
+  .settings-turn-fields { grid-template-columns: 1fr; }
 }
 
 /* ============ Dark refinement: the host nav active item ============ */

@@ -76,6 +76,34 @@ type wsHarnessOpts struct {
 	limiter *RateLimiter
 }
 
+type contextRecordingICE struct {
+	ctx context.Context
+}
+
+func (p *contextRecordingICE) ICEFrame(string) (signaling.Frame, bool) {
+	return signaling.Frame{}, false
+}
+
+func (p *contextRecordingICE) ICEFrameFor(ctx context.Context, _, _ string) (signaling.Frame, bool) {
+	p.ctx = ctx
+	return signaling.Frame{}, false
+}
+
+func TestWSDispatch_ICERefreshUsesConnectionContext(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "connection")
+	ice := &contextRecordingICE{}
+	h := &wsHandler{ice: ice}
+	hub := signaling.NewHub(nil, nil)
+	room := hub.Room("host-1")
+	t.Cleanup(room.Close)
+
+	h.dispatch(ctx, room, wsIdentity{peer: "peer-1", session: "host-1"}, signaling.Frame{T: "ice-refresh"})
+	if ice.ctx == nil || ice.ctx.Value(contextKey{}) != "connection" {
+		t.Fatalf("ICE refresh context = %v, want the connection context", ice.ctx)
+	}
+}
+
 func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ws.db")
