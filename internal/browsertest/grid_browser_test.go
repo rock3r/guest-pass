@@ -180,3 +180,48 @@ func TestGreenroom_MultiGuestGrid(t *testing.T) {
 		t.Fatalf("People rail = %d people / %d selected controls / %d connection state, want 3 / 1 / 1", peopleCount, selectedControls, healthCount)
 	}
 }
+
+// A host is also a first-class backstage participant: the control room must provide an explicit
+// local setup action (rather than silently opening devices), a self preview/mic control once joined,
+// the in-memory backstage chat, and a per-participant audio-activity indicator. This is intentionally
+// a browser test because the contract spans getUserMedia, the live room UI, and Preact rendering.
+func TestGreenroom_HostSetupChatAndAudioActivity(t *testing.T) {
+	s := seedGrid(t, 1)
+	publishGuestOwnBrowser(t, s.base, s.rawTokens[0], "guest")
+
+	hostAlloc, cancelHA := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelHA()
+	hostCtx, cancelH := chromedp.NewContext(hostAlloc)
+	defer cancelH()
+	hostCtx, cancelHT := context.WithTimeout(hostCtx, 150*time.Second)
+	defer cancelHT()
+
+	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+	})
+	if err := chromedp.Run(hostCtx,
+		network.Enable(),
+		setHostCookie,
+		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(`.gr-host-setup`, chromedp.ByQuery),
+		chromedp.Click(`.gr-host-setup`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gr-host-preview`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.gr-host-preview').videoWidth > 0`, nil, chromedp.WithPollingTimeout(30*time.Second)),
+		chromedp.WaitVisible(`.gr-host-mic`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gr-host-audio[role="meter"]`, chromedp.ByQuery),
+		chromedp.Click(`.gr-host-mic`, chromedp.ByQuery),
+		chromedp.Click(`.gr-host-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gr-host-preview`, "audio", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Click(`.gr-host-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gr-host-preview`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Click(`.gr-host-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gr-host-preview`, "audio", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.WaitVisible(`.gr-chat-form`, chromedp.ByQuery),
+		chromedp.SendKeys(`#gr-chat-draft`, "host-chat-roundtrip-8Nf2", chromedp.ByQuery),
+		chromedp.Click(`.gr-chat-form button`, chromedp.ByQuery),
+		chromedp.Poll(`[...document.querySelectorAll('.gr-chat-messages li')].some((m) => m.textContent.includes('host-chat-roundtrip-8Nf2'))`, nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.WaitVisible(`.gr-audio-activity[data-peer]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("host control-room setup affordances: %v", err)
+	}
+}

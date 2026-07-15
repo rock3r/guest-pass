@@ -192,6 +192,10 @@ function DeviceCheck() {
   const requestingRef = useRef(false);
   /** @type {{current: import("../rtc/session.js").ReconnectingSession|null}} */
   const sessionRef = useRef(null);
+  // Stop function for the local microphone meter relay. The meter remains entirely in memory: it
+  // samples the local audio track, sends a coarse 0..1 level to the live room, and the server batches
+  // it for participants. No audio, samples, or transcript leaves the browser.
+  const levelStopRef = useRef(() => {});
   /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
   const pubRef = useRef(null);
   /** @type {{current: import("../rtc/mesh.js").MeshManager|null}} */
@@ -574,6 +578,57 @@ function DeviceCheck() {
     return targets;
   }
 
+  function startLevelReporter(room) {
+    levelStopRef.current();
+    const stream = streamRef.current;
+    const track = stream && stream.getAudioTracks()[0];
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!track || !AudioContextClass) return;
+    let context;
+    let frame = 0;
+    let active = true;
+    let lastSentAt = 0;
+    let lastLevel = -1;
+    try {
+      context = new AudioContextClass();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      const samples = new Uint8Array(analyser.fftSize);
+      context.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+      context.resume().catch(() => {});
+      const sample = () => {
+        if (!active) return;
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const value of samples) {
+          const normalized = (value - 128) / 128;
+          total += normalized * normalized;
+        }
+        const level = Math.min(1, Math.sqrt(total / samples.length) * 6);
+        const now = performance.now();
+        if (pubStateRef.current === "live" && (Math.abs(level - lastLevel) >= 0.03 || now-lastSentAt >= 150)) {
+          try {
+            room.send({ t: "state", level });
+            lastLevel = level;
+            lastSentAt = now;
+          } catch {
+            // The socket may close between the live check and send; the next reconnect starts fresh.
+          }
+        }
+        if (active) frame = requestAnimationFrame(sample);
+      };
+      sample();
+    } catch {
+      // Unsupported analyser implementations leave the meter quiet without affecting publishing.
+    }
+    levelStopRef.current = () => {
+      active = false;
+      if (frame) cancelAnimationFrame(frame);
+      if (context) context.close().catch(() => {});
+      levelStopRef.current = () => {};
+    };
+  }
+
   // startPublishing keeps the already-running preview stream and publishes it to the greenroom over
   // the guest's pass WS, so consumers (host monitor, OBS source) render the guest over P2P. The
   // server only relays the opaque SDP/ICE (D-23). It runs inside a ReconnectingSession (AC-13): a
@@ -615,6 +670,7 @@ function DeviceCheck() {
           (id) => watch.untrack("pub:" + id),
         );
         pubRef.current = publisher;
+        startLevelReporter(room);
         // The backstage mesh (D-10): one bidirectional P2P link to each other guest/co-host for the
         // thumbnails. The Publisher serves the one-way consumers (host monitor, OBS sources).
         const mesh = new MeshManager(
@@ -866,6 +922,7 @@ function DeviceCheck() {
         // reflected on-air + "we're live" + own-degradation state rather than assert stale values
         // (D-24). A reconnect re-arms all of it from the fresh roster + replay.
         if (degRef.current) degRef.current.stop();
+        levelStopRef.current();
         if (watchRef.current) watchRef.current.stop();
         if (pubRef.current) pubRef.current.close();
         if (meshRef.current) meshRef.current.close();
