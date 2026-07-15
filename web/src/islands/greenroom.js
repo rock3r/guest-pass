@@ -24,7 +24,116 @@ const isGuestRole = (role) => role === "guest" || role === "cohost";
 function onAirLabel(onAir) {
   if (onAir === "on-air") return "On air";
   if (onAir === "not-on-air") return "Not on air";
-  return "Status unavailable";
+  return "Awaiting OBS state";
+}
+
+/** A local-only meter gives the host a soundcheck signal without retaining or transmitting samples. */
+function HostAudioMeter({ stream, enabled }) {
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    const track = stream && stream.getAudioTracks()[0];
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!track || !enabled || !AudioContextClass) {
+      setLevel(0);
+      return undefined;
+    }
+    let context;
+    let frame = 0;
+    try {
+      context = new AudioContextClass();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      const samples = new Uint8Array(analyser.fftSize);
+      context.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+      context.resume().catch(() => {});
+      const sample = () => {
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const value of samples) {
+          const normalized = (value - 128) / 128;
+          total += normalized * normalized;
+        }
+        setLevel(Math.max(0, Math.min(5, Math.ceil(Math.sqrt(total / samples.length) * 18))));
+        frame = requestAnimationFrame(sample);
+      };
+      sample();
+    } catch {
+      setLevel(0);
+    }
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (context) context.close().catch(() => {});
+    };
+  }, [stream, enabled]);
+  return (
+    <span class="gr-audio-activity gr-host-audio" data-level={level} role="meter" aria-label="Your microphone activity" aria-valuemin="0" aria-valuemax="5" aria-valuenow={level}>
+      {[1, 2, 3, 4, 5].map((bar) => <i key={bar} data-active={bar <= level ? "1" : "0"} />)}
+    </span>
+  );
+}
+
+/** The host starts devices explicitly, then sees a muted local preview to prevent echo. */
+function HostSetup({ stream, capture, pending, error, onStart, onToggle }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream || null;
+  }, [stream]);
+  return (
+    <section class="gr-host-setup-card" aria-label="Your setup">
+      <div>
+        <p class="gr-rail-label">Your setup</p>
+        <h2>Camera and microphone</h2>
+        <p class="gr-host-setup-copy">
+          Your preview is muted locally to prevent feedback. Use the microphone meter to confirm your setup.
+        </p>
+      </div>
+      {stream ? (
+        <div class="gr-host-preview-wrap">
+          <video ref={videoRef} class="gr-host-preview" autoplay playsinline muted />
+          <div class="gr-host-device-controls">
+            <button type="button" class="gr-host-mic" aria-pressed={capture.mic} onClick={() => onToggle("mic")}>
+              {capture.mic ? "Mute microphone" : "Unmute microphone"}
+            </button>
+            <button type="button" class="gr-host-camera" aria-pressed={capture.cam} onClick={() => onToggle("cam")}>
+              {capture.cam ? "Turn off camera" : "Turn on camera"}
+            </button>
+            <span class="gr-host-meter-label">Mic level <HostAudioMeter stream={stream} enabled={capture.mic} /></span>
+          </div>
+        </div>
+      ) : (
+        <button type="button" class="gr-host-setup" disabled={pending} onClick={onStart}>{pending ? "Opening devices…" : "Set up camera and microphone"}</button>
+      )}
+      {error ? <p class="gr-host-setup-error" role="alert">{error}</p> : null}
+    </section>
+  );
+}
+
+/** Backstage chat remains in memory in the browser and is rendered only after server relay. */
+function ChatRail({ messages, peers, selfID, live, onSend }) {
+  const [draft, setDraft] = useState("");
+  const nameFor = (id) => (id === selfID ? "You" : (peers.find((p) => p.id === id) || {}).name || id || "Guest");
+  const submit = (e) => {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text || !live) return;
+    onSend(text);
+    setDraft("");
+  };
+  return (
+    <section class="gr-chat-rail" aria-label="Backstage chat">
+      <p class="gr-rail-label">Backstage</p>
+      <h2>Chat</h2>
+      <p class="gr-chat-privacy">Relayed live, never recorded.</p>
+      <ol class="gr-chat-messages" aria-live="polite">
+        {messages.length ? messages.map((m, i) => <li key={`${m.from}-${i}`}><strong>{nameFor(m.from)}</strong><span>{m.text}</span></li>) : <li class="gr-chat-empty">Say hello to everyone backstage.</li>}
+      </ol>
+      <form class="gr-chat-form" onSubmit={submit}>
+        <label class="sr-only" for="gr-chat-draft">Message</label>
+        <input id="gr-chat-draft" value={draft} onInput={(e) => setDraft(e.currentTarget.value)} maxLength="500" placeholder="Message backstage" disabled={!live} />
+        <button type="submit" disabled={!live || !draft.trim()}>Send</button>
+      </form>
+    </section>
+  );
 }
 
 /**
@@ -116,7 +225,7 @@ function ScreenTile({ tile, live, onSelect }) {
  * @param {{tiles:Array<{id:string,entry:any,stream:MediaStream|null}>, selectedEntry:any, selectedPeerID:string, onSelect:(id:string)=>void, viewerRole:string, live:boolean, onForce:(id:string,m:string)=>void, onRelease:(id:string,m:string)=>void, onRole:(id:string,role:string)=>void, onDismissHand:(id:string)=>void, onBindSlot:(id:string,slot:string)=>void, onSetName:(id:string,name:string)=>void, onSetCanScreen:(id:string,can:boolean)=>void, quality:import("preact").VNode}} props
  * @returns {import("preact").VNode}
  */
-function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen, quality }) {
+function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen, chat, quality }) {
   return (
     <aside class="gr-people-rail" aria-label="People controls">
       <div class="gr-people-head">
@@ -161,6 +270,7 @@ function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole
           onSetCanScreen={(can) => onSetCanScreen(selectedEntry.id, can)}
         />
       ) : null}
+      {chat}
       {quality}
     </aside>
   );
@@ -221,7 +331,7 @@ function QualityControls({ state, anyDegraded, recoverGroupRef, infoOpen, onInfo
               ? `● Live (verified on ${verifiedLive.platform})`
               : verifiedLive.status === "offline"
                 ? `Not live on ${verifiedLive.platform}`
-                : `${verifiedLive.platform}: live status unavailable`}
+              : `Couldn’t verify ${verifiedLive.platform} live status`}
             {verifiedLive.watch_url ? (
               <a class="gr-verified-watch" href={verifiedLive.watch_url} target="_blank" rel="noopener noreferrer">
                 {" "}watch ↗
@@ -281,6 +391,15 @@ function Greenroom() {
   // session is live, or null when no channel is linked. Lets the host confirm "live (verified on
   // Twitch)" even when OBS gives status-unavailable.
   const [verifiedLive, setVerifiedLive] = useState(null);
+  // Host device capture is opt-in: opening the control room alone never opens a camera or microphone.
+  const [hostStream, setHostStream] = useState(/** @type {MediaStream|null} */ (null));
+  const [hostCapture, setHostCapture] = useState({ mic: true, cam: true });
+  const [hostSetupPending, setHostSetupPending] = useState(false);
+  const [hostSetupError, setHostSetupError] = useState("");
+  const [messages, setMessages] = useState(/** @type {Array<{from:string,text:string}>} */ ([]));
+  const [peers, setPeers] = useState(/** @type {any[]} */ ([]));
+  const [selfID, setSelfID] = useState("");
+  const [levels, setLevels] = useState(/** @type {Record<string,number>} */ ({}));
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -299,6 +418,12 @@ function Greenroom() {
   const screenLiveRef = useRef("");
   /** @type {{current: Map<string, any>}} */
   const entriesRef = useRef(new Map());
+  /** @type {{current: MediaStream|null}} */
+  const hostStreamRef = useRef(null);
+  const hostCaptureRef = useRef({ mic: true, cam: true });
+  // getUserMedia can resolve after the host has navigated away or retried setup. Track both lifecycle
+  // and request order so a late stream is stopped instead of reviving the camera behind a dead island.
+  const hostSetupRef = useRef({ mounted: true, request: 0, pending: false });
   // Bind ordering: the host can change pickers quickly, so multiple PUTs are in flight and (pre-live,
   // with no roster to reconcile) an OLDER response landing last would overwrite a newer selection. A
   // global monotonic counter stamps each bind; we track the latest stamp per PASS and per SLOT, and
@@ -448,7 +573,11 @@ function Greenroom() {
       }
       // This client's own rank drives which controls show (it can change live via demotion).
       const me = (f.peers || []).find((p) => p.self || p.id === f.self);
-      if (me) setViewerRole(me.role);
+      if (me) {
+        setViewerRole(me.role);
+        setSelfID(me.id || f.self || "");
+      }
+      setPeers(f.peers || []);
       // Release a local (pre-live DB-only) override once the authoritative roster makes it stale:
       //  - the pass left the room, or
       //  - the pass is now itself live-bound (its own boundSlot is set — e.g. Go-live replay), or
@@ -478,6 +607,10 @@ function Greenroom() {
       syncTiles();
       setState((s) => (s === "connecting" ? "live" : s));
     });
+    // Audio levels are deliberately a separate throttled room frame rather than roster churn. Keep
+    // the latest full map so a quiet participant reads as quiet, not unavailable.
+    room.on("levels", (f) => setLevels(f.levels || {}));
+    room.on("chat", (f) => setMessages((prev) => [...prev, { from: f.from, text: f.text }]));
     room.on("session-live", () => {
       // The host's session just went live: the roster now carries the authoritative live bindings,
       // so drop ALL optimistic pre-live overrides. A pass unassigned/displaced from another client
@@ -488,10 +621,17 @@ function Greenroom() {
     });
     room.on("peer-joined", (f) => {
       upsert(f.peer);
+      if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
       syncTiles();
     });
     room.on("peer-left", (f) => {
       dropPeer(f.peerId);
+      setPeers((prev) => prev.filter((p) => p.id !== f.peerId));
+      setLevels((prev) => {
+        const next = { ...prev };
+        delete next[f.peerId];
+        return next;
+      });
       syncTiles();
     });
     room.on("signal", (f) => {
@@ -532,6 +672,7 @@ function Greenroom() {
       setTiles([]);
       setScreenTiles([]);
       setScreenLive("");
+      setLevels({});
     }
 
     // A transient drop AUTO-RECONNECTS (D-40/AC-4): show the reconnecting banner, not an error, and
@@ -550,10 +691,80 @@ function Greenroom() {
       // displaced (a second greenroom tab took over, EN-16) stops THIS tab so the two don't
       // reconnect-war; unreachable (RF-22 cap) shows the error screen; any other terminal end
       // (session-ended) shows the "ended" screen.
-      onTerminal: (reason) => setState(reason === "displaced" ? "displaced" : reason === "unreachable" ? "error" : "ended"),
+      onTerminal: (reason) => {
+        releaseHostCapture();
+        setState(reason === "displaced" ? "displaced" : reason === "unreachable" ? "error" : "ended");
+      },
     });
     return () => session.close();
   }, []);
+
+  // Release the opt-in local stream when the host leaves the control room. This is independent of
+  // the signaling-session teardown: a reconnect must not briefly hold an extra camera capture.
+  useEffect(() => () => {
+    hostSetupRef.current.mounted = false;
+    hostSetupRef.current.request += 1;
+    hostSetupRef.current.pending = false;
+    if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  async function startHostSetup() {
+    if (state === "ended" || state === "displaced" || state === "error") return;
+    if (hostSetupRef.current.pending) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setHostSetupError("This browser cannot open a camera or microphone.");
+      return;
+    }
+    setHostSetupError("");
+    hostSetupRef.current.pending = true;
+    setHostSetupPending(true);
+    const request = ++hostSetupRef.current.request;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      if (!hostSetupRef.current.mounted || request !== hostSetupRef.current.request) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
+      hostStreamRef.current = stream;
+      setHostStream(stream);
+      hostCaptureRef.current = { mic: true, cam: true };
+      setHostCapture(hostCaptureRef.current);
+    } catch {
+      if (hostSetupRef.current.mounted && request === hostSetupRef.current.request) {
+        setHostSetupError("GuestPass could not access your camera and microphone. Check browser permissions, then try again.");
+      }
+    } finally {
+      if (hostSetupRef.current.mounted && request === hostSetupRef.current.request) {
+        hostSetupRef.current.pending = false;
+        setHostSetupPending(false);
+      }
+    }
+  }
+
+  // Terminal room states keep the page mounted for their explanation, but must never keep the
+  // camera/microphone open behind that screen (or contend with the tab that displaced this one).
+  function releaseHostCapture() {
+    hostSetupRef.current.request += 1;
+    hostSetupRef.current.pending = false;
+    if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
+    hostStreamRef.current = null;
+    setHostStream(null);
+    hostCaptureRef.current = { mic: true, cam: true };
+    setHostCapture(hostCaptureRef.current);
+    setHostSetupPending(false);
+  }
+
+  function toggleHostCapture(modality) {
+    const key = modality === "mic" ? "mic" : "cam";
+    const kind = key === "mic" ? "audio" : "video";
+    const next = !hostCaptureRef.current[key];
+    for (const track of hostStreamRef.current ? hostStreamRef.current.getTracks() : []) {
+      if (track.kind === kind) track.enabled = next;
+    }
+    hostCaptureRef.current = { ...hostCaptureRef.current, [key]: next };
+    setHostCapture(hostCaptureRef.current);
+  }
 
   // Seed picker overrides from the host's PERSISTED bindings on load (codex): a pre-live bind is
   // DB-only and isn't in the live-occupancy roster, so without this it would vanish from the picker
@@ -797,6 +1008,7 @@ function Greenroom() {
   // non-null `degraded` only while that publisher is actively shedding or still climbing back
   // (AD-21). With nothing degraded there's nothing to bump, so the button is disabled.
   const anyDegraded = tiles.some((t) => t.entry && t.entry.degraded);
+  const hostSetupAvailable = state !== "ended" && state !== "displaced" && state !== "error";
   const selectedTile = tiles.find((t) => t.id === selectedPeerID) || tiles[0] || null;
   const selectedEntry = selectedTile
     ? selectedTile.id in boundOverrides
@@ -839,6 +1051,7 @@ function Greenroom() {
       ) : null}
       <div class="gr-control-layout">
       <div class="gr-main-stage">
+      {hostSetupAvailable ? <HostSetup stream={hostStream} capture={hostCapture} pending={hostSetupPending} error={hostSetupError} onStart={startHostSetup} onToggle={toggleHostCapture} /> : null}
       {/* Screenshare preview-switcher rail (D-21/AC-11): every active sharer as a thumbnail; the host
           picks which one is live (the live render is the badged tile, shown to everyone backstage +
           on /s/screen). Host-only — guests never see the rail (the screen-roster is host-only). */}
@@ -875,6 +1088,7 @@ function Greenroom() {
             key={t.id}
             entry={t.id in boundOverrides ? { ...t.entry, boundSlot: boundOverrides[t.id] } : t.entry}
             stream={t.stream}
+            level={levels[t.id] || 0}
             viewerRole={viewerRole}
             live={state === "live"}
             onReconnect={() => {
@@ -908,6 +1122,18 @@ function Greenroom() {
         onBindSlot={bindSlot}
         onSetName={setName}
         onSetCanScreen={setCanScreen}
+        chat={
+          <ChatRail
+            messages={messages}
+            peers={peers}
+            selfID={selfID}
+            live={state === "live"}
+            onSend={(text) => {
+              if (state !== "live") return;
+              roomRef.current?.send({ t: "chat", text });
+            }}
+          />
+        }
         quality={
           <QualityControls
             state={state}

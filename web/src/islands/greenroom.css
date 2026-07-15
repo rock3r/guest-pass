@@ -53,6 +53,53 @@ section.greenroom > .gr-privacy-note {
 .gr-main-stage {
   min-width: 0;
 }
+.gr-host-setup-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.gr-host-setup-card h2,
+.gr-chat-rail h2 {
+  margin: 0 0 5px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.1;
+}
+.gr-host-setup-copy,
+.gr-host-setup-error,
+.gr-chat-privacy {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.gr-host-setup-error { color: var(--danger); font-weight: 600; }
+.gr-host-preview-wrap { display: grid; gap: 8px; }
+.gr-host-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--tile);
+}
+.gr-host-device-controls { display: flex; flex-wrap: wrap; gap: 7px; }
+.gr-host-meter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
 .gr-people-rail {
   position: sticky;
   top: 16px;
@@ -316,6 +363,28 @@ section.greenroom > .gr-privacy-note {
   border-color: var(--good);
   background: color-mix(in srgb, var(--good) 30%, var(--surface));
 }
+.gr-audio-activity {
+  display: inline-flex;
+  align-items: end;
+  gap: 2px;
+  width: 20px;
+  height: 14px;
+  padding: 1px;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.gr-audio-activity i {
+  display: block;
+  flex: 1;
+  height: 28%;
+  background: var(--line-2);
+}
+.gr-audio-activity i:nth-child(2) { height: 43%; }
+.gr-audio-activity i:nth-child(3) { height: 60%; }
+.gr-audio-activity i:nth-child(4) { height: 78%; }
+.gr-audio-activity i:nth-child(5) { height: 100%; }
+.gr-audio-activity i[data-active="1"] { background: var(--good); }
 
 /* Force-lock notice (D-13), separate from the pill. */
 .gr-lock {
@@ -357,6 +426,27 @@ section.greenroom > .gr-privacy-note {
   transition: transform 0.07s ease, box-shadow 0.07s ease, background 0.15s;
   line-height: 1;
 }
+.gr-host-setup,
+.gr-host-mic,
+.gr-host-camera,
+.gr-chat-form button {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 1.5px 1.5px 0 var(--edge);
+  cursor: pointer;
+}
+.gr-host-setup:hover,
+.gr-host-mic:hover,
+.gr-host-camera:hover,
+.gr-chat-form button:hover { background: var(--surface-2); }
+.gr-host-mic[aria-pressed="false"],
+.gr-host-camera[aria-pressed="false"] { background: var(--bad-soft); color: var(--danger); box-shadow: none; }
 .gr-controls button:hover,
 .gr-reconnect:hover,
 .gr-recover:hover,
@@ -686,8 +776,9 @@ section.greenroom > .gr-privacy-note {
   color: var(--ink);
 }
 .gr-quality-rail .gr-toolbar {
+  display: grid;
   align-items: stretch;
-  justify-content: initial;
+  justify-content: stretch;
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -696,18 +787,53 @@ section.greenroom > .gr-privacy-note {
   background: transparent;
 }
 .gr-quality-rail .gr-ceiling {
+  display: grid;
+  grid-template-columns: 1fr;
   align-items: stretch;
-  flex-direction: column;
+  width: 100%;
 }
 .gr-quality-rail .gr-ceiling-field {
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(3rem, 1fr) minmax(5.5rem, 1fr) auto;
+  align-items: center;
 }
 .gr-quality-rail .gr-ceiling-field input {
-  width: 7ch;
+  width: 100%;
+  min-width: 0;
 }
 .gr-quality-rail .gr-binderr {
   margin-right: 0;
 }
+.gr-chat-rail {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+.gr-chat-messages {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gr-chat-messages li { display: grid; gap: 1px; font-size: 12px; line-height: 1.35; }
+.gr-chat-messages strong { color: var(--ink); }
+.gr-chat-messages span, .gr-chat-empty { color: var(--ink-2); }
+.gr-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.gr-chat-form input {
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+}
+.gr-chat-form button:disabled { cursor: default; opacity: 0.5; box-shadow: none; }
 
 @media (max-width: 1020px) {
   .gr-control-layout {
@@ -717,6 +843,7 @@ section.greenroom > .gr-privacy-note {
     position: static;
     max-height: none;
   }
+  .gr-host-setup-card { grid-template-columns: 1fr; }
   .gr-people-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

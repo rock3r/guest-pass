@@ -38,7 +38,7 @@ const LOCK_COPY = {
 function onAirLabel(onAir) {
   if (onAir === "on-air") return "On air";
   if (onAir === "not-on-air") return "Not on air";
-  return "On-air status unavailable";
+  return "Awaiting OBS state";
 }
 
 /**

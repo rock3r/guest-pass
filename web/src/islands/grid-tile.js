@@ -133,7 +133,7 @@ function EligibilityToggle({ entry, onSetCanScreen }) {
 function onAirLabel(onAir) {
   if (onAir === "on-air") return "On air";
   if (onAir === "not-on-air") return "Not on air";
-  return "On-air status unavailable";
+  return "Awaiting OBS state";
 }
 
 /**
@@ -254,10 +254,10 @@ export function PersonControls({ entry, viewerRole, live, onForce, onRelease, on
  * host control room, optional moderation controls. The stream attaches via an effect so a re-render
  * (e.g. an on-air change) never reloads the <video>. The Reconnect control forces an ICE restart
  * for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, showControls?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
+ * @param {{entry:any, stream:MediaStream|null, level?:number, viewerRole:string, live?:boolean, showControls?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, live = true, showControls = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
+export function Tile({ entry, stream, level, viewerRole, live = true, showControls = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   // Whether the consumed stream carries video. An audio-only guest (PD-12 mic-only join) connects
@@ -284,6 +284,9 @@ export function Tile({ entry, stream, viewerRole, live = true, showControls = tr
   }, [stream]);
   const audioOnly = hasAudio && !hasVideo;
   const notices = lockNotices(entry.locks);
+  const micLocked = (entry.locks || []).some((lock) => lock.kind === "mic");
+  const hasLevel = typeof level === "number";
+  const meterLevel = micLocked ? 0 : Math.max(0, Math.min(5, Math.ceil((level || 0) * 5)));
   return (
     <div class="gr-tile" data-guest={entry.id} data-role={entry.role} data-novideo={audioOnly ? "1" : undefined}>
       <div class="gr-video-wrap">
@@ -303,6 +306,11 @@ export function Tile({ entry, stream, viewerRole, live = true, showControls = tr
           {onAirLabel(entry.onAir)}
         </span>
         <span class="gr-signal" data-signal={entry.signal || 0} title="Connection health" />
+        {hasLevel ? (
+          <span class="gr-audio-activity" data-peer={entry.id} data-level={meterLevel} role="meter" aria-label="Microphone activity" aria-valuemin="0" aria-valuemax="5" aria-valuenow={meterLevel} title={meterLevel > 0 ? "Microphone activity" : "No microphone activity"}>
+            {[1, 2, 3, 4, 5].map((bar) => <i key={bar} data-active={bar <= meterLevel ? "1" : "0"} />)}
+          </span>
+        ) : null}
         <button type="button" class="gr-reconnect" onClick={onReconnect}>
           Reconnect
         </button>
