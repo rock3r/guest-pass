@@ -15,7 +15,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/auth"
 )
 
-// M5.6/AC-1 (T-1+T-2): the three self-hosted design fonts are SERVED (same-origin under /static —
+// M5.6/AC-1 (T-1+T-2): the three self-hosted design fonts are SERVED (same-origin under /assets —
 // CSP font-src 'self') and APPLY — headings render in Newsreader, body in Schibsted Grotesk,
 // replacing the browser-default serif. `document.fonts.load` forces each woff2 to download (it would
 // reject on a 404), so a true result proves all three faces are actually served + loadable, not just
@@ -52,7 +52,7 @@ func TestFonts_DesignFacesLoadAndApply(t *testing.T) {
 			t.Fatalf("body font-family = %q, want Schibsted Grotesk", bodyFont)
 		}
 		if !allLoaded {
-			t.Fatal("a self-hosted face failed to load — its woff2 is not being served under /static")
+			t.Fatal("a self-hosted face failed to load — its woff2 is not being served under /assets")
 		}
 
 		// The HOST shell (body.app in app-host.css, imported AFTER tokens.css) must also resolve to

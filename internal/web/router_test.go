@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -107,6 +109,25 @@ func TestRouter_Healthz(t *testing.T) {
 	rec := do(h, http.MethodGet, "/healthz")
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
 		t.Fatalf("/healthz = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRouter_ServesBuiltAssetsUnderAssetsPath(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "app.css"), []byte("body { color: green; }"), 0o600); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	h, err := NewRouter(RouterConfig{SourceURL: testSourceURL, StaticDir: dist})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	rec := do(h, http.MethodGet, "/assets/app.css")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/assets/app.css = %d, want 200", rec.Code)
+	}
+	if got := rec.Body.String(); got != "body { color: green; }" {
+		t.Fatalf("asset body = %q", got)
 	}
 }
 

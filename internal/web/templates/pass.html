@@ -9,5 +9,5 @@ No account or install needed — run a quick camera check, then enter the greenr
 <div id="device-check"></div>
 {{if .ReportToken}}<p class="report-link"><a href="/p/{{.ReportToken}}/report">Didn't expect this invite? Report it.</a></p>{{end}}
 </section>
-<script type="module" src="/static/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}"{{end}}></script>
+<script type="module" src="/assets/app.js"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}"{{end}}></script>
 {{end}}

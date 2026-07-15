@@ -71,7 +71,7 @@ It is **dev-only**: `AUTH_MODE=dev` + the `dev` build tag. Nothing here ships in
 > guest could otherwise trim `/p/<token>` to `/auth/dev` and take over (the loopback guard passes
 > for tunnel-proxied requests, and `SIGNUP_MODE`/Google do **not** gate `/auth/dev`). To prevent
 > that, **the tunnel points at a path-allowlist proxy** (`cmd/smokeproxy`) that forwards **only** the
-> guest journey (`/p`, `/ws`, `/static`) and **refuses `/auth/dev`, the greenroom, the admin API, and
+> guest journey (`/p`, `/ws`, `/assets`) and **refuses `/auth/dev`, the greenroom, the admin API, and
 > the OBS source pages `/s`** — so neither a host/admin capability nor a slot **source token** ever
 > traverses the tunnel (OBS runs on the host machine over loopback). The **host signs in on loopback**
 > (`localhost`) on the machine running `smoke.sh`. (`/auth/dev?as=host2` mints a second, **non-admin**

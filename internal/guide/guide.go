@@ -85,7 +85,7 @@ func Compile(root, dist string) error {
 	}
 	outDir := filepath.Join(dist, "guide")
 	// Rebuild the output dir from scratch so a page removed from the manifest leaves no stale
-	// compiled fragment behind (which would otherwise linger on disk and be reachable via /static).
+	// compiled fragment behind (which would otherwise linger on disk and be reachable via /assets).
 	if err := os.RemoveAll(outDir); err != nil {
 		return fmt.Errorf("guide outdir: %w", err)
 	}

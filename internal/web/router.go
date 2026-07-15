@@ -17,7 +17,7 @@ import (
 
 // RouterConfig wires the HTTP surface. Auth-dependent routes are registered only when
 // their dependency is present, so a minimal config (e.g. in tests) still serves the
-// landing, sign-in, health, and static routes. /ws needs the authenticator, store, and
+// landing, sign-in, health, and built-asset routes. /ws needs the authenticator, store, and
 // token hasher because it authenticates by credential.
 type RouterConfig struct {
 	SourceURL     string              // link to the running build's source (EN-17)
@@ -27,7 +27,7 @@ type RouterConfig struct {
 	DevLogin      http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
 	TURNHost      string              // CSP connect-src TURN host; empty = STUN-only
 	Secure        bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
-	StaticDir     string              // built frontend assets (web/dist), served at /static
+	StaticDir     string              // built frontend assets (web/dist), served at /assets
 	RateLimiter   *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
 	WSRateLimiter *RateLimiter        // per-IP limiter applied to /ws (reconnect throttle); nil disables
 	InviteLimiter *RateLimiter        // per-HOST send-rate limiter on the email-sending routes (D-36); nil disables
@@ -127,7 +127,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		})
 	}
 	if cfg.StaticDir != "" {
-		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(cfg.StaticDir))))
+		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(cfg.StaticDir))))
 	}
 
 	// Auth routes, rate-limited per IP to blunt credential/token scanning (§5).
