@@ -270,12 +270,10 @@ function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole
           </span>
         </button>
       </div>
-      {tab === "chat" ? (
-        <div id="gr-chat-panel" class="gr-rail-panel" data-panel="chat" role="tabpanel" aria-labelledby="gr-chat-tab">
-          {chat}
-        </div>
-      ) : (
-        <div id="gr-people-panel" class="gr-rail-panel" data-panel="people" role="tabpanel" aria-labelledby="gr-people-tab">
+      <div id="gr-chat-panel" class="gr-rail-panel" data-panel="chat" role="tabpanel" aria-labelledby="gr-chat-tab" hidden={tab !== "chat"}>
+        {chat}
+      </div>
+      <div id="gr-people-panel" class="gr-rail-panel" data-panel="people" role="tabpanel" aria-labelledby="gr-people-tab" hidden={tab !== "people"}>
           <div class="gr-people-head">
             <div>
               <p class="gr-rail-label">People</p>
@@ -316,8 +314,7 @@ function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole
             />
           ) : null}
           {quality}
-        </div>
-      )}
+      </div>
     </aside>
   );
 }

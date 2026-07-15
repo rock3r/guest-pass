@@ -152,6 +152,7 @@ section.greenroom > .gr-privacy-note {
   overflow: auto;
   padding: 14px;
 }
+.gr-rail-panel[hidden] { display: none; }
 .gr-rail-panel[data-panel="chat"] { min-height: 360px; }
 .gr-people-head,
 .gr-person-detail-head {
@@ -845,7 +846,7 @@ section.greenroom > .gr-privacy-note {
 }
 .gr-chat-rail {
   display: grid;
-  grid-template-rows: auto auto minmax(120px, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(120px, 1fr) auto;
   flex: 1 1 auto;
   gap: 8px;
 }
