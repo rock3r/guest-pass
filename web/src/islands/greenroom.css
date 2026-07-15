@@ -105,15 +105,55 @@ section.greenroom > .gr-privacy-note {
   top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   max-height: calc(100vh - 32px);
   overflow: auto;
-  padding: 14px;
+  min-height: 0;
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
+.gr-rail-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 10px 12px 10px;
+  border-bottom: 1px solid var(--line-2);
+}
+.gr-rail-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.gr-rail-tab:hover { background: var(--surface-2); color: var(--ink); }
+.gr-rail-tab[aria-selected="true"] {
+  border-color: var(--edge);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.gr-rail-tab:focus-visible { outline: 2px solid var(--accent-press); outline-offset: 2px; }
+.gr-rail-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px;
+}
+.gr-rail-panel[hidden] { display: none; }
+.gr-rail-panel[data-panel="chat"] { min-height: 360px; }
 .gr-people-head,
 .gr-person-detail-head {
   display: flex;
@@ -139,8 +179,8 @@ section.greenroom > .gr-privacy-note {
 }
 .gr-people-count {
   display: inline-flex;
-  min-width: 24px;
-  min-height: 24px;
+  min-width: 20px;
+  min-height: 20px;
   align-items: center;
   justify-content: center;
   border-radius: var(--r-xs);
@@ -806,14 +846,14 @@ section.greenroom > .gr-privacy-note {
 }
 .gr-chat-rail {
   display: grid;
+  grid-template-rows: auto auto auto minmax(120px, 1fr) auto;
+  flex: 1 1 auto;
   gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line-2);
 }
 .gr-chat-messages {
   display: grid;
   gap: 6px;
-  max-height: 150px;
+  min-height: 0;
   overflow: auto;
   margin: 0;
   padding: 0;

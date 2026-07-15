@@ -220,58 +220,101 @@ function ScreenTile({ tile, live, onSelect }) {
 
 /**
  * PeopleRail keeps the host's operational controls in one stable place while the video grid stays
- * focused on monitoring. Selecting a person never changes media state; it only scopes the existing
- * server-authorized actions to the participant the host intends to manage.
- * @param {{tiles:Array<{id:string,entry:any,stream:MediaStream|null}>, selectedEntry:any, selectedPeerID:string, onSelect:(id:string)=>void, viewerRole:string, live:boolean, onForce:(id:string,m:string)=>void, onRelease:(id:string,m:string)=>void, onRole:(id:string,role:string)=>void, onDismissHand:(id:string)=>void, onBindSlot:(id:string,slot:string)=>void, onSetName:(id:string,name:string)=>void, onSetCanScreen:(id:string,can:boolean)=>void, quality:import("preact").VNode}} props
+ * focused on monitoring. Chat and people are peer views, so conversation has room to breathe and
+ * host-only participant / quality controls stay together. Selecting a person never changes media
+ * state; it only scopes the existing server-authorized actions to that participant.
+ * @param {{tiles:Array<{id:string,entry:any,stream:MediaStream|null}>, selectedEntry:any, selectedPeerID:string, onSelect:(id:string)=>void, viewerRole:string, live:boolean, onForce:(id:string,m:string)=>void, onRelease:(id:string,m:string)=>void, onRole:(id:string,role:string)=>void, onDismissHand:(id:string)=>void, onBindSlot:(id:string,slot:string)=>void, onSetName:(id:string,name:string)=>void, onSetCanScreen:(id:string,can:boolean)=>void, chat:import("preact").VNode, quality:import("preact").VNode}} props
  * @returns {import("preact").VNode}
  */
 function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen, chat, quality }) {
+  const [tab, setTab] = useState("people");
+  const switchTab = (next) => {
+    setTab(next);
+    requestAnimationFrame(() => document.getElementById(`gr-${next}-tab`)?.focus());
+  };
+  const onTabKeyDown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    switchTab(tab === "chat" ? "people" : "chat");
+  };
   return (
-    <aside class="gr-people-rail" aria-label="People controls">
-      <div class="gr-people-head">
-        <div>
-          <p class="gr-rail-label">People</p>
-          <h2>Room participants</h2>
-        </div>
-        <span class="gr-people-count" aria-label={`${tiles.length} participant${tiles.length === 1 ? "" : "s"}`}>
-          {tiles.length}
-        </span>
+    <aside class="gr-people-rail" aria-label="Control room sidebar">
+      <div class="gr-rail-tabs" role="tablist" aria-label="Control room sidebar">
+        <button
+          type="button"
+          id="gr-chat-tab"
+          class="gr-rail-tab"
+          role="tab"
+          aria-selected={tab === "chat"}
+          aria-controls="gr-chat-panel"
+          tabIndex={tab === "chat" ? 0 : -1}
+          onClick={() => setTab("chat")}
+          onKeyDown={onTabKeyDown}
+        >
+          Chat
+        </button>
+        <button
+          type="button"
+          id="gr-people-tab"
+          class="gr-rail-tab"
+          role="tab"
+          aria-selected={tab === "people"}
+          aria-controls="gr-people-panel"
+          tabIndex={tab === "people" ? 0 : -1}
+          onClick={() => setTab("people")}
+          onKeyDown={onTabKeyDown}
+        >
+          People
+          <span class="gr-people-count" aria-label={`${tiles.length} participant${tiles.length === 1 ? "" : "s"}`}>
+            {tiles.length}
+          </span>
+        </button>
       </div>
-      {tiles.length ? (
-        <div class="gr-people-list" role="list">
-          {tiles.map((tile) => (
-            <button
-              type="button"
-              class="gr-person"
-              data-guest={tile.id}
-              data-selected={tile.id === selectedPeerID ? "1" : "0"}
-              aria-pressed={tile.id === selectedPeerID}
-              onClick={() => onSelect(tile.id)}
-            >
-              <span class="gr-person-name">{tile.entry.name || tile.entry.id}</span>
-              <span class="gr-person-status">{onAirLabel(tile.entry.onAir)}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p class="gr-people-empty">Guests will appear here when they connect.</p>
-      )}
-      {selectedEntry ? (
-        <PersonControls
-          entry={selectedEntry}
-          viewerRole={viewerRole}
-          live={live}
-          onForce={(kind) => onForce(selectedEntry.id, kind)}
-          onRelease={(kind) => onRelease(selectedEntry.id, kind)}
-          onRole={(role) => onRole(selectedEntry.id, role)}
-          onDismissHand={() => onDismissHand(selectedEntry.id)}
-          onBindSlot={(slot) => onBindSlot(selectedEntry.id, slot)}
-          onSetName={(name) => onSetName(selectedEntry.id, name)}
-          onSetCanScreen={(can) => onSetCanScreen(selectedEntry.id, can)}
-        />
-      ) : null}
-      {chat}
-      {quality}
+      <div id="gr-chat-panel" class="gr-rail-panel" data-panel="chat" role="tabpanel" aria-labelledby="gr-chat-tab" hidden={tab !== "chat"}>
+        {chat}
+      </div>
+      <div id="gr-people-panel" class="gr-rail-panel" data-panel="people" role="tabpanel" aria-labelledby="gr-people-tab" hidden={tab !== "people"}>
+          <div class="gr-people-head">
+            <div>
+              <p class="gr-rail-label">People</p>
+              <h2>Room participants</h2>
+            </div>
+          </div>
+          {tiles.length ? (
+            <div class="gr-people-list" role="list">
+              {tiles.map((tile) => (
+                <button
+                  type="button"
+                  class="gr-person"
+                  data-guest={tile.id}
+                  data-selected={tile.id === selectedPeerID ? "1" : "0"}
+                  aria-pressed={tile.id === selectedPeerID}
+                  onClick={() => onSelect(tile.id)}
+                >
+                  <span class="gr-person-name">{tile.entry.name || tile.entry.id}</span>
+                  <span class="gr-person-status">{onAirLabel(tile.entry.onAir)}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p class="gr-people-empty">Guests will appear here when they connect.</p>
+          )}
+          {selectedEntry ? (
+            <PersonControls
+              entry={selectedEntry}
+              viewerRole={viewerRole}
+              live={live}
+              onForce={(kind) => onForce(selectedEntry.id, kind)}
+              onRelease={(kind) => onRelease(selectedEntry.id, kind)}
+              onRole={(role) => onRole(selectedEntry.id, role)}
+              onDismissHand={() => onDismissHand(selectedEntry.id)}
+              onBindSlot={(slot) => onBindSlot(selectedEntry.id, slot)}
+              onSetName={(name) => onSetName(selectedEntry.id, name)}
+              onSetCanScreen={(can) => onSetCanScreen(selectedEntry.id, can)}
+            />
+          ) : null}
+          {quality}
+      </div>
     </aside>
   );
 }
