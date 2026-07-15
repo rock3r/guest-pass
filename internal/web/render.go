@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -150,35 +151,38 @@ var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html"
 // newRenderer parses the embedded templates. sourceURL is the build source link (EN-17);
 // manifest carries the SRI hashes (nil/empty in tests); devLogin toggles dev sign-in.
 func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*renderer, error) {
+	if manifest == nil {
+		manifest = map[string]string{}
+	}
+	funcs := template.FuncMap{
+		"assetURL": func(name string) string { return bundledAssetURL(name, manifest[name]) },
+	}
 	pages := make(map[string]*template.Template, len(pageFiles)+len(appPageFiles))
 	for _, p := range pageFiles {
-		t, err := template.New("base").ParseFS(templateFS, "templates/base.html", "templates/"+p)
+		t, err := template.New("base").Funcs(funcs).ParseFS(templateFS, "templates/base.html", "templates/"+p)
 		if err != nil {
 			return nil, err
 		}
 		pages[p] = t
 	}
 	for _, p := range appPageFiles {
-		t, err := template.New("base").ParseFS(templateFS, "templates/appbase.html", "templates/"+p)
+		t, err := template.New("base").Funcs(funcs).ParseFS(templateFS, "templates/appbase.html", "templates/"+p)
 		if err != nil {
 			return nil, err
 		}
 		pages[p] = t
 	}
-	obs, err := template.New("obs.html").ParseFS(templateFS, "templates/obs.html")
+	obs, err := template.New("obs.html").Funcs(funcs).ParseFS(templateFS, "templates/obs.html")
 	if err != nil {
 		return nil, err
 	}
-	landing, err := template.New("landing.html").ParseFS(templateFS, "templates/landing.html")
+	landing, err := template.New("landing.html").Funcs(funcs).ParseFS(templateFS, "templates/landing.html")
 	if err != nil {
 		return nil, err
 	}
-	guideT, err := template.New("guide.html").ParseFS(templateFS, "templates/guide.html")
+	guideT, err := template.New("guide.html").Funcs(funcs).ParseFS(templateFS, "templates/guide.html")
 	if err != nil {
 		return nil, err
-	}
-	if manifest == nil {
-		manifest = map[string]string{}
 	}
 	return &renderer{
 		pages:       pages,
@@ -189,6 +193,17 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 		manifest:    manifest,
 		devLogin:    devLogin,
 	}, nil
+}
+
+// bundledAssetURL versions a static asset by its SRI digest. Asset filenames are stable between
+// deploys, so this prevents a browser or CDN from pairing freshly rendered HTML with an older,
+// cached CSS or JavaScript response that SRI will correctly reject.
+func bundledAssetURL(name, integrity string) string {
+	path := "/_gp/" + name
+	if integrity == "" {
+		return path
+	}
+	return path + "?v=" + url.QueryEscape(integrity)
 }
 
 // loadGuide loads the compiled user guide from dir (web/dist/guide). A failure (guide not
