@@ -62,16 +62,16 @@ func Serve(t *testing.T, handler http.Handler) *httptest.Server {
 // Harness is a running test server fronting the freshly-built frontend bundles.
 type Harness struct {
 	URL  string // base URL of the test server
-	Dist string // temp dir holding the built bundles, served at /static
+	Dist string // temp dir holding the built bundles, served at /assets
 }
 
 // New builds the frontend into a temp dir and starts a test server that serves the bundles
-// at /static plus any page routes the caller registers.
+// at /assets plus any page routes the caller registers.
 func New(t *testing.T, routes func(*http.ServeMux)) *Harness {
 	t.Helper()
 	dist := BuildDist(t)
 	mux := http.NewServeMux()
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(dist))))
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(dist))))
 	if routes != nil {
 		routes(mux)
 	}

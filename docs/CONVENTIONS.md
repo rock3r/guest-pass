@@ -253,7 +253,7 @@ PII directly.
 **Design tokens + dark mode (D-9).** `web/src/styles/tokens.css` carries the v2
 design's full token system (M5.6): the three self-hosted fonts (`--font-display`
 Newsreader / `--font-body` Schibsted Grotesk / `--font-mono` Spline Sans Mono,
-woff2 under `web/src/fonts/`, emitted as hashed `/static` assets by the esbuild
+woff2 under `web/src/fonts/`, emitted as hashed `/assets` assets by the esbuild
 `.woff2` loader — `font-src 'self'`), the surface/ink/line palette
 (`--bg`/`--surface*`/`--ink*`/`--line*`), shadow/radii (`--r-*`)/spacing (`--sp-*`)
 scales, and status/accent tokens, for **light and dark**. The product's older

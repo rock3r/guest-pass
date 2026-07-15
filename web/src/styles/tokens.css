@@ -6,7 +6,7 @@
    working; later M5.6 PRs migrate those surfaces onto the design's components and token names. */
 
 /* Self-hosted fonts (NO third-party CDN — privacy, EN-20). Variable woff2, Latin subset; the
-   esbuild .woff2 file loader emits each as a hashed /static asset (same-origin → CSP font-src
+   esbuild .woff2 file loader emits each as a hashed /assets asset (same-origin → CSP font-src
    'self'; not SRI-gated). font-display: swap avoids FOIT — text paints in the fallback, then swaps. */
 @font-face {
   font-family: "Newsreader";

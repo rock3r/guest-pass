@@ -85,7 +85,7 @@ func BuildOptions(root, outDir string) api.BuildOptions {
 		JSX:             api.JSXAutomatic,
 		JSXImportSource: "preact",
 		// .woff2 → file loader: a font url() in CSS is emitted as a hashed asset in outDir and the
-		// url() is rewritten to it. Served from /static (same-origin → CSP font-src 'self'); @font-face
+		// url() is rewritten to it. Served from /assets (same-origin → CSP font-src 'self'); @font-face
 		// urls are not SRI-gated, so the manifest is unaffected. The obs bundle imports no font (D-13).
 		Loader:           map[string]api.Loader{".js": api.LoaderJSX, ".woff2": api.LoaderFile},
 		Engines:          guestEngines,
