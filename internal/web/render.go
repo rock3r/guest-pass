@@ -138,14 +138,14 @@ type renderer struct {
 // error.html (the denial/error screens, M5.5) is composed into base.html — the PUBLIC shell, NOT
 // appbase.html: a suspended/pending/non-admin host must not see a host nav whose every link would
 // itself 403. It still carries the source-link footer (EN-17).
-var pageFiles = []string{"signin.html", "pass.html", "greenroom.html", "report.html", "error.html"}
+var pageFiles = []string{"signin.html", "pass.html", "report.html", "error.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
 // appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the
 // public pages do not carry. Each also defines a "content" template; parsed in their own
 // template.Template instances so "base" can mean appbase.html here and base.html there
 // with no name clash.
-var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html", "streamdetail.html", "settings.html", "admin.html"}
+var appPageFiles = []string{"dashboard.html", "streamedit.html", "calendar.html", "streamdetail.html", "settings.html", "admin.html", "greenroom.html"}
 
 // newRenderer parses the embedded templates. sourceURL is the build source link (EN-17);
 // manifest carries the SRI hashes (nil/empty in tests); devLogin toggles dev sign-in.
@@ -310,12 +310,6 @@ func (rd *renderer) landing(w http.ResponseWriter, r *http.Request) {
 
 func (rd *renderer) signin(w http.ResponseWriter, r *http.Request) {
 	rd.render(w, r, "signin.html", pageData{Title: "Host sign-in"})
-}
-
-// greenroom renders the host's monitoring page (host-authenticated upstream): it mounts the
-// greenroom grid island, which consumes each guest's camera over P2P (PR-9).
-func (rd *renderer) greenroom(w http.ResponseWriter, r *http.Request) {
-	rd.render(w, r, "greenroom.html", pageData{Title: "Greenroom"})
 }
 
 // passLandingPage renders the guest's magic-link landing (side-effect-free, EN-10): it

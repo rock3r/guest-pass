@@ -145,6 +145,14 @@ function lockNotices(locks) {
   return (locks || []).map((l) => LOCK_COPY[l.kind]).filter(Boolean);
 }
 
+/** @param {number} signal */
+function signalLabel(signal) {
+  if (signal >= 4) return "Connection strong";
+  if (signal >= 2) return "Connection fair";
+  if (signal >= 1) return "Connection weak";
+  return "Connection status unavailable";
+}
+
 /**
  * Controls renders the per-tile moderation actions a viewer of viewerRole may take on a target
  * entry (D-13/D-15). FORCE shows on an unlocked modality only to a moderator strictly ABOVE the
@@ -202,13 +210,54 @@ function Controls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismi
 }
 
 /**
- * Tile renders one participant's P2P video plus its roster-driven status chrome and moderation
- * controls. The stream attaches via an effect so a re-render (e.g. an on-air change) never reloads
- * the <video>. The Reconnect control forces an ICE restart for a stuck tile.
- * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
+ * PersonControls renders the live controls for one selected participant. The host greenroom uses it
+ * in the persistent People rail; the reused guest-session tiles retain their in-tile controls. This
+ * keeps the video grid observational while preserving the established server-authorized operations.
+ * @param {{entry:any, viewerRole:string, live:boolean, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
  * @returns {import("preact").VNode}
  */
-export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
+export function PersonControls({ entry, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
+  const locks = lockNotices(entry.locks);
+  return (
+    <section class="gr-person-detail" data-guest={entry.id} aria-label={`Controls for ${entry.name || entry.id}`}>
+      <div class="gr-person-detail-head">
+        <div>
+          <span class="gr-person-detail-name">{entry.name || entry.id}</span>
+          <span class="gr-person-detail-meta">{entry.role} · {onAirLabel(entry.onAir)}</span>
+        </div>
+        {entry.handRaised ? <span class="gr-hand" data-hand="1">Hand raised</span> : null}
+      </div>
+      <p class="gr-person-health" data-signal={entry.signal || 0}>
+        {signalLabel(entry.signal || 0)}{entry.rttMs ? ` · ${entry.rttMs} ms` : ""}
+      </p>
+      {locks.length ? <p class="gr-person-locks">Host controls active: {locks.join(" · ")}</p> : null}
+      {viewerRole === "host" && onBindSlot ? <SlotPicker entry={entry} live={live} onBindSlot={onBindSlot} /> : null}
+      {viewerRole === "host" && onSetName ? <NameOverride entry={entry} onSetName={onSetName} /> : null}
+      {viewerRole === "host" && onSetCanScreen && entry.role === "guest" ? (
+        <EligibilityToggle entry={entry} onSetCanScreen={onSetCanScreen} />
+      ) : null}
+      <Controls
+        entry={entry}
+        viewerRole={viewerRole}
+        live={live}
+        onForce={onForce}
+        onRelease={onRelease}
+        onRole={onRole}
+        onDismissHand={onDismissHand}
+      />
+    </section>
+  );
+}
+
+/**
+ * Tile renders one participant's P2P video plus its roster-driven status chrome and, outside the
+ * host control room, optional moderation controls. The stream attaches via an effect so a re-render
+ * (e.g. an on-air change) never reloads the <video>. The Reconnect control forces an ICE restart
+ * for a stuck tile.
+ * @param {{entry:any, stream:MediaStream|null, viewerRole:string, live?:boolean, showControls?:boolean, onReconnect:()=>void, onForce:(m:string)=>void, onRelease:(m:string)=>void, onRole:(role:string)=>void, onDismissHand:()=>void, onBindSlot?:(slot:string)=>void, onSetName?:(name:string)=>void, onSetCanScreen?:(can:boolean)=>void}} props
+ * @returns {import("preact").VNode}
+ */
+export function Tile({ entry, stream, viewerRole, live = true, showControls = true, onReconnect, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen }) {
   /** @type {{current: HTMLVideoElement|null}} */
   const videoRef = useRef(null);
   // Whether the consumed stream carries video. An audio-only guest (PD-12 mic-only join) connects
@@ -273,20 +322,20 @@ export function Tile({ entry, stream, viewerRole, live = true, onReconnect, onFo
           ✋ Hand raised
         </span>
       ) : null}
-      {viewerRole === "host" && onBindSlot ? <SlotPicker entry={entry} live={live} onBindSlot={onBindSlot} /> : null}
-      {viewerRole === "host" && onSetName ? <NameOverride entry={entry} onSetName={onSetName} /> : null}
-      {viewerRole === "host" && onSetCanScreen && entry.role === "guest" ? (
-        <EligibilityToggle entry={entry} onSetCanScreen={onSetCanScreen} />
+      {showControls ? (
+        <PersonControls
+          entry={entry}
+          viewerRole={viewerRole}
+          live={live}
+          onForce={onForce}
+          onRelease={onRelease}
+          onRole={onRole}
+          onDismissHand={onDismissHand}
+          onBindSlot={onBindSlot}
+          onSetName={onSetName}
+          onSetCanScreen={onSetCanScreen}
+        />
       ) : null}
-      <Controls
-        entry={entry}
-        viewerRole={viewerRole}
-        live={live}
-        onForce={onForce}
-        onRelease={onRelease}
-        onRole={onRole}
-        onDismissHand={onDismissHand}
-      />
     </div>
   );
 }

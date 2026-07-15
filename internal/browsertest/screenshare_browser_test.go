@@ -364,10 +364,11 @@ func TestScreenShare_RevokeWhileDisconnectedStopsCapture(t *testing.T) {
 		t.Fatalf("guest did not reconnect: %v", err)
 	}
 
-	// The share control is hidden (no longer eligible), and after the reconcile grace the stranded
-	// capture is released (track ended) rather than running invisibly forever.
+	// The available share action becomes an explicit unavailable state, and after the reconcile grace
+	// the stranded capture is released (track ended) rather than running invisibly forever.
 	if err := chromedp.Run(aCtx,
-		chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-eligible="0"]`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.gs-screen-toggle`, chromedp.ByQuery),
 		chromedp.Poll(`!!window.__gpShareStream && window.__gpShareStream.getVideoTracks()[0].readyState === 'ended'`,
 			nil, chromedp.WithPollingTimeout(10*time.Second)),
 	); err != nil {

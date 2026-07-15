@@ -1,6 +1,6 @@
 /* Greenroom monitoring grid — restyled to the v2 design (M5.6 PR-6, AC-7), ported from
-   screens-greenroom.jsx. The greenroom page renders in the PUBLIC base shell (logo header + footer);
-   this island fills the content. CSS-only against the Preact `.gr-*` class names (coupled to
+   screens-greenroom.jsx. The host greenroom renders in the authenticated app shell; this island
+   supplies the live control-room surface. CSS-only against the Preact `.gr-*` class names (coupled to
    greenroom.js + the moderation/on-air/grid/screenshare/reconnect browser tests), so no class moves —
    only the design treatment: card-edged tiles, badge-style on-air pills, the small button treatment
    on moderation controls, a panelled screenshare rail, and the design's notice banners. Tokens +
@@ -13,7 +13,7 @@
    padding/margin and nest the max-width (codex). */
 section.greenroom {
   width: 100%;
-  max-width: 1240px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 28px 24px 56px;
   box-sizing: border-box;
@@ -41,6 +41,154 @@ section.greenroom > .gr-privacy-note {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 14px;
+}
+
+/* ============ Host control-room layout ============ */
+.gr-control-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 16px;
+}
+.gr-main-stage {
+  min-width: 0;
+}
+.gr-people-rail {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.gr-people-head,
+.gr-person-detail-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gr-rail-label {
+  margin: 0 0 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.gr-people-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.gr-people-count {
+  display: inline-flex;
+  min-width: 24px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.gr-people-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gr-person {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gr-person:hover {
+  background: var(--surface-2);
+}
+.gr-person[data-selected="1"] {
+  border-color: var(--edge);
+  background: var(--accent-soft);
+}
+.gr-person-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gr-person-status,
+.gr-person-detail-meta,
+.gr-people-empty {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.gr-person-status {
+  flex: 0 0 auto;
+}
+.gr-people-empty {
+  margin: 0;
+  line-height: 1.45;
+}
+.gr-person-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+.gr-person-detail-name,
+.gr-person-detail-meta {
+  display: block;
+}
+.gr-person-detail-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+}
+.gr-person-detail-meta {
+  margin-top: 2px;
+  text-transform: capitalize;
+}
+.gr-person-health,
+.gr-person-locks {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.gr-person-health {
+  color: var(--ink-2);
+}
+.gr-person-health[data-signal="3"],
+.gr-person-health[data-signal="4"],
+.gr-person-health[data-signal="5"] {
+  color: var(--good);
+}
+.gr-person-health[data-signal="1"] {
+  color: var(--warn);
+}
+.gr-person-locks {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .gr-empty {
@@ -522,4 +670,73 @@ section.greenroom > .gr-privacy-note {
   margin: 0;
   font-size: 0.9rem;
   color: var(--ink-2);
+}
+
+/* Quality is a stream-wide host operation, so it lives below the selected person's controls in the
+   same persistent rail rather than competing with the monitoring grid. */
+.gr-quality-rail {
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+.gr-quality-head h2 {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.gr-quality-rail .gr-toolbar {
+  align-items: stretch;
+  justify-content: initial;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.gr-quality-rail .gr-ceiling {
+  align-items: stretch;
+  flex-direction: column;
+}
+.gr-quality-rail .gr-ceiling-field {
+  justify-content: space-between;
+}
+.gr-quality-rail .gr-ceiling-field input {
+  width: 7ch;
+}
+.gr-quality-rail .gr-binderr {
+  margin-right: 0;
+}
+
+@media (max-width: 1020px) {
+  .gr-control-layout {
+    grid-template-columns: 1fr;
+  }
+  .gr-people-rail {
+    position: static;
+    max-height: none;
+  }
+  .gr-people-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  section.greenroom {
+    padding: 20px 16px 40px;
+  }
+  .gr-toolbar,
+  .gr-ceiling {
+    align-items: stretch;
+  }
+  .gr-toolbar,
+  .gr-ceiling,
+  .gr-ceiling-field {
+    flex-direction: column;
+  }
+  .gr-ceiling-field input {
+    width: 100%;
+  }
 }

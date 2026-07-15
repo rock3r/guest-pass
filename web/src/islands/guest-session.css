@@ -160,6 +160,81 @@
   color: var(--danger);
 }
 
+/* Guest-owned live setup: compact, explicit controls that sit beside the self-view. A host lock
+   disables the relevant control but leaves an explanation in place, so the unavailable state never
+   reads like a broken button. */
+.gs-self-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.gs-self-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gs-self-control > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.gs-self-control strong {
+  font-size: 13px;
+}
+.gs-self-mic,
+.gs-self-cam {
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.gs-self-mic[aria-pressed="true"],
+.gs-self-cam[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.gs-self-mic:disabled,
+.gs-self-cam:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.gs-self-control-note,
+.gs-screen-unavailable {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.gs-audio-meter {
+  display: inline-flex;
+  align-items: end;
+  gap: 2px;
+  height: 16px;
+}
+.gs-audio-meter-bar {
+  display: block;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+}
+.gs-audio-meter-bar:nth-child(1) { height: 4px; }
+.gs-audio-meter-bar:nth-child(2) { height: 7px; }
+.gs-audio-meter-bar:nth-child(3) { height: 10px; }
+.gs-audio-meter-bar:nth-child(4) { height: 13px; }
+.gs-audio-meter-bar:nth-child(5) { height: 16px; }
+.gs-audio-meter-bar[data-active="1"] { background: var(--good); }
+
 /* ============ Controls — screenshare toggle, raise hand, leave ============ */
 .gs-screen {
   display: flex;

@@ -163,4 +163,20 @@ func TestGreenroom_MultiGuestGrid(t *testing.T) {
 	if pills != 3 {
 		t.Fatalf("expected 3 role-filtered guest tiles with on-air pills, got %d", pills)
 	}
+
+	// The host's operational controls belong in a persistent People rail, not repeated inside every
+	// video tile. It identifies every connected guest and opens the first guest's selected detail.
+	var peopleCount, selectedControls, healthCount int
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(
+		`document.querySelectorAll('.gr-people-list [data-guest]').length`, &peopleCount,
+	), chromedp.Evaluate(
+		`document.querySelectorAll('.gr-person-detail[data-guest] .gr-slot').length`, &selectedControls,
+	), chromedp.Evaluate(
+		`document.querySelectorAll('.gr-person-detail[data-guest] .gr-person-health[data-signal]').length`, &healthCount,
+	)); err != nil {
+		t.Fatalf("read host People rail: %v", err)
+	}
+	if peopleCount != 3 || selectedControls != 1 || healthCount != 1 {
+		t.Fatalf("People rail = %d people / %d selected controls / %d connection state, want 3 / 1 / 1", peopleCount, selectedControls, healthCount)
+	}
 }

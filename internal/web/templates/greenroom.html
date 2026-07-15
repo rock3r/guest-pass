@@ -1,7 +1,10 @@
 {{define "content"}}
 <section class="greenroom">
-<h1>Greenroom</h1>
-<p>Your guests' live cameras appear here. Wire each OBS source once and reuse it every stream.</p>
+<p class="section-label">Control room</p>
+{{if .CurrentStream}}<h1>{{.CurrentStream.Title}}</h1>
+<p>Your live room is connected to OBS as a monitor. GuestPass reflects on-air state; OBS still owns the broadcast.</p>
+{{else}}<h1>Greenroom</h1>
+<p>Open a live stream from your <a href="/app">dashboard</a> to see its room context. Your guests' cameras can still connect backstage before you go live.</p>{{end}}
 {{/* Chat-privacy trust copy (EN-20/AC-7): the backstage chat your guests + co-hosts use is relayed
      live over the connection and never written to disk — surfaced here so the host can reassure
      guests it's private. The same guarantee shows in the guest session's chat note. */}}

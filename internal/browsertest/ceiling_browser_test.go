@@ -150,7 +150,10 @@ func TestCeiling_GreenroomControlApplies(t *testing.T) {
 		network.Enable(),
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
-		// The control appears (GET populated it) with the stream's default ceiling.
+		// The control appears in the host's persistent right rail (GET populated it) with the
+		// stream's default ceiling; it must not return to the monitoring-grid utility bar.
+		chromedp.WaitVisible(`.gr-people-rail .gr-ceiling-res`, chromedp.ByQuery),
+		chromedp.Poll(`!!document.querySelector('.gr-people-rail .gr-ceiling-res') && !document.querySelector('.gr-main-stage .gr-ceiling-res')`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		chromedp.WaitVisible(`.gr-ceiling-res`, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('.gr-ceiling-res').value === '720'`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		// Lower the resolution and apply.

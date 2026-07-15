@@ -576,26 +576,42 @@ func TestAPI_PassLandingRevokedIsGone(t *testing.T) {
 	}
 }
 
-// The greenroom page is host-authenticated (EN-6): an unauthenticated request is rejected, and
-// a signed-in host gets the page with the greenroom grid island root.
+// The greenroom page is host-authenticated (EN-6) and is a stream-scoped host control room: an
+// unauthenticated request is rejected, while a signed-in host sees the app shell, active-stream
+// context, and links that resolve inside the host workspace rather than through public marketing.
 func TestGreenroom_RequiresHostAuth(t *testing.T) {
 	a := newAPIHarness(t)
 	if rec := a.req(t, http.MethodGet, "/greenroom", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("GET /greenroom unauthenticated = %d, want 401", rec.Code)
 	}
-	_, cookie := a.host(t, "host1")
+	host, cookie := a.host(t, "host1")
+	streamID := a.createStream(t, cookie, "Control Room")
+	if _, err := a.store.StartSession(context.Background(), streamID, host.ID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
 	rec := a.req(t, http.MethodGet, "/greenroom", "", cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /greenroom as host = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `id="greenroom"`) {
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="greenroom"`) {
 		t.Error("greenroom page is missing the greenroom grid island root")
+	}
+	for _, want := range []string{
+		`class="appshell"`,
+		`This stream · Control Room`,
+		`href="/app/streams/` + streamID + `"`,
+		`href="/app"`,
+		`href="/greenroom" aria-current="page"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("greenroom control room is missing %q:\n%s", want, body)
+		}
 	}
 	// EN-20/AC-7: the host greenroom surfaces the chat-privacy guarantee (the same one the guest
 	// session's chat note carries), so the host can reassure guests backstage chat isn't recorded.
-	body := strings.ToLower(rec.Body.String())
-	if !strings.Contains(body, "backstage chat is never recorded") {
-		t.Errorf("greenroom page missing the EN-20 chat-privacy trust copy:\n%s", rec.Body.String())
+	if !strings.Contains(strings.ToLower(body), "backstage chat is never recorded") {
+		t.Errorf("greenroom page missing the EN-20 chat-privacy trust copy:\n%s", body)
 	}
 }
 

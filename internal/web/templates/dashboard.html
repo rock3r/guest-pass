@@ -57,13 +57,13 @@
 </div>
 <div class="grow">
 <div class="row gap-2 stream-tile-titlerow">
-<a class="stream-tile-title" href="/app/streams/{{.ID}}/invites">{{.Title}}</a>
+<a class="stream-tile-title" href="/app/streams/{{.ID}}">{{.Title}}</a>
 {{if eq .Status "draft"}}<span class="badge">Draft</span>{{else if eq .Status "scheduled"}}<span class="badge badge-accent">Scheduled</span>{{end}}
 </div>
 {{if .HasSchedule}}<div class="muted row gap-1 stream-tile-when"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 7v5l3.5 2"/></svg> {{.TimeShort}}</div>{{end}}
 </div>
 <div class="row gap-2">
-<a class="btn btn-outline btn-sm" href="/app/streams/{{.ID}}/invites"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg> Invites</a>
+<a class="btn btn-outline btn-sm" href="/app/streams/{{.ID}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v1a2 2 0 0 0 0 5v1a2 2 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 15.5v-1a2 2 0 0 0 0-5z"/><path d="M14 6v12" stroke-dasharray="2 2.5"/></svg> Invites</a>
 </div>
 </div>
 {{else}}
@@ -80,7 +80,7 @@
 <div class="stream-recent-title">{{.Title}}</div>
 <div class="faint stream-recent-when">{{.ScheduledAt}}</div>
 </div>
-<a class="btn btn-ghost btn-icon btn-sm" href="/app/streams/{{.ID}}/invites" aria-label="Open {{.Title}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>
+<a class="btn btn-ghost btn-icon btn-sm" href="/app/streams/{{.ID}}" aria-label="Open {{.Title}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>
 </div>
 {{else}}
 <p class="muted stream-recent-empty">No past streams yet.</p>
