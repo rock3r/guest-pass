@@ -29,7 +29,7 @@ func TestRenderer_LandingHasSourceLinkAndLicense(t *testing.T) {
 	}
 	// The stylesheet loads even without a build manifest (no integrity) so the page is
 	// never unstyled; integrity is added only when the manifest is present (next test).
-	if !strings.Contains(body, `href="/assets/app.css"`) {
+	if !strings.Contains(body, `href="/_gp/app.css"`) {
 		t.Error("landing should always link the stylesheet")
 	}
 	if strings.Contains(body, "integrity=") {

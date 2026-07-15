@@ -71,7 +71,7 @@ func New(t *testing.T, routes func(*http.ServeMux)) *Harness {
 	t.Helper()
 	dist := BuildDist(t)
 	mux := http.NewServeMux()
-	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(dist))))
+	mux.Handle("/_gp/", http.StripPrefix("/_gp/", http.FileServer(http.Dir(dist))))
 	if routes != nil {
 		routes(mux)
 	}

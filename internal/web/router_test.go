@@ -112,7 +112,7 @@ func TestRouter_Healthz(t *testing.T) {
 	}
 }
 
-func TestRouter_ServesBuiltAssetsUnderAssetsPath(t *testing.T) {
+func TestRouter_ServesBuiltAssetsUnderNeutralPath(t *testing.T) {
 	dist := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dist, "app.css"), []byte("body { color: green; }"), 0o600); err != nil {
 		t.Fatalf("write asset: %v", err)
@@ -122,9 +122,9 @@ func TestRouter_ServesBuiltAssetsUnderAssetsPath(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	rec := do(h, http.MethodGet, "/assets/app.css")
+	rec := do(h, http.MethodGet, "/_gp/app.css")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("/assets/app.css = %d, want 200", rec.Code)
+		t.Fatalf("/_gp/app.css = %d, want 200", rec.Code)
 	}
 	if got := rec.Body.String(); got != "body { color: green; }" {
 		t.Fatalf("asset body = %q", got)
