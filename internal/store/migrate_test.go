@@ -65,16 +65,16 @@ func TestRunMigrations_FreshAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
 
-	// Fresh Open already ran migrations; schema_version should hold version 1.
+	// Fresh Open already ran both embedded migrations.
 	var maxVersion int
 	if err := st.reader.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM schema_version").Scan(&maxVersion); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if maxVersion != 1 {
-		t.Fatalf("schema_version max = %d, want 1", maxVersion)
+	if maxVersion != 2 {
+		t.Fatalf("schema_version max = %d, want 2", maxVersion)
 	}
 	// Core tables exist.
-	for _, table := range []string{"hosts", "streams", "slots", "passes", "sessions", "peers", "pass_locks", "host_source_tokens"} {
+	for _, table := range []string{"hosts", "streams", "slots", "passes", "sessions", "peers", "pass_locks", "host_source_tokens", "counters", "counters_daily"} {
 		var name string
 		err := st.reader.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
 		if err != nil {
@@ -89,8 +89,8 @@ func TestRunMigrations_FreshAndIdempotent(t *testing.T) {
 	if err := st.reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_version").Scan(&count); err != nil {
 		t.Fatalf("counting schema_version: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("schema_version row count = %d, want 1", count)
+	if count != 2 {
+		t.Fatalf("schema_version row count = %d, want 2", count)
 	}
 }
 

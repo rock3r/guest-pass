@@ -22,7 +22,7 @@ import (
 //     field; email/identity come from Google).
 //   - DELETE /api/me         — erasure: delete the account + ALL the host's data (host-scoped wipe,
 //     store.DeleteHost cascade), REFUSED while a live session exists (D-M5-3) — "end your live
-//     stream first". No anonymous counters exist yet to preserve (DEF-COUNTERS).
+//     stream first". Global anonymous counters have no foreign keys and survive the wipe.
 //
 // The no-JS settings page (CONVENTIONS §3.1) drives the same operations: an export link (GET), and
 // amend/delete POST-redirect-GET forms (HTML forms can't PATCH/DELETE) — appServer.amendSettings /

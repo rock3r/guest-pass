@@ -94,6 +94,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r.Get("/", rd.landing)
 	r.Get("/signin", rd.signin)
 	r.Get("/healthz", healthz)
+	if cfg.Store != nil {
+		r.Get("/stats", rd.statsPage(cfg.Store))
+	}
 	// Public user guide (no auth): /guide redirects to the first page; each page lives at
 	// /guide/{slug}. Compiled from docs/user-guide Markdown at build time.
 	r.Get("/guide", rd.guideIndex)

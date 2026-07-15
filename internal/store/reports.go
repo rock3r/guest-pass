@@ -51,11 +51,22 @@ func (s *Store) CreateReport(ctx context.Context, p CreateReportParams) (*Report
 		ID: id, HostID: p.HostID, StreamID: p.StreamID, ReporterEmail: p.ReporterEmail,
 		Category: p.Category, Message: &msg, CreatedAt: time.Now().Unix(),
 	}
-	_, err = s.writer.ExecContext(ctx,
+	tx, err := s.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("inserting report: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO reports (id, host_id, stream_id, reporter_email, category, message, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.HostID, r.StreamID, r.ReporterEmail, r.Category, r.Message, r.CreatedAt)
 	if err != nil {
+		return nil, fmt.Errorf("inserting report: %w", err)
+	}
+	if err := addCounterTx(ctx, tx, CounterReportsFiled, 1, time.Now().UTC().Format(time.DateOnly)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("inserting report: %w", err)
 	}
 	return r, nil

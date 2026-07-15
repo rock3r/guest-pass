@@ -145,6 +145,28 @@ func TestAdmin_StatsAndSessions(t *testing.T) {
 	}
 }
 
+// M6's uptime is deliberately a live process gauge, not a persisted availability
+// claim. It must be available on the admin JSON surface alongside the other gauges.
+func TestAdmin_StatsIncludesProcessUptime(t *testing.T) {
+	previous := processStartedAt
+	processStartedAt = time.Now().Add(-90 * time.Second)
+	t.Cleanup(func() { processStartedAt = previous })
+
+	a := newAPIHarness(t)
+	_, adminCookie := a.adminHost(t, "uptime-admin")
+
+	var stats adminStatsView
+	if err := json.Unmarshal(a.req(t, http.MethodGet, "/api/admin/stats", "", adminCookie).Body.Bytes(), &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.UptimeSeconds < 89 || stats.UptimeSeconds > 91 {
+		t.Fatalf("uptime_seconds = %d, want about 90", stats.UptimeSeconds)
+	}
+	if body := a.req(t, http.MethodGet, "/admin", "", adminCookie).Body.String(); !strings.Contains(body, "Current process uptime") {
+		t.Fatal("admin console must label the process-uptime gauge")
+	}
+}
+
 // Regression (found in the gate-2 manual smoke): the admin console's per-session and total
 // participant counts must be keyed by HOST id, because the hub keys each live room by host id
 // (one live session per host) — NOT by the DB session-row id. Passing the session id looks up a

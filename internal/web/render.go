@@ -138,7 +138,7 @@ type renderer struct {
 // error.html (the denial/error screens, M5.5) is composed into base.html — the PUBLIC shell, NOT
 // appbase.html: a suspended/pending/non-admin host must not see a host nav whose every link would
 // itself 403. It still carries the source-link footer (EN-17).
-var pageFiles = []string{"signin.html", "pass.html", "report.html", "error.html"}
+var pageFiles = []string{"signin.html", "pass.html", "report.html", "error.html", "stats.html"}
 
 // appPageFiles are the host-app shell pages (D-32: server-rendered, no JS) composed into
 // appbase.html — which adds the host nav + "signed in as" + sign-out chrome that the

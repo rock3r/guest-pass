@@ -11,10 +11,11 @@ import (
 // by a NON-blocking send to out, so a slow/stalled peer never blocks the room
 // (AD-12 — drop slow peers); the transport owns the goroutine draining out.
 type peerConn struct {
-	id   PeerID
-	role string
-	slot SlotID // for obs source pages: the slot this conn sources ("" otherwise)
-	out  chan<- Frame
+	id       PeerID
+	role     string
+	slot     SlotID // for obs source pages: the slot this conn sources ("" otherwise)
+	out      chan<- Frame
+	joinedAt time.Time
 }
 
 // roomCmd is a closure run on the room goroutine with exclusive access to the pure
@@ -33,16 +34,21 @@ type Room struct {
 	locks       LockPersistence
 	log         *slog.Logger
 	graceWindow time.Duration // slot-binding grace on a transient guest drop (D-40); <=0 falls back to the default
+	metrics     Metrics
 }
 
-func newRoom(id string, locks LockPersistence, log *slog.Logger, graceWindow time.Duration) *Room {
+func newRoom(id string, locks LockPersistence, log *slog.Logger, graceWindow time.Duration, metrics ...Metrics) *Room {
 	if log == nil {
 		log = slog.Default()
 	}
 	if graceWindow <= 0 {
 		graceWindow = defaultGraceWindow
 	}
-	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log, graceWindow: graceWindow}
+	var sink Metrics
+	if len(metrics) > 0 {
+		sink = metrics[0]
+	}
+	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log, graceWindow: graceWindow, metrics: sink}
 }
 
 // levelsTick is the audio-meter coalescing cadence (AD-13): every participant's last-reported
@@ -143,6 +149,16 @@ func (r *Room) post(cmd roomCmd) {
 	}
 }
 
+func (r *Room) recordGuestDuration(c *peerConn) {
+	if r.metrics == nil || (c.role != "guest" && c.role != "cohost") {
+		return
+	}
+	seconds := int64(time.Since(c.joinedAt).Seconds())
+	if seconds > 0 {
+		go func() { _ = r.metrics.AddCounter(context.Background(), counterGuestConnectedSeconds, seconds) }()
+	}
+}
+
 // deliver routes reducer outbounds to peers' send channels, non-blocking (AD-12).
 // Runs on the room goroutine, so conns access is race-free.
 func deliver(conns map[PeerID]*peerConn, outs []outbound) {
@@ -197,9 +213,19 @@ func (r *Room) Join(id PeerID, role, name string, slot SlotID, out chan<- Frame)
 			case old.out <- Frame{T: "terminate", Reason: TerminateDisplaced}:
 			default:
 			}
+			r.recordGuestDuration(old)
 			close(old.out)
 		}
-		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out}
+		conns[id] = &peerConn{id: id, role: role, slot: slot, out: out, joinedAt: time.Now()}
+		if r.metrics != nil && (role == "host" || role == "guest" || role == "cohost") {
+			participants := int64(0)
+			for _, pc := range conns {
+				if pc.role == "host" || pc.role == "guest" || pc.role == "cohost" {
+					participants++
+				}
+			}
+			go func() { _ = r.metrics.BumpMax(context.Background(), counterPeakConcurrent, participants) }()
+		}
 		outs := st.join(id, role, name)
 		if role == "obs" || role == "obs_screen" {
 			outs = append(outs, st.attachSource(slot, id)...)
@@ -235,6 +261,7 @@ func (r *Room) Leave(id PeerID, out chan<- Frame) {
 		}
 		outs := st.leave(id, false) // a socket close is TRANSIENT: a cam occupant's slot enters the grace window (D-40)
 		delete(conns, id)
+		r.recordGuestDuration(c)
 		deliver(conns, outs)
 		close(c.out)
 		// Schedule grace-expiry for any cam slot this peer left grace-pending: if it doesn't rejoin
@@ -292,6 +319,7 @@ func (r *Room) Kick(actor, target PeerID, invalidate func()) {
 		// flushes through the single writer before the closed channel ends it and shuts the socket.
 		if c := conns[target]; c != nil {
 			delete(conns, target)
+			r.recordGuestDuration(c)
 			close(c.out)
 		}
 	})
@@ -323,6 +351,7 @@ func (r *Room) EvictPeers(reason string, targets []PeerID) {
 			// RECIPIENT may drop one of those routine frames (AD-12) — non-terminal, so fine.
 			deliver(conns, st.leave(target, true)) // terminal eviction: vacate the slot now (no grace)
 			delete(conns, target)
+			r.recordGuestDuration(c)
 			// The TERMINAL frame must NOT be dropped like a routine one: budgeted blocking send,
 			// concurrent across targets so the total wait is ~one budget rather than the sum.
 			wg.Add(1)
@@ -681,6 +710,7 @@ func (r *Room) terminateWith(reasonFor func(role string) string) {
 				close(c.out)
 			}(c, reason)
 			delete(conns, id)
+			r.recordGuestDuration(c)
 		}
 		wg.Wait()
 		close(done)

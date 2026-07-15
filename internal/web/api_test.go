@@ -305,6 +305,9 @@ func TestAPI_CreatePassSendsMagicLinkWithoutLeakingToken(t *testing.T) {
 	if stored.ID != pv.ID {
 		t.Fatalf("token resolves pass %s, want %s", stored.ID, pv.ID)
 	}
+	if got, err := a.store.Counter(context.Background(), store.CounterInvitesSent); err != nil || got != 1 {
+		t.Fatalf("invites_sent = %d, %v; want 1, nil", got, err)
+	}
 }
 
 // When invite delivery fails, the host gets a 502 (not a misleading 201) and the pass
@@ -330,6 +333,9 @@ func TestAPI_CreatePassMailFailureReturns502(t *testing.T) {
 	}
 	if passes[0].Status != store.PassCreated {
 		t.Errorf("pass status after failed send = %q, want created", passes[0].Status)
+	}
+	if got, err := a.store.Counter(context.Background(), store.CounterInvitesSent); err != nil || got != 0 {
+		t.Fatalf("invites_sent after failed send = %d, %v; want 0, nil", got, err)
 	}
 }
 

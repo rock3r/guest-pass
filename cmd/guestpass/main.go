@@ -65,7 +65,7 @@ func serve(addr string) error {
 	// The hub persists suppression locks through the store (AD-22), so a force-muted guest stays
 	// muted across a restart; rooms default a nil logger to slog.Default(). The slot-binding grace
 	// window (D-40) keeps a guest's OBS cam slot bound across a transient WS drop.
-	hub := signaling.NewHub(web.NewLockPersistence(st), nil, signaling.WithGraceWindow(cfg.SlotGraceWindow))
+	hub := signaling.NewHub(web.NewLockPersistence(st), nil, signaling.WithGraceWindow(cfg.SlotGraceWindow), signaling.WithMetrics(st))
 	limiter := web.NewRateLimiter(5, 20)         // ~5 req/s/IP sustained, burst 20, on /auth routes
 	wsLimiter := web.NewRateLimiter(10, 40)      // /ws reconnect throttle: lenient so OBS sources + tabs reattach
 	inviteLimiter := web.NewRateLimiter(0.1, 30) // per-host email-send throttle (D-36): burst 30 (a full panel), ~6/min sustained
