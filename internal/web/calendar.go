@@ -18,6 +18,7 @@ type calendarData struct {
 	NextMonth  string     // "YYYY-MM"
 	Weeks      [][]calDay // month grid, weeks starting Monday
 	Agenda     []agendaItem
+	Timezone   string // IANA timezone used to interpret new-stream datetime-local values
 }
 
 // calDay is one cell of the month grid. Padding cells (before the 1st / after the last)
@@ -47,26 +48,41 @@ func (s *appServer) calendar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	prefs, err := s.store.GetHostPreferences(r.Context(), host.ID)
+	if err != nil {
+		http.Error(w, "could not load stream defaults", http.StatusInternalServerError)
+		return
+	}
 	streams, err := s.store.ListStreamsByHost(r.Context(), host.ID)
 	if err != nil {
 		http.Error(w, "could not load streams", http.StatusInternalServerError)
 		return
 	}
-	now := time.Now().UTC()
+	loc, err := time.LoadLocation(prefs.Timezone)
+	if err != nil {
+		// Preferences are validated when saved; tolerate a manually-corrupted legacy value by
+		// rendering in UTC instead of turning the host's calendar into a 500.
+		loc = time.UTC
+		prefs.Timezone = "UTC"
+	}
+	now := time.Now().In(loc)
+	data := buildCalendar(now, parseMonth(r.URL.Query().Get("month"), now), streams)
+	data.Timezone = prefs.Timezone
 	s.rd.render(w, r, "calendar.html", pageData{
 		Title: "Calendar", Nav: "calendar", Host: hostNav(host),
-		Data: buildCalendar(now, parseMonth(r.URL.Query().Get("month"), now), streams),
+		Data: data,
 	})
 }
 
-// parseMonth parses a "YYYY-MM" query value into the first instant of that month (UTC);
+// parseMonth parses a "YYYY-MM" query value into the first instant of that month in now's
+// location;
 // any parse failure falls back to the month containing now, so a malformed ?month= never
 // errors the page.
 func parseMonth(v string, now time.Time) time.Time {
-	if t, err := time.Parse("2006-01", v); err == nil {
+	if t, err := time.ParseInLocation("2006-01", v, now.Location()); err == nil {
 		return t
 	}
-	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 }
 
 // buildCalendar is the pure calendar projection (no I/O, no clock — now is passed in) so it
@@ -74,7 +90,8 @@ func parseMonth(v string, now time.Time) time.Time {
 // agenda is every scheduled stream (any month) in chronological order; the grid places only
 // the viewed month's streams on their day. Unscheduled streams appear in neither.
 func buildCalendar(now, view time.Time, streams []*store.Stream) calendarData {
-	view = time.Date(view.Year(), view.Month(), 1, 0, 0, 0, 0, time.UTC)
+	loc := view.Location()
+	view = time.Date(view.Year(), view.Month(), 1, 0, 0, 0, 0, loc)
 
 	var agenda []agendaItem
 	byDay := map[int][]agendaItem{}
@@ -82,8 +99,8 @@ func buildCalendar(now, view time.Time, streams []*store.Stream) calendarData {
 		if s.ScheduledAt == nil {
 			continue
 		}
-		when := time.Unix(*s.ScheduledAt, 0).UTC()
-		it := agendaItem{ID: s.ID, Title: s.Title, Status: s.Status, When: formatSchedule(s.ScheduledAt), unix: *s.ScheduledAt}
+		when := time.Unix(*s.ScheduledAt, 0).In(loc)
+		it := agendaItem{ID: s.ID, Title: s.Title, Status: s.Status, When: formatScheduleIn(s.ScheduledAt, loc), unix: *s.ScheduledAt}
 		agenda = append(agenda, it)
 		if when.Year() == view.Year() && when.Month() == view.Month() {
 			byDay[when.Day()] = append(byDay[when.Day()], it)
@@ -96,7 +113,7 @@ func buildCalendar(now, view time.Time, streams []*store.Stream) calendarData {
 	}
 
 	// Month grid, weeks starting Monday. leading = how many padding cells precede the 1st.
-	daysInMonth := time.Date(view.Year(), view.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	daysInMonth := time.Date(view.Year(), view.Month()+1, 0, 0, 0, 0, 0, loc).Day()
 	leading := (int(view.Weekday()) - int(time.Monday) + 7) % 7
 	isThisMonth := now.Year() == view.Year() && now.Month() == view.Month()
 

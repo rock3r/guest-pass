@@ -87,6 +87,24 @@ func TestBuildCalendar_PlacesScheduledStreamsAndExcludesUnscheduled(t *testing.T
 	}
 }
 
+func TestBuildCalendar_UsesHostTimezoneForDateBoundaries(t *testing.T) {
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	view := time.Date(2026, time.July, 1, 0, 0, 0, 0, loc)
+	// 23:30 on July 31 for the host is August 1 in UTC.
+	scheduled := time.Date(2026, time.August, 1, 6, 30, 0, 0, time.UTC).Unix()
+	cal := buildCalendar(view, view, []*store.Stream{{ID: "late-july", Title: "Late July", Status: store.StreamScheduled, ScheduledAt: &scheduled}})
+
+	if got := findDay(t, cal, 31).Streams; len(got) != 1 || got[0].ID != "late-july" {
+		t.Fatalf("July 31 streams = %+v, want late-july", got)
+	}
+	if len(cal.Agenda) != 1 || !strings.Contains(cal.Agenda[0].When, "Jul 31") {
+		t.Fatalf("agenda = %+v, want July 31 in the host timezone", cal.Agenda)
+	}
+}
+
 // The grid covers the whole month in full weeks (7-day rows), with leading/trailing
 // padding cells that are not InMonth.
 func TestBuildCalendar_GridShapeAndPadding(t *testing.T) {

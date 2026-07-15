@@ -42,7 +42,7 @@ var errAccountLive = errors.New("account has a live session")
 // instance.
 var errAccountLastAdmin = errors.New("account is the last active admin")
 
-// --- export DTOs (PII surface only — NO token hashes, NO slot/source secrets) ---
+// --- export DTOs (PII surface only — NO token hashes, NO slot/source or TURN secrets) ---
 
 type exportAccount struct {
 	Email     string `json:"email"`
@@ -71,18 +71,43 @@ type exportGuest struct {
 	Status   string `json:"status"`
 }
 
-type exportData struct {
-	Account exportAccount  `json:"account"`
-	Streams []exportStream `json:"streams"`
-	Guests  []exportGuest  `json:"guests"`
+// exportPreferences contains every host-owned preference except the encrypted TURN credential.
+// It is deliberately a separate DTO so future store fields cannot accidentally enter a takeout.
+type exportPreferences struct {
+	Timezone               string `json:"timezone"`
+	YouTubeChannel         string `json:"youtube_channel,omitempty"`
+	TwitchChannel          string `json:"twitch_channel,omitempty"`
+	DefaultChannelPlatform string `json:"default_channel_platform,omitempty"`
+	MaxRes                 int64  `json:"max_res"`
+	MaxFPS                 int64  `json:"max_fps"`
+	MaxBitrateKbps         int64  `json:"max_bitrate_kbps"`
+	CustomTURNEnabled      bool   `json:"custom_turn_enabled"`
+	CustomTURNURL          string `json:"custom_turn_url,omitempty"`
 }
 
-// gatherExport reads the host's full PII surface — account, their streams, and the invited-guest
-// PII they hold — scoped to the host (EN-8). It deliberately maps into DTOs that omit every token
-// hash so the takeout never carries a credential.
+type exportData struct {
+	Account     exportAccount     `json:"account"`
+	Preferences exportPreferences `json:"preferences"`
+	Streams     []exportStream    `json:"streams"`
+	Guests      []exportGuest     `json:"guests"`
+}
+
+// gatherExport reads the host's full PII surface — account, preferences, streams, and the
+// invited-guest PII they hold — scoped to the host (EN-8). It deliberately maps into DTOs that
+// omit token hashes and the encrypted TURN credential so the takeout never carries a secret.
 func gatherExport(ctx context.Context, st *store.Store, host *store.Host) (exportData, error) {
+	prefs, err := st.GetHostPreferences(ctx, host.ID)
+	if err != nil {
+		return exportData{}, err
+	}
 	out := exportData{
 		Account: exportAccount{Email: host.Email, Name: host.Name, GoogleSub: host.GoogleSub, CreatedAt: host.CreatedAt},
+		Preferences: exportPreferences{
+			Timezone: prefs.Timezone, YouTubeChannel: prefs.YouTubeChannel, TwitchChannel: prefs.TwitchChannel,
+			DefaultChannelPlatform: prefs.DefaultChannelPlatform, MaxRes: prefs.MaxRes, MaxFPS: prefs.MaxFPS,
+			MaxBitrateKbps: prefs.MaxBitrateKbps, CustomTURNEnabled: prefs.CustomTURNEnabled,
+			CustomTURNURL: prefs.CustomTURNURL,
+		},
 		Streams: []exportStream{},
 		Guests:  []exportGuest{},
 	}

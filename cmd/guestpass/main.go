@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	// Bundle the IANA database: the production image is deliberately minimal Alpine.
+	_ "time/tzdata"
 
 	"github.com/rock3r/guest-pass/internal/auth"
 	"github.com/rock3r/guest-pass/internal/buildinfo"
@@ -198,6 +200,10 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 	if err != nil {
 		return nil, fmt.Errorf("building token hasher: %w", err)
 	}
+	settingsCipher, err := turn.NewSecretCipher(cfg.TokenSecret)
+	if err != nil {
+		return nil, fmt.Errorf("building settings cipher: %w", err)
+	}
 	var mailer mail.Mailer
 	switch cfg.MailBackend() {
 	case config.MailBackendLog:
@@ -223,12 +229,13 @@ func buildHandler(cfg *config.Config, st *store.Store, hub *signaling.Hub, limit
 		WSInflight:    wsInflight,
 		// STUN always (D-38); a TURN entry with a fresh ephemeral HMAC cred (EN-4) is added
 		// per peer when TURN_URL/TURN_SECRET are set.
-		ICE:       turn.NewProvider(cfg.STUNURL, cfg.TURNURL, cfg.TURNSecret),
-		Store:     st,
-		Hasher:    hasher,
-		Mailer:    mailer,
-		BaseURL:   cfg.BaseURL,
-		LiveCheck: livecheck.NewChecker(), // D-29 SSRF-closed live-verify (watch link + verified status)
+		ICE:            turn.NewHostProvider(cfg.STUNURL, cfg.TURNURL, cfg.TURNSecret, st, settingsCipher),
+		SettingsCipher: settingsCipher,
+		Store:          st,
+		Hasher:         hasher,
+		Mailer:         mailer,
+		BaseURL:        cfg.BaseURL,
+		LiveCheck:      livecheck.NewChecker(), // D-29 SSRF-closed live-verify (watch link + verified status)
 		// D-36 progressive-trust per-host invite/stream quotas (tightest for new accounts).
 		Trust: auth.TrustPolicy{
 			TrustAfter:     cfg.RateTrustAfter,

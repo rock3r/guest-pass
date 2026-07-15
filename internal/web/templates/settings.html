@@ -12,6 +12,8 @@
 {{if .Data.LiveError}}<p class="settings-flash settings-flash-error" data-flash="live-error">End your live stream before deleting your account.</p>{{end}}
 {{if .Data.LastAdminError}}<p class="settings-flash settings-flash-error" data-flash="last-admin-error">You're the last admin — promote another host to admin before deleting your account.</p>{{end}}
 {{if .Data.ConfirmError}}<p class="settings-flash settings-flash-error" data-flash="confirm-error">Please confirm by checking the box before deleting your account.</p>{{end}}
+{{if .Data.PreferencesSaved}}<p class="settings-flash settings-flash-ok" data-flash="preferences-saved">Defaults saved. They will be used for your next stream.</p>{{end}}
+{{if .Data.PreferencesError}}<p class="settings-flash settings-flash-error" data-flash="preferences-error">Check your timezone, channels, and quality values, then try again.</p>{{end}}
 
 <div class="settings-col">
 
@@ -36,44 +38,63 @@
 </form>
 </div>
 
+<form class="settings-preferences" method="post" action="/app/settings/preferences">
 <div class="settings-section-card">
 <h2>Scheduling defaults</h2>
 <p class="muted">Pre-filled when you create a new stream.</p>
 <label class="field settings-field-narrow"><span class="label">Default timezone</span>
-<select class="input" disabled><option>Europe/London</option></select>
-<span class="hint">Timezone defaults are coming soon.</span>
+<input class="input" name="timezone" list="timezone-options" value="{{.Data.Preferences.Timezone}}" required>
+<span class="hint">Use an IANA timezone. Your stream times are stored accurately in UTC.</span>
 </label>
+<datalist id="timezone-options">
+<option value="UTC"><option value="Europe/London"><option value="Europe/Rome"><option value="America/New_York"><option value="America/Los_Angeles"><option value="Asia/Tokyo"><option value="Australia/Sydney">
+</datalist>
 </div>
 
 <div class="settings-section-card">
 <h2>Your channels</h2>
 <p class="muted">Used for the optional "is the channel actually live?" check and quick links. We never post on your behalf.</p>
 <div class="col gap-4">
-<label class="field"><span class="label">YouTube channel</span><input class="input" type="url" placeholder="youtube.com/@yourchannel" disabled><span class="hint">Channel linking is coming soon.</span></label>
-<label class="field"><span class="label">Twitch channel</span><input class="input" type="url" placeholder="twitch.tv/yourchannel" disabled></label>
+<label class="field"><span class="label">YouTube channel</span><input class="input" name="youtube_channel" placeholder="@yourchannel" value="{{.Data.Preferences.YouTubeChannel}}"><span class="hint">Handle only, for example <code>@yourchannel</code>.</span></label>
+<label class="field"><span class="label">Twitch channel</span><input class="input" name="twitch_channel" placeholder="yourchannel" value="{{.Data.Preferences.TwitchChannel}}"><span class="hint">Channel name only, without <code>twitch.tv/</code>.</span></label>
+<label class="field settings-field-narrow"><span class="label">Use by default for new streams</span>
+<select class="input" name="default_channel_platform">
+<option value=""{{if eq .Data.Preferences.DefaultChannelPlatform ""}} selected{{end}}>Don't link a channel</option>
+<option value="youtube"{{if eq .Data.Preferences.DefaultChannelPlatform "youtube"}} selected{{end}}>YouTube</option>
+<option value="twitch"{{if eq .Data.Preferences.DefaultChannelPlatform "twitch"}} selected{{end}}>Twitch</option>
+</select>
+</label>
 </div>
 </div>
 
 <div class="settings-section-card">
-<h2>Video</h2>
-<p class="muted">Applied to new streams; override per-stream in OBS &amp; sources.</p>
-<label class="field settings-field-narrow"><span class="label">Codec</span>
-<select class="input" disabled><option>Auto · H.264 + VP8 (max compatibility)</option></select>
-<span class="hint">Codec and resolution controls are coming soon.</span>
-</label>
+<h2>Video defaults</h2>
+<p class="muted">Applied to new streams. You can still tune a stream's ceiling in the greenroom.</p>
+<div class="settings-video-grid">
+<label class="field"><span class="label">Maximum resolution</span><input class="input" name="max_res" type="number" min="144" max="2160" step="1" value="{{.Data.Preferences.MaxRes}}"><span class="hint">Height in pixels.</span></label>
+<label class="field"><span class="label">Maximum frame rate</span><input class="input" name="max_fps" type="number" min="1" max="60" step="1" value="{{.Data.Preferences.MaxFPS}}"><span class="hint">Frames per second.</span></label>
+<label class="field"><span class="label">Maximum bitrate</span><input class="input" name="max_bitrate_kbps" type="number" min="100" max="20000" step="1" value="{{.Data.Preferences.MaxBitrateKbps}}"><span class="hint">Kilobits per second.</span></label>
+</div>
+<p class="hint">GuestPass automatically negotiates H.264 with VP8 fallback for compatibility; codec selection is not exposed as a misleading preference.</p>
 </div>
 
 <div class="settings-section-card">
 <h2>Connection</h2>
 <p class="muted">By default GuestPass connects guests peer-to-peer with STUN only — no relay, nothing to run. If a guest's network blocks P2P, add your own TURN relay (it forwards encrypted packets it can't read).</p>
-<div class="row between settings-turn-row">
+<label class="row between settings-turn-row">
 <div>
 <div class="settings-turn-title">Bring your own TURN</div>
-<div class="muted settings-turn-sub">Custom TURN relay configuration is coming soon.</div>
+<div class="muted settings-turn-sub">Use your own coturn-compatible relay. GuestPass mints short-lived credentials; it never sends your shared secret to a browser.</div>
 </div>
-<label class="switch"><input type="checkbox" disabled><span class="track"></span><span class="thumb"></span></label>
+<span class="switch"><input type="checkbox" name="custom_turn_enabled" value="1"{{if .Data.Preferences.CustomTURNEnabled}} checked{{end}}><span class="track"></span><span class="thumb"></span></span>
+</label>
+<div class="settings-turn-fields">
+<label class="field"><span class="label">TURN URL</span><input class="input" name="custom_turn_url" placeholder="turns:turn.example.com:5349?transport=tcp" value="{{.Data.Preferences.CustomTURNURL}}"><span class="hint">Use <code>turn:</code> or <code>turns:</code>; TLS on port 443 is often most firewall-friendly.</span></label>
+<label class="field"><span class="label">TURN shared secret</span><input class="input" name="custom_turn_secret" type="password" autocomplete="new-password" placeholder="{{if .Data.Preferences.CustomTURNSecretEncrypted}}Leave blank to keep the saved secret{{else}}Your coturn static-auth-secret{{end}}"><span class="hint">Stored encrypted. Leave this blank to keep the existing secret.</span></label>
 </div>
 </div>
+<button type="submit" class="btn btn-primary settings-preferences-save">Save stream defaults &amp; connection</button>
+</form>
 
 {{/* GDPR host self-service (AC-3..5/D-37): functional export / amend (above) / delete. */}}
 <div class="settings-section-card" data-gdpr="self-service">

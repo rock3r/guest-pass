@@ -190,8 +190,10 @@ the server."
 | Audio | **Opus** | — |
 | Higher-efficiency video | — | **Instance-level opt-in via `CODEC_OPTIN`, OFF by default:** VP9 / AV1 / H.265. Negotiated only where both peers support it. Tradeoff: better compression vs higher encode CPU/battery borne by guests' devices, often no HW encode, uneven WebRTC support. |
 
-Per-stream/per-host codec control → v1.1. The degradation ladder below governs
-regardless of codec.
+Hosts can choose default resolution, frame-rate, and bitrate ceilings for new streams; the
+greenroom retains the per-stream live adjustment. Codec selection remains automatic: forcing a
+codec across a heterogeneous WebRTC mesh is intentionally deferred, while the degradation ladder
+below governs regardless of negotiated codec.
 
 ### The real cap: encoder count, not bandwidth (D-33)
 

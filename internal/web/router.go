@@ -20,20 +20,24 @@ import (
 // landing, sign-in, health, and built-asset routes. /ws needs the authenticator, store, and
 // token hasher because it authenticates by credential.
 type RouterConfig struct {
-	SourceURL     string              // link to the running build's source (EN-17)
-	Hub           *signaling.Hub      // signaling hub for /ws
-	OAuth         *auth.GoogleOAuth   // Google sign-in; nil disables /auth/google*
-	Auth          *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout
-	DevLogin      http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
-	TURNHost      string              // CSP connect-src TURN host; empty = STUN-only
-	Secure        bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
-	StaticDir     string              // built frontend assets (web/dist), served at /_gp
-	RateLimiter   *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
-	WSRateLimiter *RateLimiter        // per-IP limiter applied to /ws (reconnect throttle); nil disables
-	InviteLimiter *RateLimiter        // per-HOST send-rate limiter on the email-sending routes (D-36); nil disables
-	WSInflight    *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
-	ICE           ICEConfigurer       // per-peer ICE join-ack provider (AD-14); nil = no ICE servers offered
-	Logger        *slog.Logger        // structured logger for the WS path; nil uses slog.Default()
+	SourceURL      string              // link to the running build's source (EN-17)
+	Hub            *signaling.Hub      // signaling hub for /ws
+	OAuth          *auth.GoogleOAuth   // Google sign-in; nil disables /auth/google*
+	Auth           *auth.Authenticator // session lifecycle (logout); nil disables /auth/logout
+	DevLogin       http.HandlerFunc    // dev sign-in handler; nil (release) disables /auth/dev
+	TURNHost       string              // CSP connect-src TURN host; empty = STUN-only
+	Secure         bool                // HTTPS origin; false (HTTP dev) also allows ws: in connect-src
+	StaticDir      string              // built frontend assets (web/dist), served at /_gp
+	RateLimiter    *RateLimiter        // per-IP limiter applied to /auth routes; nil disables
+	WSRateLimiter  *RateLimiter        // per-IP limiter applied to /ws (reconnect throttle); nil disables
+	InviteLimiter  *RateLimiter        // per-HOST send-rate limiter on the email-sending routes (D-36); nil disables
+	WSInflight     *sync.WaitGroup     // tracks live /ws handlers so a drain can wait for terminate flush
+	ICE            ICEConfigurer       // per-peer ICE join-ack provider (AD-14); nil = no ICE servers offered
+	SettingsCipher interface {
+		Encrypt(string) (string, error)
+		Decrypt(string) (string, error)
+	} // encrypts host-owned TURN shared secrets before persistence
+	Logger *slog.Logger // structured logger for the WS path; nil uses slog.Default()
 
 	// Host API + guest magic-link page. All four must be set together to enable the
 	// /api/streams* and /p/{token} routes; if any is nil they are not registered.
@@ -159,7 +163,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	// authenticator are wired; this keeps the minimal test/landing config intact.
 	if cfg.Store != nil && cfg.Hasher != nil && cfg.Mailer != nil && cfg.Auth != nil {
 		api := &apiServer{store: cfg.Store, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, rd: rd, hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck, trust: cfg.Trust}
-		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck, trust: cfg.Trust}
+		app := &appServer{store: cfg.Store, rd: rd, hasher: cfg.Hasher, mailer: cfg.Mailer, baseURL: cfg.BaseURL, reveals: newRevealStore(), hub: cfg.Hub, binds: binds, auth: cfg.Auth, liveCheck: cfg.LiveCheck, trust: cfg.Trust, settingsCipher: cfg.SettingsCipher}
 
 		// inviteThrottle bounds the RATE of the email-sending host actions per HOST (D-36 §7.9): the
 		// per-window quota caps distinct invites, but re-issue re-sends to an existing address without
@@ -230,6 +234,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			// Host-only; CSRF-safe via the SameSite=Lax session cookie.
 			hr.Get("/app/settings", app.settings)
 			hr.Post("/app/settings/amend", app.amendSettings)
+			hr.Post("/app/settings/preferences", app.savePreferences)
 			hr.Post("/app/settings/delete", app.deleteSettings)
 			hr.Post("/app/streams", app.createStream)
 			hr.Get("/app/streams/{id}", app.streamDetail)

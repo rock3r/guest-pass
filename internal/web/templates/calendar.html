@@ -50,7 +50,7 @@
 <p class="dialog-sub">The boring bits. You can change all of this later.</p>
 <form method="post" action="/app/streams" class="col gap-4">
 <label class="field"><span class="label">Show name</span><input class="input" name="title" placeholder="e.g. Indie Hackers Live #15" maxlength="200" required></label>
-<label class="field"><span class="label">Scheduled start (UTC)</span><input class="input" type="datetime-local" name="scheduled_at"></label>
+<label class="field"><span class="label">Scheduled start ({{.Data.Timezone}})</span><input class="input" type="datetime-local" name="scheduled_at"></label>
 <label class="field"><span class="label">Length (minutes)</span><input class="input" type="number" name="duration_min" min="1" max="1440" value="90"></label>
 <div class="dialog-footer">
 <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>

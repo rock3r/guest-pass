@@ -10,9 +10,8 @@ import (
 
 // SecurityOptions configures the security-headers middleware.
 type SecurityOptions struct {
-	// TURNHost, when non-empty, is added to connect-src so the browser may reach a
-	// configured TURN relay. Empty in the STUN-only default (D-38), keeping the policy
-	// tight.
+	// TURNHost, when non-empty, is added to connect-src for the instance-level TURN relay.
+	// Host-owned TURN relays use the turn:/turns: scheme sources included unconditionally.
 	TURNHost string
 	// Secure is true for an HTTPS origin. When false (a plain-HTTP dev/loopback origin),
 	// connect-src also allows ws: so the signaling socket isn't CSP-blocked — some
@@ -54,10 +53,10 @@ func SecurityHeaders(opts SecurityOptions) func(http.Handler) http.Handler {
 }
 
 // buildCSP assembles the policy. connect-src includes the signaling endpoint (wss:,
-// plus ws: on a non-secure dev origin) and a TURN host only when one is configured
-// (CONVENTIONS §3.5).
+// plus ws: on a non-secure dev origin), any configured instance relay, and the TURN
+// schemes so a host's saved BYO relay is usable (CONVENTIONS §3.5).
 func buildCSP(nonce, turnHost string, secure bool) string {
-	connect := "connect-src 'self' wss:"
+	connect := "connect-src 'self' wss: turn: turns:"
 	if !secure {
 		connect += " ws:" // plain-HTTP dev origin: the signaling socket is ws://
 	}
