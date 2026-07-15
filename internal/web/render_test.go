@@ -72,6 +72,16 @@ func TestRenderer_StyleIntegrityInjectedWhenPresent(t *testing.T) {
 	}
 }
 
+func TestRenderer_VersionsAssetURLWithIntegrity(t *testing.T) {
+	rd, _ := newRenderer(testSourceURL, map[string]string{"app.css": "sha384-a+b/c="}, false)
+	rec := httptest.NewRecorder()
+	rd.landing(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if !strings.Contains(rec.Body.String(), `href="/_gp/app.css?v=sha384-a%2Bb%2Fc%3D"`) {
+		t.Fatalf("stylesheet URL should include the escaped integrity value, got %q", rec.Body.String())
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
