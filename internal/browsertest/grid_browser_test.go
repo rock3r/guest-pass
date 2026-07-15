@@ -216,7 +216,16 @@ func TestGreenroom_HostSetupChatAndAudioActivity(t *testing.T) {
 		chromedp.Poll(trackEnabledIs(`.gr-host-preview`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
 		chromedp.Click(`.gr-host-mic`, chromedp.ByQuery),
 		chromedp.Poll(trackEnabledIs(`.gr-host-preview`, "audio", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		// The host rail is deliberately a tabbed control surface: People keeps
+		// participant and quality operations together, while backstage chat gets
+		// its own full-height view rather than being squeezed underneath them.
+		chromedp.WaitVisible(`[role="tablist"][aria-label="Control room sidebar"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#gr-people-tab[aria-selected="true"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#gr-people-panel`, chromedp.ByQuery),
+		chromedp.Click(`#gr-chat-tab`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#gr-chat-tab[aria-selected="true"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gr-chat-form`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('#gr-people-panel') === null`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		chromedp.SendKeys(`#gr-chat-draft`, "host-chat-roundtrip-8Nf2", chromedp.ByQuery),
 		chromedp.Click(`.gr-chat-form button`, chromedp.ByQuery),
 		chromedp.Poll(`[...document.querySelectorAll('.gr-chat-messages li')].some((m) => m.textContent.includes('host-chat-roundtrip-8Nf2'))`, nil, chromedp.WithPollingTimeout(15*time.Second)),
