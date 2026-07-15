@@ -19,7 +19,7 @@ import (
 func TestSmoke_AppIslandMounts(t *testing.T) {
 	h := New(t, func(mux *http.ServeMux) {
 		mux.HandleFunc("/", Page(`<!doctype html><html><head><meta charset="utf-8"></head>`+
-			`<body><div id="device-check"></div><script type="module" src="/assets/app.js"></script></body></html>`))
+			`<body><div id="device-check"></div><script type="module" src="/_gp/app.js"></script></body></html>`))
 	})
 
 	Chrome(t, 90*time.Second, func(ctx context.Context) {

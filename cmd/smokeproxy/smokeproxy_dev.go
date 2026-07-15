@@ -3,7 +3,7 @@
 // smokeproxy is a dev-only path-allowlist reverse proxy for the manual smoke (scripts/smoke.sh).
 //
 // The public HTTPS tunnel points at THIS proxy instead of the server directly. It forwards ONLY the
-// guest journey (/p, /ws, /assets) to the local server and refuses everything else — so the
+// guest journey (/p, /ws, /_gp) to the local server and refuses everything else — so the
 // admin-granting /auth/dev, the host greenroom, and the admin API are NOT reachable over the tunnel
 // even though a guest link necessarily reveals the tunnel origin (a guest could otherwise trim their
 // /p/<token> URL to /auth/dev; the tunnel forwards from localhost, so the server's loopback-only
@@ -38,7 +38,7 @@ func allowedOverTunnel(p string) bool {
 		return true
 	case strings.HasPrefix(p, "/p/"): // guest magic-link page + the /p/{token}/enter action
 		return true
-	case strings.HasPrefix(p, "/assets/"): // bundled JS/CSS/fonts
+	case strings.HasPrefix(p, "/_gp/"): // bundled JS/CSS/fonts
 		return true
 	default:
 		return false
