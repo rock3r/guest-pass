@@ -16,6 +16,20 @@ import (
 	"github.com/rock3r/guest-pass/internal/auth"
 )
 
+func greenroomPerson(t *testing.T, ctx context.Context, passID string) string {
+	t.Helper()
+	person := fmt.Sprintf(`.gr-person[data-guest=%q]`, passID)
+	picker := fmt.Sprintf(`.gr-person-detail[data-guest=%q] .gr-slot`, passID)
+	if err := chromedp.Run(ctx,
+		chromedp.WaitVisible(person, chromedp.ByQuery),
+		chromedp.Click(person, chromedp.ByQuery),
+		chromedp.WaitVisible(picker, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("select People-rail controls for %s: %v", passID, err)
+	}
+	return picker
+}
+
 // T-6 / AC-6 — the DoD core, driven through the greenroom People controls (extends the M2
 // rebind tracer). Two guests publish; the host opens the greenroom and uses the host-only
 // slot picker to bind cam-1 to guest A — the OBS source renders A — then reassigns the slot
@@ -57,8 +71,7 @@ func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 		t.Fatalf("obs source page did not load: %v", err)
 	}
 
-	// Host greenroom (host cookie): wait until it is live and both guest tiles (with their slot
-	// pickers) have rendered over P2P.
+	// Host greenroom (host cookie): wait until it is live and both guests appear in the People rail.
 	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
@@ -67,24 +80,25 @@ func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passIDB), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passIDB), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render both guest slot pickers: %v", err)
 	}
 
-	// bindViaPicker sets a guest tile's slot picker and fires change (the host action) — which
+	// bindViaPicker selects a guest in the People rail, then changes its slot picker (the host action) — which
 	// PUTs /api/passes/{id}/slot from the greenroom page over its host cookie.
 	bindViaPicker := func(passID, slot string) {
 		t.Helper()
+		picker := greenroomPerson(t, hostCtx, passID)
 		var ok bool
 		expr := fmt.Sprintf(`(() => {
-			const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+			const sel = document.querySelector(%q);
 			if (!sel) return false;
 			sel.value = %q;
 			sel.dispatchEvent(new Event('change', { bubbles: true }));
 			return true;
-		})()`, passID, slot)
+		})()`, picker, slot)
 		if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil {
 			t.Fatalf("bind %s→%s via picker: %v", passID, slot, err)
 		}
@@ -161,37 +175,38 @@ func TestBinding_PreLivePickerKeepsSelection(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render guest A's slot picker: %v", err)
 	}
 
 	// Pick cam-1 for A pre-live: the PUT persists DB-only (no session → no reroute, no roster frame).
 	var ok bool
+	pickerA := greenroomPerson(t, hostCtx, s.passID)
 	expr := fmt.Sprintf(`(() => {
-		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		const sel = document.querySelector(%q);
 		if (!sel) return false;
 		sel.value = "cam-1";
 		sel.dispatchEvent(new Event('change', { bubbles: true }));
 		return true;
-	})()`, s.passID)
+	})()`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil || !ok {
 		t.Fatalf("set A's picker to cam-1: ok=%v err=%v", ok, err)
 	}
 
 	// Guest B joins → the grid re-renders, which RECONCILES A's controlled <select>. Without the
 	// override that reconciliation resets A's picker to "" (entry.boundSlot is still empty pre-live);
-	// with it, A stays on cam-1. Waiting for B's picker proves the re-render happened.
+	// with it, A stays on cam-1. Waiting for B's People row proves the re-render happened.
 	publishGuest(t, guestBCtx, s.base, s.rawTokenB, "B")
 	if err := chromedp.Run(hostCtx,
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passIDB), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passIDB), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("guest B did not render (no grid re-render to reconcile against): %v", err)
 	}
 
 	var aVal string
 	if err := chromedp.Run(hostCtx,
-		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value`, s.passID), &aVal),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).value`, pickerA), &aVal),
 	); err != nil {
 		t.Fatalf("read A's picker value: %v", err)
 	}
@@ -231,24 +246,25 @@ func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest slot picker: %v", err)
 	}
 
 	// Bind A → cam-1 via the picker (live reroute), and wait until the roster moves the picker to it.
 	var ok bool
+	pickerA := greenroomPerson(t, hostCtx, s.passID)
 	expr := fmt.Sprintf(`(() => {
-		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		const sel = document.querySelector(%q);
 		if (!sel) return false;
 		sel.value = "cam-1";
 		sel.dispatchEvent(new Event('change', { bubbles: true }));
 		return true;
-	})()`, s.passID)
+	})()`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil || !ok {
 		t.Fatalf("bind cam-1 via picker: ok=%v err=%v", ok, err)
 	}
-	onCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	onCam1 := fmt.Sprintf(`document.querySelector(%q).value === "cam-1"`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(onCam1, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
 		t.Fatalf("picker did not reflect the live bind to cam-1: %v", err)
 	}
@@ -265,7 +281,7 @@ func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
 	_ = resp.Body.Close()
 
 	// The picker must move back to Unassigned — a stale override must not keep showing cam-1.
-	unassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	unassigned := fmt.Sprintf(`document.querySelector(%q).value === ""`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(unassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
 		t.Fatalf("picker kept showing cam-1 after a live unbind elsewhere — stale override masked the roster: %v", err)
 	}
@@ -309,21 +325,22 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passIDB), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passIDB), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render both guest pickers: %v", err)
 	}
 
 	// Pre-live bind A → cam-1 via the picker (DB-only → local override); it sticks to cam-1.
 	var ok bool
+	pickerA := greenroomPerson(t, hostCtx, s.passID)
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
-		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		const sel = document.querySelector(%q);
 		if (!sel) return false; sel.value = "cam-1"; sel.dispatchEvent(new Event('change',{bubbles:true})); return true;
-	})()`, s.passID), &ok)); err != nil || !ok {
+	})()`, pickerA), &ok)); err != nil || !ok {
 		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
 	}
-	aCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	aCam1 := fmt.Sprintf(`document.querySelector(%q).value === "cam-1"`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(60*time.Second))); err != nil {
 		t.Fatalf("A's pre-live override did not stick to cam-1: %v", err)
 	}
@@ -349,7 +366,7 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 	}
 
 	// A's picker must drop to Unassigned (its override cleared by the displacement), not stay cam-1.
-	aUnassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	aUnassigned := fmt.Sprintf(`document.querySelector(%q).value === ""`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(60*time.Second))); err != nil {
 		t.Fatalf("A's stale override survived B being bound into cam-1: %v", err)
 	}
@@ -382,20 +399,21 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest picker: %v", err)
 	}
 
 	// Pre-live bind A → cam-1 (override); it sticks.
 	var ok bool
+	pickerA := greenroomPerson(t, hostCtx, s.passID)
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
-		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		const sel = document.querySelector(%q);
 		if (!sel) return false; sel.value = "cam-1"; sel.dispatchEvent(new Event('change',{bubbles:true})); return true;
-	})()`, s.passID), &ok)); err != nil || !ok {
+	})()`, pickerA), &ok)); err != nil || !ok {
 		t.Fatalf("bind A→cam-1: ok=%v err=%v", ok, err)
 	}
-	aCam1 := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === "cam-1"`, s.passID)
+	aCam1 := fmt.Sprintf(`document.querySelector(%q).value === "cam-1"`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
 		t.Fatalf("A's pre-live override did not stick: %v", err)
 	}
@@ -419,7 +437,7 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 	}
 
 	// Going live (session-live) must drop the stale override: A's picker returns to Unassigned.
-	aUnassigned := fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value === ""`, s.passID)
+	aUnassigned := fmt.Sprintf(`document.querySelector(%q).value === ""`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(aUnassigned, nil, chromedp.WithPollingTimeout(30*time.Second))); err != nil {
 		t.Fatalf("A's stale override survived Go live after an out-of-band unassign: %v", err)
 	}
@@ -446,12 +464,15 @@ func TestBinding_PreLiveSelectionSurvivesReload(t *testing.T) {
 	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
-	picker := fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID)
+	picker := fmt.Sprintf(`.gr-person-detail[data-guest=%q] .gr-slot`, s.passID)
+	person := fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID)
 	if err := chromedp.Run(hostCtx,
 		network.Enable(),
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(person, chromedp.ByQuery),
+		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.WaitVisible(picker, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the picker: %v", err)
@@ -474,6 +495,8 @@ func TestBinding_PreLiveSelectionSurvivesReload(t *testing.T) {
 	if err := chromedp.Run(hostCtx,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(person, chromedp.ByQuery),
+		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.WaitVisible(picker, chromedp.ByQuery),
 		chromedp.Poll(onCam1, nil, chromedp.WithPollingTimeout(30*time.Second)),
 	); err != nil {
@@ -510,20 +533,21 @@ func TestBinding_FailedBindSurfacesError(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(fmt.Sprintf(`.gr-tile[data-guest=%q] .gr-slot`, s.passID), chromedp.ByQuery),
+		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest slot picker: %v", err)
 	}
 
 	// Bind to cam-2, which the seed never provisioned → 404.
 	var ok bool
+	pickerA := greenroomPerson(t, hostCtx, s.passID)
 	expr := fmt.Sprintf(`(() => {
-		const sel = document.querySelector('.gr-tile[data-guest=%q] .gr-slot');
+		const sel = document.querySelector(%q);
 		if (!sel) return false;
 		sel.value = "cam-2";
 		sel.dispatchEvent(new Event('change', { bubbles: true }));
 		return true;
-	})()`, s.passID)
+	})()`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Evaluate(expr, &ok)); err != nil {
 		t.Fatalf("bind to unprovisioned cam-2 via picker: %v", err)
 	}
@@ -546,7 +570,7 @@ func TestBinding_FailedBindSurfacesError(t *testing.T) {
 	// The picker must NOT have stuck on cam-2 (no roster update happened); it snaps back.
 	var pickerVal string
 	if err := chromedp.Run(hostCtx,
-		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('.gr-tile[data-guest=%q] .gr-slot').value`, s.passID), &pickerVal),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).value`, pickerA), &pickerVal),
 	); err != nil {
 		t.Fatalf("read picker value: %v", err)
 	}

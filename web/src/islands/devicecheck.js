@@ -105,6 +105,11 @@ function DeviceCheck() {
   // its own roster entry's locks. On a lock the matching outbound track is stopped AT SOURCE
   // (RF-8); the guest-session renders the visible "muted/hidden by host" notice from these.
   const [lockedMods, setLockedMods] = useState(/** @type {string[]} */ ([]));
+  // selfCapture is the guest's voluntary live mic/camera preference. It is deliberately separate
+  // from host locks: releasing a host mute must restore the guest's prior choice, not silently turn
+  // their microphone back on. The ref is read by the once-registered roster callback; state drives
+  // the in-session controls.
+  const [selfCapture, setSelfCapture] = useState({ mic: true, cam: true });
   // Backstage chat + roster state for the in-session guest-session view (AC-12). messages are
   // rendered ONLY from relayed {t:chat} frames and held in memory — never persisted or echoed
   // optimistically (EN-20), so a message appearing proves it round-tripped the server relay.
@@ -177,6 +182,8 @@ function DeviceCheck() {
   const videoRef = useRef(null);
   /** @type {{current: MediaStream|null}} */
   const streamRef = useRef(null);
+  /** @type {{current: {mic:boolean,cam:boolean}}} */
+  const selfCaptureRef = useRef({ mic: true, cam: true });
   // cancelled flips true on unmount so a getUserMedia promise that resolves AFTER the island
   // is gone releases its stream instead of leaking the camera.
   const cancelledRef = useRef(false);
@@ -285,8 +292,25 @@ function DeviceCheck() {
   function installStream(stream) {
     const prev = streamRef.current;
     streamRef.current = stream;
+    selfCaptureRef.current = { mic: true, cam: true };
+    setSelfCapture(selfCaptureRef.current);
     if (prev && prev !== stream) prev.getTracks().forEach((t) => t.stop());
     if (videoRef.current) videoRef.current.srcObject = stream;
+  }
+
+  // toggleSelfCapture changes only the guest's own camera/mic tracks. It never tries to override a
+  // host suppression lock; the server remains authoritative and the disabled UI explains that state.
+  function toggleSelfCapture(modality) {
+    if ((modality !== "mic" && modality !== "cam") || lockedMods.includes(modality)) return;
+    const next = !selfCaptureRef.current[modality];
+    selfCaptureRef.current = { ...selfCaptureRef.current, [modality]: next };
+    if (pubRef.current) pubRef.current.setModalityEnabled(modality, next);
+    else {
+      const stream = streamRef.current;
+      const tracks = modality === "mic" ? stream?.getAudioTracks() || [] : stream?.getVideoTracks() || [];
+      for (const track of tracks) track.enabled = next;
+    }
+    setSelfCapture(selfCaptureRef.current);
   }
 
   // syncSelectedFromTracks points the dropdowns at the devices the captured stream is ACTUALLY using
@@ -656,12 +680,14 @@ function DeviceCheck() {
             setOnAir(me.onAir || "status-unavailable");
             setHandRaised(!!me.handRaised); // server-authoritative raise-hand (incl. host dismiss)
             setViewerRole(me.role); // our own rank → which thumbnail controls we may use (within rank)
-            // RF-8: stop a force-suppressed modality's outbound track AT SOURCE (and re-enable a
-            // released one). The server also rejects any self-state that re-enables a locked
-            // modality, so this is cooperative source-side enforcement, not the authority (EN-7).
+            // RF-8: stop a force-suppressed modality's outbound track AT SOURCE. A released lock
+            // restores the guest's own chosen state rather than always turning capture back on;
+            // otherwise an unrelated roster refresh could defeat a voluntary guest mute. The server
+            // still rejects any attempt to self-enable a locked modality, so this remains cooperative
+            // source-side enforcement rather than the authority (EN-7).
             const locked = (me.locks || []).map((l) => l.kind);
-            for (const m of ["mic", "cam", "share"]) {
-              publisher.setModalityEnabled(m, !locked.includes(m));
+            for (const m of ["mic", "cam"]) {
+              publisher.setModalityEnabled(m, !locked.includes(m) && selfCaptureRef.current[m]);
             }
             setLockedMods(locked);
             setSelfDegraded(me.degraded || null); // our own degradation, round-tripped (AD-21/AC-15)
@@ -1232,6 +1258,8 @@ function DeviceCheck() {
         streaming={streaming}
         lockedMods={lockedMods}
         selfStream={streamRef.current}
+        selfCapture={selfCapture}
+        onToggleCapture={toggleSelfCapture}
         peers={peers}
         selfId={selfId}
         messages={messages}

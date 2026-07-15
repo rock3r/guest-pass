@@ -135,12 +135,16 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 	shot(t, host, shotsDir, "02-grid")
 	beat(headful)
 
-	// 5) RF-8: force-no-cam guest 1 FROM the host tile (the page's own socket). The host tile's video
+	// 5) RF-8: force-no-cam guest 1 FROM the host People rail (the page's own socket). The host tile's video
 	//    track AND the OBS source's video track must go black — receiver-side detach, independent of
 	//    the guest (which keeps sending). Then release restores both.
 	tile := `.gr-tile[data-guest="` + s.passIDs[0] + `"]`
+	person := `.gr-person[data-guest="` + s.passIDs[0] + `"]`
+	detail := `.gr-person-detail[data-guest="` + s.passIDs[0] + `"]`
 	if err := chromedp.Run(host,
-		chromedp.Click(tile+` .gr-force[data-kind="cam"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(person, chromedp.ByQuery),
+		chromedp.Click(person, chromedp.ByQuery),
+		chromedp.Click(detail+` .gr-force[data-kind="cam"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(tile+` .gr-lock`, chromedp.ByQuery),
 		chromedp.Poll(trackEnabledIs(tile+` .gr-video`, "video", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
 	); err != nil {
@@ -157,7 +161,7 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 	beat(headful)
 
 	if err := chromedp.Run(host,
-		chromedp.Click(tile+` .gr-release[data-kind="cam"]`, chromedp.ByQuery),
+		chromedp.Click(detail+` .gr-release[data-kind="cam"]`, chromedp.ByQuery),
 		chromedp.WaitNotPresent(tile+` .gr-lock`, chromedp.ByQuery),
 		chromedp.Poll(trackEnabledIs(tile+` .gr-video`, "video", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
 	); err != nil {

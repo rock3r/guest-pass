@@ -49,6 +49,38 @@ type dashStream struct {
 	TimeShort   string // e.g. "18:00 UTC"; empty when unscheduled
 }
 
+// greenroom renders the host's live control room in the authenticated app shell. The room's
+// realtime state still comes from the island over WebSocket; this server-rendered context gives a
+// host an immediate, safe workspace frame before the connection is established.
+func (s *appServer) greenroom(w http.ResponseWriter, r *http.Request) {
+	host, ok := auth.HostFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	data := pageData{Title: "Greenroom", Nav: "greenroom", Host: hostNav(host)}
+	sess, err := s.store.ActiveSession(r.Context(), host.ID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		// A host may open the room before declaring a stream live. The island keeps its
+		// existing pre-live behavior; omit stream-specific navigation until there is one.
+	case err != nil:
+		http.Error(w, "could not load active stream", http.StatusInternalServerError)
+		return
+	default:
+		st, err := s.store.GetStream(r.Context(), sess.StreamID)
+		if err != nil {
+			http.Error(w, "could not load active stream", http.StatusInternalServerError)
+			return
+		}
+		data.Title = st.Title + " · Greenroom"
+		data.CurrentStream = &navStream{ID: st.ID, Title: st.Title, IsLive: true}
+	}
+
+	s.rd.render(w, r, "greenroom.html", data)
+}
+
 type dashboardData struct {
 	Streams         []dashStream
 	UpcomingStreams []dashStream      // draft or scheduled, for the "Up next" panel

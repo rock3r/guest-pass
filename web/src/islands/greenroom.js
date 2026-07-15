@@ -3,7 +3,7 @@ import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { ReconnectingSession } from "../rtc/session.js";
 import { PeerLink } from "../rtc/peerlink.js";
-import { Tile, FORCE_FRAME } from "./grid-tile.js";
+import { PersonControls, Tile, FORCE_FRAME } from "./grid-tile.js";
 
 /**
  * Greenroom is the host's live multi-guest monitoring grid (D-10/AC-10): it connects to the
@@ -18,6 +18,14 @@ import { Tile, FORCE_FRAME } from "./grid-tile.js";
  */
 
 const isGuestRole = (role) => role === "guest" || role === "cohost";
+
+// Keep the People rail's compact availability label aligned with the tile copy. This lives here
+// because the rail is an orchestration concern; the shared tile keeps its own presentation helper.
+function onAirLabel(onAir) {
+  if (onAir === "on-air") return "On air";
+  if (onAir === "not-on-air") return "Not on air";
+  return "Status unavailable";
+}
 
 /**
  * CeilingControl is the host-only stream-wide program quality ceiling control (D-19/AC-8): max
@@ -102,6 +110,132 @@ function ScreenTile({ tile, live, onSelect }) {
 }
 
 /**
+ * PeopleRail keeps the host's operational controls in one stable place while the video grid stays
+ * focused on monitoring. Selecting a person never changes media state; it only scopes the existing
+ * server-authorized actions to the participant the host intends to manage.
+ * @param {{tiles:Array<{id:string,entry:any,stream:MediaStream|null}>, selectedEntry:any, selectedPeerID:string, onSelect:(id:string)=>void, viewerRole:string, live:boolean, onForce:(id:string,m:string)=>void, onRelease:(id:string,m:string)=>void, onRole:(id:string,role:string)=>void, onDismissHand:(id:string)=>void, onBindSlot:(id:string,slot:string)=>void, onSetName:(id:string,name:string)=>void, onSetCanScreen:(id:string,can:boolean)=>void, quality:import("preact").VNode}} props
+ * @returns {import("preact").VNode}
+ */
+function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen, quality }) {
+  return (
+    <aside class="gr-people-rail" aria-label="People controls">
+      <div class="gr-people-head">
+        <div>
+          <p class="gr-rail-label">People</p>
+          <h2>Room participants</h2>
+        </div>
+        <span class="gr-people-count" aria-label={`${tiles.length} participant${tiles.length === 1 ? "" : "s"}`}>
+          {tiles.length}
+        </span>
+      </div>
+      {tiles.length ? (
+        <div class="gr-people-list" role="list">
+          {tiles.map((tile) => (
+            <button
+              type="button"
+              class="gr-person"
+              data-guest={tile.id}
+              data-selected={tile.id === selectedPeerID ? "1" : "0"}
+              aria-pressed={tile.id === selectedPeerID}
+              onClick={() => onSelect(tile.id)}
+            >
+              <span class="gr-person-name">{tile.entry.name || tile.entry.id}</span>
+              <span class="gr-person-status">{onAirLabel(tile.entry.onAir)}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p class="gr-people-empty">Guests will appear here when they connect.</p>
+      )}
+      {selectedEntry ? (
+        <PersonControls
+          entry={selectedEntry}
+          viewerRole={viewerRole}
+          live={live}
+          onForce={(kind) => onForce(selectedEntry.id, kind)}
+          onRelease={(kind) => onRelease(selectedEntry.id, kind)}
+          onRole={(role) => onRole(selectedEntry.id, role)}
+          onDismissHand={() => onDismissHand(selectedEntry.id)}
+          onBindSlot={(slot) => onBindSlot(selectedEntry.id, slot)}
+          onSetName={(name) => onSetName(selectedEntry.id, name)}
+          onSetCanScreen={(can) => onSetCanScreen(selectedEntry.id, can)}
+        />
+      ) : null}
+      {quality}
+    </aside>
+  );
+}
+
+/**
+ * QualityControls keeps stream-wide recovery, ceiling, and verified-live state next to the People
+ * controls instead of splitting a host's attention across a utility bar and the participant rail.
+ * @param {{state:string, anyDegraded:boolean, recoverGroupRef:any, infoOpen:boolean, onInfo:()=>void, onRecover:()=>void, ceiling:any, onApply:(streamId:string,maxRes:number,maxFps:number,maxBitrateKbps:number)=>void, verifiedLive:any, bindError:string}} props
+ * @returns {import("preact").VNode}
+ */
+function QualityControls({ state, anyDegraded, recoverGroupRef, infoOpen, onInfo, onRecover, ceiling, onApply, verifiedLive, bindError }) {
+  return (
+    <section class="gr-quality-rail" aria-label="Quality and live status">
+      <div class="gr-quality-head">
+        <p class="gr-rail-label">Quality</p>
+        <h2>Stream health</h2>
+      </div>
+      <div class="gr-toolbar">
+        {state === "live" ? (
+          <div class="gr-recover-group" ref={recoverGroupRef}>
+            <button
+              type="button"
+              class="gr-recover"
+              disabled={!anyDegraded}
+              title={
+                anyDegraded
+                  ? "Restore full quality for every guest now"
+                  : "Quality is already at the maximum — nothing to bump"
+              }
+              onClick={onRecover}
+            >
+              Bump quality now
+            </button>
+            <button
+              type="button"
+              class="gr-recover-info"
+              aria-label="What does “Bump quality now” do?"
+              aria-expanded={infoOpen}
+              onClick={onInfo}
+            >
+              <span aria-hidden="true">i</span>
+            </button>
+            {infoOpen ? (
+              <div class="gr-recover-pop" role="tooltip">
+                When a guest&rsquo;s connection or CPU is under strain, GuestPass automatically lowers their video quality,
+                then eases it back up slowly so it doesn&rsquo;t flap. &ldquo;Bump quality now&rdquo; skips that wait and asks every
+                guest&rsquo;s browser to jump straight back to full quality. If the strain is still there, it eases back down on
+                its own. It only does something while a guest is degraded.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {ceiling ? <CeilingControl ceiling={ceiling} onApply={onApply} /> : null}
+        {verifiedLive ? (
+          <span class="gr-verified" data-verified-status={verifiedLive.status} data-verified-platform={verifiedLive.platform}>
+            {verifiedLive.status === "live"
+              ? `● Live (verified on ${verifiedLive.platform})`
+              : verifiedLive.status === "offline"
+                ? `Not live on ${verifiedLive.platform}`
+                : `${verifiedLive.platform}: live status unavailable`}
+            {verifiedLive.watch_url ? (
+              <a class="gr-verified-watch" href={verifiedLive.watch_url} target="_blank" rel="noopener noreferrer">
+                {" "}watch ↗
+              </a>
+            ) : null}
+          </span>
+        ) : null}
+        {bindError ? <p class="gr-binderr" role="alert">{bindError}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+/**
  * Greenroom is the grid island.
  * @returns {import("preact").VNode}
  */
@@ -115,6 +249,9 @@ function Greenroom() {
   // moderation controls the viewer may use. The /greenroom host is "host"; the grid is reused for
   // a co-host in the guest-session (PR-11).
   const [viewerRole, setViewerRole] = useState("host");
+  // The host selects a participant in the persistent People rail. If the roster changes, deriving
+  // the effective selection from the current tiles safely falls back to the first connected person.
+  const [selectedPeerID, setSelectedPeerID] = useState("");
   // bindError surfaces a failed slot (re)bind to the host: the picker is controlled by
   // entry.boundSlot (roster-driven), so a rejected PUT snaps the picker back AND shows why
   // (e.g. 404 when slots aren't provisioned yet — the host must open the Sources tab first).
@@ -660,6 +797,12 @@ function Greenroom() {
   // non-null `degraded` only while that publisher is actively shedding or still climbing back
   // (AD-21). With nothing degraded there's nothing to bump, so the button is disabled.
   const anyDegraded = tiles.some((t) => t.entry && t.entry.degraded);
+  const selectedTile = tiles.find((t) => t.id === selectedPeerID) || tiles[0] || null;
+  const selectedEntry = selectedTile
+    ? selectedTile.id in boundOverrides
+      ? { ...selectedTile.entry, boundSlot: boundOverrides[selectedTile.id] }
+      : selectedTile.entry
+    : null;
 
   return (
     <div class="greenroom" data-state={state}>
@@ -694,74 +837,8 @@ function Greenroom() {
           <p class="gr-error-body">The greenroom couldn’t reconnect after several tries. Reload the page to try again.</p>
         </div>
       ) : null}
-      <div class="gr-toolbar">
-        {/* Host-only "bump quality now" (AD-21/D-34): broadcasts {t:recover-quality} so every
-            publisher recovers immediately, overriding the slow recover hysteresis. Shown only
-            while live, and clickable only when a guest is actually degraded — there's nothing to
-            bump at full quality. The ⓘ opens an explainer popover. */}
-        {state === "live" ? (
-          <div class="gr-recover-group" ref={recoverGroupRef}>
-            <button
-              type="button"
-              class="gr-recover"
-              disabled={!anyDegraded}
-              title={
-                anyDegraded
-                  ? "Restore full quality for every guest now"
-                  : "Quality is already at the maximum — nothing to bump"
-              }
-              onClick={() => roomRef.current?.send({ t: "recover-quality" })}
-            >
-              Bump quality now
-            </button>
-            <button
-              type="button"
-              class="gr-recover-info"
-              aria-label="What does “Bump quality now” do?"
-              aria-expanded={infoOpen}
-              onClick={() => setInfoOpen((v) => !v)}
-            >
-              <span aria-hidden="true">i</span>
-            </button>
-            {infoOpen ? (
-              <div class="gr-recover-pop" role="tooltip">
-                When a guest&rsquo;s connection or CPU is under strain, GuestPass automatically lowers
-                their video quality, then eases it back up slowly so it doesn&rsquo;t flap. &ldquo;Bump
-                quality now&rdquo; skips that wait and asks every guest&rsquo;s browser to jump straight
-                back to full quality. If the strain is still there, it eases back down on its own. It
-                only does something while a guest is degraded.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {ceiling ? <CeilingControl ceiling={ceiling} onApply={applyCeiling} /> : null}
-        {/* Verified-live signal (D-29/AC-8): folds the linked channel's live status into the D-24
-            broadcast surface, alongside the OBS-reflected on-air. Shown only when a channel is linked. */}
-        {verifiedLive ? (
-          <span
-            class="gr-verified"
-            data-verified-status={verifiedLive.status}
-            data-verified-platform={verifiedLive.platform}
-          >
-            {verifiedLive.status === "live"
-              ? `● Live (verified on ${verifiedLive.platform})`
-              : verifiedLive.status === "offline"
-                ? `Not live on ${verifiedLive.platform}`
-                : `${verifiedLive.platform}: live status unavailable`}
-            {verifiedLive.watch_url ? (
-              <a class="gr-verified-watch" href={verifiedLive.watch_url} target="_blank" rel="noopener noreferrer">
-                {" "}
-                watch ↗
-              </a>
-            ) : null}
-          </span>
-        ) : null}
-        {bindError ? (
-          <p class="gr-binderr" role="alert">
-            {bindError}
-          </p>
-        ) : null}
-      </div>
+      <div class="gr-control-layout">
+      <div class="gr-main-stage">
       {/* Screenshare preview-switcher rail (D-21/AC-11): every active sharer as a thumbnail; the host
           picks which one is live (the live render is the badged tile, shown to everyone backstage +
           on /s/screen). Host-only — guests never see the rail (the screen-roster is host-only). */}
@@ -789,7 +866,7 @@ function Greenroom() {
           // rebuilds from the fresh roster once a reconnect recovers).
           state === "ended" || state === "error" || state === "reconnecting" || state === "displaced" ? null : (
             <p class="gr-empty" data-state={state}>
-              Waiting for guests to join…
+              No guests are connected yet. They&rsquo;ll appear here when they open their invite link; manage invitations from the stream dashboard.
             </p>
           )
         ) : (
@@ -811,9 +888,41 @@ function Greenroom() {
             onBindSlot={(slot) => bindSlot(t.id, slot)}
             onSetName={(name) => setName(t.id, name)}
             onSetCanScreen={(can) => setCanScreen(t.id, can)}
+            showControls={false}
           />
           ))
         )}
+      </div>
+      </div>
+      <PeopleRail
+        tiles={tiles}
+        selectedEntry={selectedEntry}
+        selectedPeerID={selectedTile ? selectedTile.id : ""}
+        onSelect={setSelectedPeerID}
+        viewerRole={viewerRole}
+        live={state === "live"}
+        onForce={(id, kind) => roomRef.current?.send({ t: FORCE_FRAME[kind], peerId: id })}
+        onRelease={(id, kind) => roomRef.current?.send({ t: "release", peerId: id, kind })}
+        onRole={(id, role) => roomRef.current?.send({ t: "role", peerId: id, role })}
+        onDismissHand={(id) => roomRef.current?.send({ t: "hand", peerId: id, raised: false })}
+        onBindSlot={bindSlot}
+        onSetName={setName}
+        onSetCanScreen={setCanScreen}
+        quality={
+          <QualityControls
+            state={state}
+            anyDegraded={anyDegraded}
+            recoverGroupRef={recoverGroupRef}
+            infoOpen={infoOpen}
+            onInfo={() => setInfoOpen((v) => !v)}
+            onRecover={() => roomRef.current?.send({ t: "recover-quality" })}
+            ceiling={ceiling}
+            onApply={applyCeiling}
+            verifiedLive={verifiedLive}
+            bindError={bindError}
+          />
+        }
+      />
       </div>
     </div>
   );

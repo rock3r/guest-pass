@@ -108,11 +108,6 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	wsReady := cfg.Hub != nil && cfg.Auth != nil && cfg.Store != nil && cfg.Hasher != nil
 
 	if wsReady {
-		// Host-only greenroom monitor page (host-authenticated, EN-6).
-		r.Group(func(gr chi.Router) {
-			gr.Use(cfg.Auth.RequireHost)
-			gr.Get("/greenroom", rd.greenroom)
-		})
 		// Chromeless OBS cam source page. PUBLIC: the slot source token in the URL
 		// authenticates the /ws?src= the page opens, not the page itself (EN-15). The {slot}
 		// segment is an opaque label; the token resolves the slot server-side.
@@ -176,6 +171,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 		r.Group(func(hr chi.Router) {
 			hr.Use(cfg.Auth.RequireHost)
+			if wsReady {
+				// The host-only greenroom is an authenticated, stream-scoped control room.
+				hr.Get("/greenroom", app.greenroom)
+			}
 			hr.Get("/api/streams", api.listStreams)
 			hr.Post("/api/streams", api.createStream)
 			hr.Get("/api/streams/{id}", api.getStream)

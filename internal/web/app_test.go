@@ -78,7 +78,7 @@ func TestApp_DashboardListsOwnStreams(t *testing.T) {
 	_, alice := a.host(t, "alice")
 	_, bob := a.host(t, "bob")
 
-	a.createStream(t, alice, "Alice Morning Show")
+	aliceStreamID := a.createStream(t, alice, "Alice Morning Show")
 	a.createStream(t, bob, "Bob Secret Stream")
 
 	rec := a.req(t, http.MethodGet, "/app", "", alice)
@@ -91,6 +91,12 @@ func TestApp_DashboardListsOwnStreams(t *testing.T) {
 	}
 	if strings.Contains(body, "Bob Secret Stream") {
 		t.Fatalf("dashboard leaked another host's stream")
+	}
+	if !strings.Contains(body, `href="/app/streams/`+aliceStreamID+`"`) {
+		t.Fatalf("dashboard missing working stream link; body:\n%s", body)
+	}
+	if strings.Contains(body, `/app/streams/`+aliceStreamID+`/invites`) {
+		t.Fatalf("dashboard still links to the removed /invites route; body:\n%s", body)
 	}
 }
 

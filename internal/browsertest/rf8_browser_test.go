@@ -159,10 +159,14 @@ func TestRF8_HostGreenroomDetachesNonCooperatingPublisher(t *testing.T) {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
 	const tile = `.gr-tile[data-role="guest"]`
+	const person = `.gr-person[data-guest]`
+	const detail = `.gr-person-detail[data-guest]`
 	if err := chromedp.Run(hCtx,
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(tile+` .gr-video`, chromedp.ByQuery),
+		chromedp.WaitVisible(person, chromedp.ByQuery),
+		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('`+tile+` .gr-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(90*time.Second)),
 		chromedp.Poll(trackLive(tile+` .gr-video`, "audio"), nil, chromedp.WithPollingTimeout(30*time.Second)),
 	); err != nil {
@@ -172,7 +176,7 @@ func TestRF8_HostGreenroomDetachesNonCooperatingPublisher(t *testing.T) {
 	// Host force-mutes → the lock shows on the tile, and RF-8 detaches the guest's remote audio track
 	// even though the guest keeps sending.
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(tile+` .gr-force[data-kind="mic"]`, chromedp.ByQuery),
+		chromedp.Click(detail+` .gr-force[data-kind="mic"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(tile+` .gr-lock`, chromedp.ByQuery),
 		chromedp.Poll(trackEnabledIs(tile+` .gr-video`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
 	); err != nil {
@@ -184,7 +188,7 @@ func TestRF8_HostGreenroomDetachesNonCooperatingPublisher(t *testing.T) {
 
 	// Release → the host re-attaches the remote audio track.
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(tile+` .gr-release[data-kind="mic"]`, chromedp.ByQuery),
+		chromedp.Click(detail+` .gr-release[data-kind="mic"]`, chromedp.ByQuery),
 		chromedp.WaitNotPresent(tile+` .gr-lock`, chromedp.ByQuery),
 		chromedp.Poll(trackEnabledIs(tile+` .gr-video`, "audio", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
 	); err != nil {

@@ -21,10 +21,14 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	s := seedDeviceCheck(t)
 
 	// Guest A enters (its guest-session view). seedDeviceCheck's pass is not screenshare-eligible, so
-	// the affordance starts absent.
+	// no share action is available; the surface explains how to request permission instead of silently
+	// omitting the capability.
 	aCtx := enterGuestSession(t, s.base, s.rawToken, "A")
-	if err := chromedp.Run(aCtx, chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery)); err != nil {
-		t.Fatalf("the share affordance should be absent before the host grants eligibility: %v", err)
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`.gs-screen[data-eligible="0"]`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.gs-screen-toggle`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("the unavailable share state should explain the missing permission before the host grants eligibility: %v", err)
 	}
 
 	// Host greenroom: guest A's tile carries the (unchecked) eligibility toggle.
@@ -37,13 +41,16 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
-	tileA := `.gr-tile[data-guest="` + s.passID + `"]`
-	toggle := tileA + ` .gr-screenelig-input`
+	personA := `.gr-person[data-guest="` + s.passID + `"]`
+	detailA := `.gr-person-detail[data-guest="` + s.passID + `"]`
+	toggle := detailA + ` .gr-screenelig-input`
 	if err := chromedp.Run(hCtx,
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
+		chromedp.WaitVisible(personA, chromedp.ByQuery),
+		chromedp.Click(personA, chromedp.ByQuery),
 		chromedp.WaitVisible(toggle, chromedp.ByQuery),
-		chromedp.Poll(`!document.querySelector('`+tileA+` .gr-screenelig-input').checked`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+		chromedp.Poll(`!document.querySelector('`+detailA+` .gr-screenelig-input').checked`, nil, chromedp.WithPollingTimeout(10*time.Second)),
 	); err != nil {
 		t.Fatalf("host greenroom did not render guest A's eligibility toggle (unchecked): %v", err)
 	}
@@ -55,21 +62,23 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	if err := chromedp.Run(aCtx, chromedp.WaitVisible(`.gs-screen[data-eligible="1"]`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("the guest's share affordance did not appear after the host granted eligibility: %v", err)
 	}
-	if err := chromedp.Run(hCtx, chromedp.Poll(`document.querySelector('`+tileA+` .gr-screenelig-input').checked`, nil, chromedp.WithPollingTimeout(10*time.Second))); err != nil {
+	if err := chromedp.Run(hCtx, chromedp.Poll(`document.querySelector('`+detailA+` .gr-screenelig-input').checked`, nil, chromedp.WithPollingTimeout(10*time.Second))); err != nil {
 		t.Fatalf("the host's eligibility toggle did not reflect the grant: %v", err)
 	}
 
-	// REVOKE: host unchecks → the affordance disappears AND the force-no-share lock notice shows.
+	// REVOKE: host unchecks → the available action becomes an explicit unavailable state, and the
+	// force-no-share lock notice shows.
 	if err := chromedp.Run(hCtx, chromedp.Click(toggle, chromedp.ByQuery)); err != nil {
 		t.Fatalf("revoke click: %v", err)
 	}
 	var lock string
 	if err := chromedp.Run(aCtx,
-		chromedp.WaitNotPresent(`.gs-screen`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-screen[data-eligible="0"]`, chromedp.ByQuery),
+		chromedp.WaitNotPresent(`.gs-screen-toggle`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gs-lock`, chromedp.ByQuery),
 		chromedp.Text(`.gs-lock`, &lock, chromedp.ByQuery),
 	); err != nil {
-		t.Fatalf("revoke did not remove the affordance + show the force-no-share notice: %v", err)
+		t.Fatalf("revoke did not show the unavailable state + force-no-share notice: %v", err)
 	}
 	if !strings.Contains(lock, "Screen share stopped by host") {
 		t.Fatalf("revoke force-lock notice = %q, want 'Screen share stopped by host'", lock)

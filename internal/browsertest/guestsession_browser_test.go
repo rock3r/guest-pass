@@ -10,8 +10,10 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/coder/websocket"
 
 	"github.com/rock3r/guest-pass/internal/auth"
+	"github.com/rock3r/guest-pass/internal/signaling"
 )
 
 // enterGuestSession opens a FRESH fake-media browser, runs the device check, enters, and waits for
@@ -120,10 +122,14 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 		return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 	})
 	tileA := `.gr-tile[data-guest="` + s.passID + `"]`
+	personA := `.gr-person[data-guest="` + s.passID + `"]`
+	detailA := `.gr-person-detail[data-guest="` + s.passID + `"]`
 	if err := chromedp.Run(hCtx,
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(tileA, chromedp.ByQuery),
+		chromedp.WaitVisible(personA, chromedp.ByQuery),
+		chromedp.Click(personA, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("host greenroom did not render guest A's tile: %v", err)
 	}
@@ -138,7 +144,7 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 
 	// Host force-mutes guest A → A's guest-session shows the separate force-lock notice (D-13).
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(tileA+` .gr-force[data-kind="mic"]`, chromedp.ByQuery),
+		chromedp.Click(detailA+` .gr-force[data-kind="mic"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("host force-mute click: %v", err)
 	}
@@ -151,5 +157,68 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 	}
 	if !strings.Contains(lock, "Muted by host") {
 		t.Fatalf("force-lock notice = %q, want it to contain 'Muted by host'", lock)
+	}
+	var lockHelp string
+	if err := chromedp.Run(aCtx,
+		chromedp.WaitVisible(`.gs-self-mic:disabled`, chromedp.ByQuery),
+		chromedp.Text(`.gs-self-control-note`, &lockHelp, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("force-muted guest did not get a disabled control with an explanation: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(lockHelp), "host") {
+		t.Fatalf("locked microphone explanation = %q, want host authority copy", lockHelp)
+	}
+}
+
+// A guest controls their own already-published capture without rejoining. The buttons flip the
+// tracks that feed the self-view and every P2P consumer; the level meter is present even when
+// Chrome's synthetic microphone happens to be silent.
+func TestGuestSession_SelfCaptureControls(t *testing.T) {
+	s := seedDeviceCheck(t)
+	ctx := enterGuestSession(t, s.base, s.rawToken, "A")
+	if err := chromedp.Run(ctx,
+		chromedp.WaitVisible(`.gs-self-controls`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.gs-audio-meter[role="meter"]`, chromedp.ByQuery),
+		chromedp.Click(`.gs-self-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Click(`.gs-self-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "audio", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Click(`.gs-self-cam`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "video", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Click(`.gs-self-cam`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "video", true), nil, chromedp.WithPollingTimeout(15*time.Second)),
+	); err != nil {
+		t.Fatalf("guest could not control their own live microphone/camera: %v", err)
+	}
+
+	// The guest's voluntary mute must survive a host mute/release cycle: a release removes only the
+	// host authority, never grants consent to turn a guest's mic back on. Drive moderation directly
+	// over the authenticated host socket so this assertion does not depend on the separate host-video
+	// connection established by the grid.
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`.gs-self-mic`, chromedp.ByQuery),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
+	); err != nil {
+		t.Fatalf("guest could not leave their microphone muted before the host lock: %v", err)
+	}
+	host := dialHostWS(t, s)
+	t.Cleanup(func() { _ = host.Close(websocket.StatusNormalClosure, "") })
+	writeFrame(t, host, signaling.Frame{T: "force-mute", PeerID: s.passID})
+	var lockHelp string
+	if err := chromedp.Run(ctx,
+		chromedp.WaitVisible(`.gs-self-mic:disabled`, chromedp.ByQuery),
+		chromedp.Text(`.gs-self-control-note`, &lockHelp, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("force-muted guest did not get a disabled control with an explanation: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(lockHelp), "host") {
+		t.Fatalf("locked microphone explanation = %q, want host authority copy", lockHelp)
+	}
+	writeFrame(t, host, signaling.Frame{T: "release", PeerID: s.passID, Kind: "mic"})
+	if err := chromedp.Run(ctx,
+		chromedp.Poll(`!((document.querySelector('[data-entered]').dataset.locked || '').split(',').includes('mic'))`, nil, chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Poll(trackEnabledIs(`.gs-selfview`, "audio", false), nil, chromedp.WithPollingTimeout(15*time.Second)),
+	); err != nil {
+		t.Fatalf("host release did not preserve the guest's voluntary mute: %v", err)
 	}
 }

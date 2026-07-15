@@ -624,8 +624,9 @@ web/
                       (signaling WS + ICE config from the join-ack + {t:ice-refresh}), session
                       (ReconnectingSession), getStats sampling
   src/islands/        device-check(+publish + backstage mesh; renders guest-session in-session),
-                      greenroom grid, guest-session (self-view, chat, raise-hand, on-air, locks,
-                      backstage thumbnails), grid-tile (shared tile + moderation controls)
+                      greenroom monitor + People/quality rail, guest-session (self-view, local
+                      mic/camera controls + level meter, screenshare, chat, raise-hand, on-air,
+                      locks, backstage thumbnails), grid-tile (shared tile + moderation controls)
   src/obs/            cam + screen source pages (separate minimal entry — no fonts, EN-13)
   src/styles/         tokens verbatim from styles-v2.css (D-9)
   vendor/preact/      vendored MIT (D-32)   ·   fonts/  OFL woff2 ×3 (EN-17)
@@ -1276,8 +1277,8 @@ navigation, islands mount per-page against a known root element.
 | Admin console | Go `html/template` | minimal (poll/refresh) |
 | Error / state screens | Go `html/template` | none (the in-session `reconnecting` overlay and terminate-routed screens are island-rendered — they react to a `{t:terminate}` WS frame). Auth-denial screens (M5.5) are server-rendered for navigations: a gated host (suspended/pending), a non-admin hitting `/admin`, and an unauthenticated navigation each get an explanatory page keyed off the live authz outcome, while fetch/XHR callers (the islands → `/api/*`) keep the terse plain-text body. The same content-negotiated path renders the **404** (router `NotFound`) and the **pass-landing** states (`/p/{token}`): an expired/past-deadline pass → "invite expired" (410, with the +30 min grace copy, D-5); a revoked pass → opaque "link turned off" (410); an unknown/rotated token → the same link-off screen but **404** (unknown and rotated are indistinguishable, so the not-found contract holds). The **device-check** capture failures are island-rendered with distinct copy (DESIGN §6): a denied permission → `cam-blocked`, no attached devices → `no-devices`, and a browser with no WebRTC (old engine / in-app webview, detected up front) → terminal `unsupported` with no retry. The `cam-blocked` screen offers a real **"Join audio-only"** fallback (PD-12): it re-runs `getUserMedia({audio:true,video:false})` and, when the mic is available, enters the greenroom publishing a mic-only stream (if the mic is also blocked it just re-surfaces the blocked screen — never a dead-end button). A video-less guest publishes through the unchanged media path (the Publisher/mesh take whatever tracks the stream has; on-air stays OBS-reflected, never inferred from a video track), and renders as **connected-with-audio** — a placeholder over the black tile (`data-novideo`) on the self-view, the greenroom grid tile, and the backstage thumbnails, with the OBS cam source carrying the audio and exposing a `data-obs-novideo` seam for the host's Custom CSS. Two in-session guest states are also island-derived: `host-waiting` (the guest is connected/live but no host has appeared in the roster yet — the greenroom room exists before the host opens it, D-40; latched so a host's own reconnect blip doesn't bounce guests back to it), and `guest-left` (a voluntary "Leave the greenroom" — distinct from a terminal terminate — with a rejoin-while-live path, D-40, and the 24 h purge notice, D-37). |
 | **Device check** | `/p/{token}` server page + island | Preact island |
-| **Guest session** | in-session phase of the device-check island (same page, signaling connection, and captured camera) | Preact island |
-| **Greenroom** (host + co-host + guest) | server page + island | Preact island |
+| **Guest session** | in-session phase of the device-check island (same page, signaling connection, and captured camera); the guest can toggle their own mic/camera and see local mic activity, while host locks remain authoritative and explicitly explained | Preact island |
+| **Greenroom** (host + co-host + guest) | host route uses the authenticated app shell plus island; guest/co-host use the guest-session island | Preact island |
 | **OBS source page** (cam + screen) | minimal standalone HTML | **separate** minimal entry (EN-13) |
 
 Islands are confined to ~4–5 screens, keeping the JS attack-and-maintenance surface
@@ -1285,7 +1286,8 @@ tiny and the frontend off the DB/PII path entirely (server-side authz EN-6/EN-8 
 the guard).
 
 **Host-app shell routes (M4).** The out-of-room host UI mounts under the `/app`
-prefix, all behind `RequireHost` (EN-6, so pending/suspended hosts are gated — the
+prefix, and the host's `/greenroom` control room uses the same authenticated shell;
+all are behind `RequireHost` (EN-6, so pending/suspended hosts are gated — the
 gate renders an explanatory screen for a navigation, M5.5, not a bare 403 body). The
 dashboard is `GET /app` (lists the host's streams + the create form); stream
 create/edit/delete are server-rendered forms — `POST /app/streams`,

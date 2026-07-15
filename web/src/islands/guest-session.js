@@ -42,10 +42,62 @@ function onAirLabel(onAir) {
 }
 
 /**
+ * AudioLevelMeter visualizes the local microphone signal without sending or retaining any audio.
+ * Browsers may keep a newly-created AudioContext suspended until a gesture (and fake test media may
+ * be silent), so the meter intentionally settles at zero rather than treating that as an error.
+ * @param {{stream: MediaStream|null, enabled: boolean}} props
+ */
+function AudioLevelMeter({ stream, enabled }) {
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    const track = stream && stream.getAudioTracks()[0];
+    if (!track || !enabled) {
+      setLevel(0);
+      return undefined;
+    }
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return undefined;
+    let context;
+    let frame = 0;
+    try {
+      context = new AudioContextClass();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      const samples = new Uint8Array(analyser.fftSize);
+      context.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+      context.resume().catch(() => {});
+      const sample = () => {
+        analyser.getByteTimeDomainData(samples);
+        let total = 0;
+        for (const value of samples) {
+          const normalized = (value - 128) / 128;
+          total += normalized * normalized;
+        }
+        setLevel(Math.min(5, Math.round(Math.sqrt(total / samples.length) * 18)));
+        frame = requestAnimationFrame(sample);
+      };
+      sample();
+    } catch {
+      setLevel(0);
+    }
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (context) context.close().catch(() => {});
+    };
+  }, [stream, enabled]);
+
+  return (
+    <div class="gs-audio-meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="5" aria-valuenow={level} data-level={level}>
+      {[1, 2, 3, 4, 5].map((bar) => <span key={bar} class="gs-audio-meter-bar" data-active={bar <= level ? "1" : "0"} />)}
+    </div>
+  );
+}
+
+/**
  * GuestSession renders the guest's in-session view.
  * @param {{
  *   pubState: string, onLeave: ()=>void, onAir: string, streaming: boolean, lockedMods: string[],
- *   selfStream: MediaStream|null, peers: any[], selfId: string,
+ *   selfStream: MediaStream|null, selfCapture: {mic:boolean,cam:boolean}, onToggleCapture: (modality:"mic"|"cam")=>void, peers: any[], selfId: string,
  *   messages: Array<{from:string, text:string}>, handRaised: boolean,
  *   onSendChat: (text:string)=>void, onToggleHand: ()=>void,
  *   screenShare: string, onToggleScreen: ()=>void,
@@ -65,6 +117,8 @@ export function GuestSession({
   streaming,
   lockedMods,
   selfStream,
+  selfCapture,
+  onToggleCapture,
   peers,
   selfId,
   messages,
@@ -138,6 +192,8 @@ export function GuestSession({
   // slot, "live" the host promoted this sharer to /s/screen. Derived solely from the server-folded
   // self pointer — the sharer never asserts "live" optimistically (the host alone selects live).
   const sharing = screenShare === "backstage" || screenShare === "live";
+  const micLocked = (lockedMods || []).includes("mic");
+  const camLocked = (lockedMods || []).includes("cam");
 
   // The chat and raise-hand actions send over the signaling socket, which throws while it is still
   // CONNECTING (and is dead once disconnected) — so they are disabled until the room is live.
@@ -232,8 +288,45 @@ export function GuestSession({
               {notices.join(" · ")}
             </p>
           ) : null}
-          {canShareScreen ? (
-            <div class="gs-screen" data-eligible="1" data-screen-state={screenShare || "idle"}>
+          <div class="gs-self-controls" aria-label="Your camera and microphone">
+            <div class="gs-self-control">
+              <div>
+                <strong>Microphone</strong>
+                <AudioLevelMeter stream={selfStream} enabled={!!(selfCapture && selfCapture.mic) && !micLocked} />
+              </div>
+              <button
+                type="button"
+                class="gs-self-mic"
+                aria-pressed={!!(selfCapture && selfCapture.mic)}
+                disabled={!selfHasAudio || micLocked || !live}
+                onClick={() => onToggleCapture("mic")}
+              >
+                {selfCapture && selfCapture.mic ? "Mute microphone" : "Unmute microphone"}
+              </button>
+            </div>
+            <div class="gs-self-control">
+              <strong>Camera</strong>
+              <button
+                type="button"
+                class="gs-self-cam"
+                aria-pressed={!!(selfCapture && selfCapture.cam)}
+                disabled={!selfHasVideo || camLocked || !live}
+                onClick={() => onToggleCapture("cam")}
+              >
+                {selfCapture && selfCapture.cam ? "Turn camera off" : "Turn camera on"}
+              </button>
+            </div>
+            <p class="gs-self-control-note" role="status">
+              {micLocked
+                ? "Your microphone is muted by the host. Ask them to release it before turning it on."
+                : camLocked
+                  ? "Your camera is off by the host. Ask them to release it before turning it on."
+                  : "These controls affect your live greenroom feed."}
+            </p>
+          </div>
+          <div class="gs-screen" data-eligible={canShareScreen ? "1" : "0"} data-screen-state={screenShare || "idle"}>
+            {canShareScreen ? (
+              <>
               <button
                 type="button"
                 class="gs-screen-toggle"
@@ -260,8 +353,11 @@ export function GuestSession({
                   Screen sharing enabled by the host.
                 </p>
               )}
-            </div>
-          ) : null}
+              </>
+            ) : (
+              <p class="gs-screen-unavailable">Screen sharing is not enabled for you. Ask the host if you need to present.</p>
+            )}
+          </div>
           <button
             type="button"
             class="gs-hand"

@@ -55,15 +55,20 @@ func TestGreenroom_ModerationControls(t *testing.T) {
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.gr-tile[data-role="guest"] .gr-video`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelector('.gr-tile[data-role="guest"] .gr-video').videoWidth > 0`,
-			nil, chromedp.WithPollingTimeout(90*time.Second)),
 	); err != nil {
-		t.Fatalf("host grid did not render the guest: %v", err)
+		t.Fatalf("host grid did not render the guest tile: %v", err)
+	}
+	if err := chromedp.Run(hCtx, chromedp.Poll(
+		`document.querySelector('.gr-tile[data-role="guest"] .gr-video').videoWidth > 0`,
+		nil, chromedp.WithPollingTimeout(90*time.Second),
+	)); err != nil {
+		t.Fatalf("host tile did not receive the guest's video: %v", err)
 	}
 
-	// Host force-mutes the guest → the tile shows the live, per-modality lock notice (D-13).
+	// Host force-mutes the guest from its selected People-rail controls → the tile shows the live,
+	// per-modality lock notice (D-13).
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(`.gr-tile[data-role="guest"] .gr-force[data-kind="mic"]`, chromedp.ByQuery),
+		chromedp.Click(`.gr-person-detail .gr-force[data-kind="mic"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gr-tile[data-role="guest"] .gr-lock`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("force-mute did not show the live lock on the tile: %v", err)
@@ -86,7 +91,7 @@ func TestGreenroom_ModerationControls(t *testing.T) {
 
 	// Host releases → the lock clears on the tile and the guest re-enables its mic.
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(`.gr-tile[data-role="guest"] .gr-release[data-kind="mic"]`, chromedp.ByQuery),
+		chromedp.Click(`.gr-person-detail .gr-release[data-kind="mic"]`, chromedp.ByQuery),
 		chromedp.WaitNotPresent(`.gr-tile[data-role="guest"] .gr-lock`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("release did not clear the lock: %v", err)
@@ -100,7 +105,7 @@ func TestGreenroom_ModerationControls(t *testing.T) {
 
 	// Host promotes the guest → the tile role flips to co-host (live, D-15).
 	if err := chromedp.Run(hCtx,
-		chromedp.Click(`.gr-tile[data-role="guest"] .gr-role`, chromedp.ByQuery),
+		chromedp.Click(`.gr-person-detail .gr-role`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gr-tile[data-role="cohost"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("promote did not flip the tile role to co-host: %v", err)
