@@ -10,6 +10,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
 	"github.com/rock3r/guest-pass/internal/auth"
@@ -85,26 +86,31 @@ func TestGreenroom_SecondTabDisplacesFirstWithoutWar(t *testing.T) {
 		)
 	}
 
-	// Create both tabs from a shared browser root. A child of tab A can inherit its
-	// target lifecycle; creating sibling targets mirrors the real two-tab case and
-	// keeps the second host connection independently alive while the first is evicted.
+	// Use the root target as tab A, then create tab B after tab A has allocated the browser.
+	// That produces two sibling targets in one Chrome process; deriving both children before the
+	// root has a Browser causes chromedp to allocate independent browser processes instead.
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
 	defer cancelAlloc()
-	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
-	defer cancelRoot()
-	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 90*time.Second)
-	defer cancelDeadline()
-
-	tabA, cancelA := chromedp.NewContext(rootCtx)
+	tabA, cancelA := chromedp.NewContext(allocCtx)
 	defer cancelA()
-	tabB, cancelB := chromedp.NewContext(rootCtx)
-	defer cancelB()
+	tabA, cancelDeadline := context.WithTimeout(tabA, 90*time.Second)
+	defer cancelDeadline()
 
 	if err := open(tabA); err != nil {
 		t.Fatalf("tab A greenroom did not go live: %v", err)
 	}
-	// Tab B is a sibling target in the same browser with the SAME host cookie → it displaces tab A on join.
-	if err := open(tabB); err != nil {
+	// Open tab B from tab A itself and attach to the resulting target. This is the browser's actual
+	// "open in a new tab" path: the two targets share Chrome and its cookie jar, so the second
+	// greenroom connection faithfully displaces the first one.
+	newTab := chromedp.WaitNewTarget(tabA, func(info *target.Info) bool {
+		return info.URL == s.base+"/greenroom"
+	})
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`window.open("/greenroom", "_blank"); void 0`, nil)); err != nil {
+		t.Fatalf("open tab B: %v", err)
+	}
+	tabB, cancelB := chromedp.NewContext(tabA, chromedp.WithTargetID(<-newTab))
+	defer cancelB()
+	if err := chromedp.Run(tabB, chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery)); err != nil {
 		t.Fatalf("tab B greenroom did not go live: %v", err)
 	}
 
