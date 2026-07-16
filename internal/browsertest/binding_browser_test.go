@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
 	"github.com/rock3r/guest-pass/internal/auth"
@@ -378,6 +379,23 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 // broadcasts session-live, which drops all overrides and reconciles to the authoritative roster.
 func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 	s := seedDeviceCheck(t) // NO session yet → the bind is DB-only (override)
+	// Hold the mount-time bindings fetch until after the test has changed the persisted binding.
+	// This makes the historical race deterministic: the response contains cam-1, but it resolves
+	// only AFTER the host receives session-live and must therefore not resurrect a stale override.
+	holdBindingsFetch := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(`(() => {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (...args) => {
+    if (!String(args[0]).includes('/api/passes/slot-bindings')) return nativeFetch(...args);
+    return new Promise((resolve, reject) => {
+      window.__gpReleaseBindingsRequest = () => nativeFetch(...args).then((response) => {
+        window.__gpResolveBindingsResponse = () => resolve(response);
+      }, reject);
+    });
+  };
+})()`).Do(ctx)
+		return err
+	})
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
 	defer cancelAlloc()
@@ -396,10 +414,12 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 	})
 	if err := chromedp.Run(hostCtx,
 		network.Enable(),
+		holdBindingsFetch,
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
+		chromedp.Poll(`typeof window.__gpReleaseBindingsRequest === "function"`, nil, chromedp.WithPollingTimeout(10*time.Second)),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest picker: %v", err)
 	}
@@ -416,6 +436,13 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 	aCam1 := fmt.Sprintf(`document.querySelector(%q).value === "cam-1"`, pickerA)
 	if err := chromedp.Run(hostCtx, chromedp.Poll(aCam1, nil, chromedp.WithPollingTimeout(20*time.Second))); err != nil {
 		t.Fatalf("A's pre-live override did not stick: %v", err)
+	}
+	// Fetch the just-persisted cam-1 binding but hold its response; it will arrive after Go live.
+	if err := chromedp.Run(hostCtx,
+		chromedp.Evaluate(`window.__gpReleaseBindingsRequest()`, nil),
+		chromedp.Poll(`typeof window.__gpResolveBindingsResponse === "function"`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("capture delayed persisted binding: %v", err)
 	}
 
 	// Out-of-band UNASSIGN A (DB-only, no live command/roster), then go live.
@@ -434,6 +461,9 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 		t.Fatalf("go-live: %v", err)
 	} else {
 		_ = resp.Body.Close()
+	}
+	if err := chromedp.Run(hostCtx, chromedp.Evaluate(`window.__gpResolveBindingsResponse()`, nil)); err != nil {
+		t.Fatalf("release delayed persisted binding: %v", err)
 	}
 
 	// Going live (session-live) must drop the stale override: A's picker returns to Unassigned.

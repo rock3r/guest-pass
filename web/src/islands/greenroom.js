@@ -419,6 +419,10 @@ function Greenroom() {
   // by pass id → the slot the host last successfully set (""=unassigned). The roster clears an entry
   // once the authoritative live value catches up (e.g. on Go-live replay).
   const [boundOverrides, setBoundOverrides] = useState({});
+  // The mount-time persisted-bindings request is deliberately best-effort and can resolve after
+  // the host has gone live. Once session-live arrives, only the room roster is authoritative; a
+  // late pre-live response must never resurrect an override that the server has just cleared.
+  const sessionLiveRef = useRef(false);
   // ceiling is the active session's program quality ceiling (D-19/AC-8): {streamId, maxRes, maxFps,
   // maxBitrateKbps} when a session is live, else null (the control is hidden until Go live). Fetched
   // from GET /api/session/ceiling on mount + on session-live, and updated from each adjust's response.
@@ -659,6 +663,7 @@ function Greenroom() {
       // so drop ALL optimistic pre-live overrides. A pass unassigned/displaced from another client
       // before Go live would otherwise keep showing its stale slot while OBS shows the placeholder
       // (codex). Sent after the replay, so entry.boundSlot is already authoritative.
+      sessionLiveRef.current = true;
       setBoundOverrides((prev) => (Object.keys(prev).length ? {} : prev));
       fetchCeiling(); // the session just went live — its ceiling control is now available
     });
@@ -818,7 +823,7 @@ function Greenroom() {
     fetch("/api/passes/slot-bindings")
       .then((r) => (r.ok ? r.json() : {}))
       .then((m) => {
-        if (active && m && typeof m === "object") {
+        if (active && !sessionLiveRef.current && m && typeof m === "object") {
           setBoundOverrides((prev) => ({ ...m, ...prev }));
         }
       })
