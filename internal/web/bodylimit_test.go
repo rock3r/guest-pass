@@ -95,6 +95,26 @@ func TestRequestBodyLimit_WSUpgradeExempt(t *testing.T) {
 	}
 }
 
+// An OBS source uses its own source-scoped signaling endpoint so a Cloudflare Access bypass can
+// remain narrow. It is still a genuine WebSocket stream and must receive the same body-cap
+// exemption as the host/guest endpoint.
+func TestRequestBodyLimit_SourceWSUpgradeExempt(t *testing.T) {
+	next, called, _ := readEcho(t)
+	mw := RequestBodyLimit(16)(next)
+
+	req := wsUpgradeReq()
+	req.URL.Path = "/s/cam-1/ws"
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if !*called {
+		t.Fatal("a genuine source WebSocket upgrade must be exempt from the body cap")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("source WebSocket upgrade exempt = %d, want 200", rec.Code)
+	}
+}
+
 // A genuine upgrade whose Connection/Upgrade tokens are SPLIT across multiple header fields or sit
 // in a comma list (as a proxy may send them) is still recognized and exempt — Header.Get + an exact
 // match would miss the token, but websocket.Accept scans all values, and so must the exemption.

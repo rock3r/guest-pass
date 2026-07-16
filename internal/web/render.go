@@ -156,6 +156,12 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 	}
 	funcs := template.FuncMap{
 		"assetURL": func(name string) string { return bundledAssetURL(name, manifest[name]) },
+		// OBS source pages must load their runtime assets beneath /s/{slot}. Operators commonly
+		// exempt that token-gated path from an edge-access policy; loading the general /_gp assets
+		// instead turns a Cloudflare Access redirect into a CSP failure and a black source.
+		"sourceAssetURL": func(slot, name string) string {
+			return sourceAssetURL(slot, name, manifest[name])
+		},
 	}
 	pages := make(map[string]*template.Template, len(pageFiles)+len(appPageFiles))
 	for _, p := range pageFiles {
@@ -200,6 +206,17 @@ func newRenderer(sourceURL string, manifest map[string]string, devLogin bool) (*
 // cached CSS or JavaScript response that SRI will correctly reject.
 func bundledAssetURL(name, integrity string) string {
 	path := "/_gp/" + name
+	if integrity == "" {
+		return path
+	}
+	return path + "?v=" + url.QueryEscape(integrity)
+}
+
+// sourceAssetURL mirrors bundledAssetURL for the tiny OBS runtime, but scopes the request to
+// the public, token-gated source prefix. This avoids requiring an embedded OBS Chromium instance
+// to complete an interactive edge-access login for its stylesheet or module bundle.
+func sourceAssetURL(slot, name, integrity string) string {
+	path := "/s/" + url.PathEscape(slot) + "/_gp/" + url.PathEscape(name)
 	if integrity == "" {
 		return path
 	}

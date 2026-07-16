@@ -37,14 +37,14 @@ const requestBodyReadTimeout = 30 * time.Second
 // To stop a slowloris client from stalling that read (or a handler's own read) and pinning a
 // goroutine, it sets a per-request body read deadline (requestBodyReadTimeout) before reading.
 //
-// Only a genuine WebSocket upgrade to /ws is exempt — that body is the hijacked streaming socket,
+// Only a genuine WebSocket upgrade to a signaling route is exempt — that body is the hijacked streaming socket,
 // not a finite request body, and capping (or deadlining) it would corrupt the stream. The
 // exemption is gated on the upgrade handshake (not the path alone), so a stray POST /ws or a
 // non-upgrade GET /ws is still capped like any other route.
 func RequestBodyLimit(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/ws" && isWebSocketUpgrade(r) { // streaming signaling — exempt (D-M5.5-4)
+			if isSignalingWSPath(r.URL.Path) && isWebSocketUpgrade(r) { // streaming signaling — exempt (D-M5.5-4)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -88,6 +88,14 @@ func RequestBodyLimit(maxBytes int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isSignalingWSPath(path string) bool {
+	if path == "/ws" {
+		return true
+	}
+	parts := strings.Split(path, "/")
+	return len(parts) == 4 && parts[0] == "" && parts[1] == "s" && parts[2] != "" && parts[3] == "ws"
 }
 
 // isWebSocketUpgrade reports whether r is a genuine WebSocket upgrade handshake (RFC 6455): a GET

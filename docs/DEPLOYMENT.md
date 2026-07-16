@@ -557,6 +557,12 @@ Repeat these steps for each environment (staging first, then prod when ready).
    Applications → Self-hosted.
    - Application domain: `staging.guest-pass.link`
    - Policy: **Allow** → Include → **Emails** → add your address.
+   - Add a more-specific **Bypass** application for
+     `staging.guest-pass.link/s/*`. OBS Browser Sources cannot complete an
+     interactive Access login. The source token still gates the media WebSocket;
+     the source HTML, its two runtime assets, and its source-scoped signaling
+     WebSocket (`/s/{slot}/ws?src=…`) deliberately stay beneath `/s/*` so they
+     all use this bypass.
 
 4. **Add redirect URIs to your Google OAuth client** — Authorised redirect URIs:
    - `https://staging.guest-pass.link/auth/google/callback`
@@ -673,5 +679,8 @@ with a graceful drain (SIGTERM → 25s → exit, RF-21).
   Switch to Resend by removing that line and setting `RESEND_API_KEY` + `MAIL_FROM`.
 - **Cloudflare Access vs. GuestPass auth**: Access is the outer gate (who can
   reach the URL at all); GuestPass sign-in is the inner gate (who can create
-  streams). For staging, both are required. For prod, Access is omitted so
-  anyone can reach the public sign-in page.
+  streams). For staging, both are required for the host app. The narrow `/s/*`
+  bypass is intentional: an OBS source authenticates its source-scoped
+  WebSocket with its per-slot source token, and OBS cannot use the interactive
+  Access flow. For prod, Access is omitted so anyone can reach the public
+  sign-in page.

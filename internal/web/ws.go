@@ -208,6 +208,16 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 	<-writerDone
 }
 
+// serveSource admits only an OBS source credential on the edge-bypassed /s/{slot}/ws route.
+func (h *wsHandler) serveSource(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if !q.Has("src") || q.Has("pass") {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	h.serve(w, r)
+}
+
 // dispatch routes a client frame to the room, enforcing role authority (EN-7): only a
 // host (re)binds slots; only an OBS source reflects on-air program state; any peer may
 // relay signaling. The role comes from the credential, never the frame.
