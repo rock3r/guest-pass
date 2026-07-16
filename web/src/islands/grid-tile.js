@@ -133,7 +133,7 @@ function EligibilityToggle({ entry, onSetCanScreen }) {
 function onAirLabel(onAir) {
   if (onAir === "on-air") return "On air";
   if (onAir === "not-on-air") return "Not on air";
-  return "Awaiting OBS state";
+  return "OBS state unknown";
 }
 
 /**

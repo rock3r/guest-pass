@@ -279,8 +279,49 @@ section.greenroom > .gr-privacy-note {
 }
 
 .gr-empty {
+  display: grid;
+  gap: 8px;
+  max-width: 36rem;
+  padding: 22px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
   color: var(--ink-2);
-  padding: 24px 0;
+}
+.gr-empty h2,
+.gr-empty p {
+  margin: 0;
+}
+.gr-empty h2 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+.gr-empty p:not(.gr-rail-label) {
+  line-height: 1.45;
+}
+.gr-empty-action {
+  justify-self: start;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.gr-empty-action:hover { background: var(--accent); }
+.gr-empty-action:focus-visible { outline: 2px solid var(--accent-press); outline-offset: 2px; }
+.gr-obs-state-help {
+  margin: 0;
+  padding: 8px 9px;
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-xs);
+  background: var(--warn-soft);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* ============ Video tiles — card-edged, design treatment ============ */

@@ -17,6 +17,16 @@ import (
 	"github.com/rock3r/guest-pass/internal/auth"
 )
 
+// The sidebar intentionally starts on Chat. Browser scenarios that exercise host controls must
+// make the same explicit People-tab choice a host makes instead of relying on the old default.
+func openPeopleRail() chromedp.Action {
+	return chromedp.Tasks{
+		chromedp.WaitVisible(`#gr-people-tab`, chromedp.ByQuery),
+		chromedp.Click(`#gr-people-tab`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#gr-people-panel`, chromedp.ByQuery),
+	}
+}
+
 func greenroomPerson(t *testing.T, ctx context.Context, passID string) string {
 	t.Helper()
 	person := fmt.Sprintf(`.gr-person[data-guest=%q]`, passID)
@@ -81,6 +91,7 @@ func TestBinding_GreenroomPickerReroutesSource(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passIDB), chromedp.ByQuery),
 	); err != nil {
@@ -176,6 +187,7 @@ func TestBinding_PreLivePickerKeepsSelection(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render guest A's slot picker: %v", err)
@@ -247,6 +259,7 @@ func TestBinding_LiveUnbindElsewhereClearsPicker(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest slot picker: %v", err)
@@ -326,6 +339,7 @@ func TestBinding_PreLiveOverrideClearedOnDisplacement(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passIDB), chromedp.ByQuery),
 	); err != nil {
@@ -418,6 +432,7 @@ func TestBinding_PreLiveOverrideClearedOnGoLiveAfterUnassign(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 		chromedp.Poll(`typeof window.__gpReleaseBindingsRequest === "function"`, nil, chromedp.WithPollingTimeout(10*time.Second)),
 	); err != nil {
@@ -501,6 +516,7 @@ func TestBinding_PreLiveSelectionSurvivesReload(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(person, chromedp.ByQuery),
 		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.WaitVisible(picker, chromedp.ByQuery),
@@ -525,6 +541,7 @@ func TestBinding_PreLiveSelectionSurvivesReload(t *testing.T) {
 	if err := chromedp.Run(hostCtx,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(person, chromedp.ByQuery),
 		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.WaitVisible(picker, chromedp.ByQuery),
@@ -563,6 +580,7 @@ func TestBinding_FailedBindSurfacesError(t *testing.T) {
 		setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(fmt.Sprintf(`.gr-person[data-guest=%q]`, s.passID), chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("greenroom did not render the guest slot picker: %v", err)

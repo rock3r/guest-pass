@@ -165,6 +165,7 @@ func TestRF8_HostGreenroomDetachesNonCooperatingPublisher(t *testing.T) {
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(tile+` .gr-video`, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(person, chromedp.ByQuery),
 		chromedp.Click(person, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('`+tile+` .gr-video').videoWidth > 0`, nil, chromedp.WithPollingTimeout(90*time.Second)),

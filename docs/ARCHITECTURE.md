@@ -509,7 +509,7 @@ events fire at the default level.
 |---|---|---|
 | **on-air** | `obsSourceActiveChanged.active === true` | source is in an active scene (program) |
 | **not-on-air** | source connected, not in active scene | wired, not live |
-| **status-unavailable** | no OBS signal at all | show "Awaiting OBS state" and explain that the source has not reported yet; do not imply off-air |
+| **status-unavailable** | no OBS signal at all | show "OBS state unknown" and explain that the source has not reported yet; do not imply off-air |
 
 - Detection signal is **`active`** (`obsSourceActiveChanged`), **NOT `visible`** —
   `obsSourceVisibleChanged` also fires in preview and would false-positive.
