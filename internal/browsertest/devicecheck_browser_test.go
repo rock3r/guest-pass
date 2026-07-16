@@ -38,6 +38,7 @@ type devSeed struct {
 	srcToken       string // cam-1 slot's raw source token (/s/{slotLabel}?token=…)
 	slotLabel      string // the cam slot's signaling label ("cam-1")
 	srcTokenScreen string // the screenshare slot's raw source token (/s/screen?token=…)
+	srcTokenHost   string // the dedicated host slot's raw source token (/s/host?token=…)
 	hostID         string // the host's id (room/session key)
 	streamID       string // the seeded stream's id (host-app routes)
 	slotID         string // the cam-1 slot's DB id (regenerate route)
@@ -115,6 +116,17 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 		t.Fatalf("CreateSlot screenshare: %v", err)
 	}
 
+	// The dedicated host slot is bound only while the host explicitly publishes local media.
+	srcHostRaw, err := token.Mint()
+	if err != nil {
+		t.Fatalf("mint host src: %v", err)
+	}
+	if _, err := st.CreateSlot(ctx, store.CreateSlotParams{
+		HostID: host.ID, Kind: store.SlotHost, SourceTokenHash: hasher.Hash(srcHostRaw), SourceTokenPlain: srcHostRaw,
+	}); err != nil {
+		t.Fatalf("CreateSlot host: %v", err)
+	}
+
 	ring, err := auth.NewKeyRing("devcheck-browser-session-secret-cccccccc")
 	if err != nil {
 		t.Fatalf("key ring: %v", err)
@@ -139,7 +151,7 @@ func seedDeviceCheck(t *testing.T) *devSeed {
 	return &devSeed{
 		store: st, base: Serve(t, handler).URL, rawToken: raw, passID: pass.ID,
 		rawTokenB: rawB, passIDB: passB.ID,
-		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1", srcTokenScreen: srcScreenRaw,
+		hostCookie: sess, srcToken: srcRaw, slotLabel: "cam-1", srcTokenScreen: srcScreenRaw, srcTokenHost: srcHostRaw,
 		hostID: host.ID, streamID: stream.ID, slotID: camSlot.ID,
 	}
 }

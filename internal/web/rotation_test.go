@@ -51,7 +51,7 @@ func TestApp_RegenerateSlotRotatesToken(t *testing.T) {
 		t.Fatalf("new token does not resolve to cam-1: %v", err)
 	}
 	// Only cam-1 was rotated: the count is unchanged.
-	if slots, _ := a.store.ListSlotsByHost(context.Background(), host.ID); len(slots) != 9 {
+	if slots, _ := a.store.ListSlotsByHost(context.Background(), host.ID); len(slots) != 10 {
 		t.Fatalf("regenerate changed the pool size to %d", len(slots))
 	}
 }
@@ -65,7 +65,7 @@ func TestApp_RegenerateAllRotatesEverySlot(t *testing.T) {
 
 	body := a.req(t, http.MethodGet, "/app/streams/"+id+"/sources", "", alice).Body.String()
 	oldTokens := map[string]string{}
-	for _, label := range []string{"cam-1", "cam-4", "cam-8", "screen"} {
+	for _, label := range []string{"cam-1", "cam-4", "cam-8", "screen", "host"} {
 		oldTokens[label] = extractSlotToken(t, body, label)
 	}
 

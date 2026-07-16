@@ -441,6 +441,27 @@ func (s *roomState) attachSource(sid SlotID, source PeerID) []outbound {
 	return out
 }
 
+// setHostMedia binds the dedicated host OBS slot only while the connected host is actively
+// publishing a local stream. Unlike guest cam slots, this is never addressable through the generic
+// rebind frame: the host's authenticated connection is the only valid occupant.
+func (s *roomState) setHostMedia(id PeerID, active bool) []outbound {
+	p := s.peers[id]
+	if p == nil || p.role != "host" {
+		return nil
+	}
+	st := s.slot("host")
+	if active {
+		if st.occupant == id {
+			return nil
+		}
+		return s.rebindSlot("host", id)
+	}
+	if st.occupant == "" {
+		return nil
+	}
+	return s.unbindSlot("host")
+}
+
 // degradeStaleOnAir resets a slot's on-air to UNKNOWN if it was asserting a real state, so a
 // stale assertion never outlives the live OBS signal behind it (D-24). Returns whether it
 // changed; the caller re-broadcasts the roster so the occupant's folded onAir field updates.

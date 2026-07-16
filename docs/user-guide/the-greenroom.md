@@ -6,7 +6,7 @@ The greenroom is your private, invite-only control room — the place you and yo
 
 Every guest who has opened their pass and allowed their camera shows up as a tile. Each tile carries their name, a connection-health signal, and an on-air indicator, plus moderation controls scaled to your role.
 
-Use **Set up camera and microphone** to open your own local preview. It is an explicit action: merely opening the greenroom never asks for device permission. The preview is muted on your own machine to prevent feedback; use the microphone activity meter on each tile to confirm who is currently producing sound. A quiet meter means quiet, not a broken connection.
+Use **Set up camera and microphone** to open your own local preview and publish to the **Host** OBS source. It is an explicit action: merely opening the greenroom never asks for device permission. The preview is muted on your own machine to prevent feedback; use the microphone activity meter on each tile to confirm who is currently producing sound. A quiet meter means quiet, not a broken connection. Closing the capture clears the Host source again.
 
 **Awaiting OBS state** means the browser source has not yet reported whether it is active in OBS. It is not a claim that the guest is off air; check the source or the linked stream until OBS reports a state.
 

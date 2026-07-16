@@ -451,6 +451,36 @@ func TestRelaySignalSourceChannelBoundToSlot(t *testing.T) {
 
 // EN-3 (the keystone): after a rebind, a STALE obsSourceActive carrying the previous epoch
 // must NOT light the new occupant; only the current epoch's event applies.
+func TestHostMediaBindsOnlyTheHostSlot(t *testing.T) {
+	s := newRoomState()
+	s.join("host", "host", "Presenter")
+	s.attachSource("host", "host-source")
+
+	if out := s.setHostMedia("host", false); len(out) != 0 {
+		t.Fatalf("inactive host media = %+v, want no-op", out)
+	}
+	out := s.setHostMedia("host", true)
+	if _, ok := firstFrameOfType(out, "host-source", "slot-rebind"); !ok {
+		t.Fatalf("activating host media = %+v, want host source rebind", out)
+	}
+	st := s.slot("host")
+	if st.occupant != "host" {
+		t.Fatalf("host slot occupant = %q, want host", st.occupant)
+	}
+
+	out = s.setHostMedia("host", false)
+	if _, ok := firstFrameOfType(out, "host-source", "slot-unbound"); !ok {
+		t.Fatalf("stopping host media = %+v, want host source unbind", out)
+	}
+	if st.occupant != "" {
+		t.Fatalf("host slot occupant after stop = %q, want empty", st.occupant)
+	}
+
+	if out := s.setHostMedia("guest", true); len(out) != 0 {
+		t.Fatalf("guest host-media frame = %+v, want no-op", out)
+	}
+}
+
 func TestStaleObsActiveIgnoredAfterRebind(t *testing.T) {
 	s := newRoomState()
 	s.join("src", "obs", "")

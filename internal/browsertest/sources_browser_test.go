@@ -65,19 +65,19 @@ func TestHostApp_SourcesTab(t *testing.T) {
 		); err != nil {
 			t.Fatalf("first sources open: %v", err)
 		}
-		if cardCount != 9 {
-			t.Fatalf("slot cards = %d, want 9 (cam 1–8 + screenshare)", cardCount)
+		if cardCount != 10 {
+			t.Fatalf("slot cards = %d, want 10 (cam 1–8 + host + screenshare)", cardCount)
 		}
-		if !strings.Contains(slotURLs, "/s/cam-1?token=") || !strings.Contains(slotURLs, "/s/screen?token=") {
-			t.Fatalf("slot cards did not show the cam-1 + screen OBS URLs; got:\n%s", slotURLs)
+		if !strings.Contains(slotURLs, "/s/cam-1?token=") || !strings.Contains(slotURLs, "/s/host?token=") || !strings.Contains(slotURLs, "/s/screen?token=") {
+			t.Fatalf("slot cards did not show the cam-1 + host + screen OBS URLs; got:\n%s", slotURLs)
 		}
 		// The on-air pill is present (three-state; status-unavailable on the no-JS page).
 		var onairCount int
 		if err := chromedp.Run(ctx, chromedp.Evaluate(`document.querySelectorAll('.slot-onair[data-onair]').length`, &onairCount)); err != nil {
 			t.Fatalf("count on-air pills: %v", err)
 		}
-		if onairCount != 9 {
-			t.Fatalf("on-air pills = %d, want 9", onairCount)
+		if onairCount != 10 {
+			t.Fatalf("on-air pills = %d, want 10", onairCount)
 		}
 		// EN-26: no editable production controls; the card links to the greenroom.
 		var hasGreenroomLink, hasForbiddenControl bool

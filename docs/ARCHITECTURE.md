@@ -28,7 +28,7 @@ is LOCKED.
   greenroom. Zero accounts, zero installs. Their PII is auto-deleted within 24h of
   stream end (D-37).
 - **Hosts get real OBS sources, wired once.** A stable browser-source URL per
-  **slot** (cam slots 1–8, an optional host slot, one shared screenshare slot).
+  **slot** (cam slots 1–8, one host slot, one shared screenshare slot).
   The host pastes these into OBS one time and composites there every stream;
   GuestPass never builds a grid (D-20).
 - **OBS owns the show.** GuestPass has no staging / "bring on stream" control. The
@@ -296,12 +296,11 @@ The host machine is a bottleneck: its **downlink carries N×program + N×monitor
 into local OBS / greenroom, while its **uplink carries broadcast egress** — both on
 one (often asymmetric) connection.
 
-**Guard (folds D-18):** the **optional host source(s) must NOT run on a
-single-uplink host.** Routing the host's own cam through GuestPass to an OBS
-browser source (the Windows single-webcam-exclusivity fix) fans the host cam out to
-every guest on the *same* uplink that carries broadcast egress — actively harmful.
-Two-uplink / native-OBS hosts only. Webcam exclusivity is driver/device-specific,
-not universal (EN-19).
+**Guard (D-18):** the **host source is opt-in**. When the host explicitly enables
+camera and microphone in the greenroom, its browser publishes only to the dedicated
+Host OBS source over P2P; GuestPass never fans that media out to guests. Closing the
+capture clears the source again. This solves browser/OBS webcam exclusivity without
+changing OBS's composition authority (EN-19).
 
 ### Connection resilience
 
@@ -1314,8 +1313,8 @@ nonce — the raw token is never stored (EN-5) and never rides the URL (the nonc
 the token). Re-issue rotates the token so the old link stops resolving **and clears the
 deadline** so the fresh link can't be born expired (PD-2/D-5). `GET
 /app/streams/{id}/sources` is the **read-only Sources tab** (EN-26): it idempotently
-provisions the host-global slot pool on first open (cam 1–8 + the shared screenshare
-slot, D-20; the host slot is DEF-1) and renders per-slot cards (slot + current occupant
+provisions the host-global slot pool on first open (cam 1–8 + host + the shared screenshare
+slot, D-20) and renders per-slot cards (slot + current occupant
 + three-state on-air pill, defaulting to `status-unavailable` since the no-JS reference
 page carries no live WS, D-24). Each slot's permanent OBS URL is **revealed once**, at
 provisioning — the source token is stored hashed (EN-5) so it can't be re-derived;
