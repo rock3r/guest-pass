@@ -1028,6 +1028,13 @@ body.landing { overflow-x: hidden; }
 .stats-trend th, .stats-trend td { padding: 10px 0; text-align: left; border-top: 1px solid var(--line-2); }
 @media (max-width: 720px) { .stats-page { width: min(100% - 28px, 960px); margin: 44px auto; } .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) {
+  .stats-trend table, .stats-trend tbody, .stats-trend tr, .stats-trend td { display: block; }
+  .stats-trend thead { clip: rect(0 0 0 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+  .stats-trend tbody tr { padding: 2px 0; }
+  .stats-trend td { align-items: baseline; display: flex; justify-content: space-between; gap: 24px; }
+  .stats-trend td::before { color: var(--ink-2); content: attr(data-label); font-weight: 700; }
+}
+@media (max-width: 600px) {
   .features-grid { grid-template-columns: 1fr; }
   .hero-h1 { font-size: 34px; }
   .compare-card { overflow-x: auto; }

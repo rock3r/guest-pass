@@ -12,4 +12,6 @@ type Metrics interface {
 const (
 	counterGuestConnectedSeconds = "guest_connected_seconds"
 	counterPeakConcurrent        = "peak_concurrent"
+	counterConnectionsTotal      = "connections_total"
+	counterConnectionsRelayed    = "connections_relayed"
 )

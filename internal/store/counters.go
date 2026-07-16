@@ -17,6 +17,8 @@ const (
 	CounterTotalHosts            = "total_hosts"
 	CounterInvitesSent           = "invites_sent"
 	CounterReportsFiled          = "reports_filed"
+	CounterConnectionsTotal      = "connections_total"
+	CounterConnectionsRelayed    = "connections_relayed"
 )
 
 // DailyCounter is one UTC daily bucket for an anonymous aggregate.

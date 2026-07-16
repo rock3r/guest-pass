@@ -11,6 +11,14 @@
     <article class="card"><strong>{{.Data.PeakConcurrent}}</strong><span>peak concurrent participants</span></article>
     <article class="card"><strong>{{.Data.TotalHosts}}</strong><span>hosts created</span></article>
   </section>
-  <section class="card stats-trend"><h2>Daily streams</h2>{{if .Data.DailyStreams}}<table><thead><tr><th>UTC day</th><th>Streams</th></tr></thead><tbody>{{range .Data.DailyStreams}}<tr><td>{{.Day}}</td><td>{{.Value}}</td></tr>{{end}}</tbody></table>{{else}}<p>No completed streams have been recorded yet.</p>{{end}}</section>
+  <section class="card stats-trend">
+    <h2>Daily activity</h2>
+    {{if .Data.DailyActivity}}
+    <table>
+      <thead><tr><th>UTC day</th><th>Streams</th><th>Guest-minutes</th><th>Invites</th><th>Hosts</th><th>Reports</th></tr></thead>
+      <tbody>{{range .Data.DailyActivity}}<tr><td data-label="UTC day">{{.Day}}</td><td data-label="Streams">{{.Streams}}</td><td data-label="Guest-minutes">{{.GuestMinutes}}</td><td data-label="Invites">{{.Invites}}</td><td data-label="Hosts">{{.Hosts}}</td><td data-label="Reports">{{.Reports}}</td></tr>{{end}}</tbody>
+    </table>
+    {{else}}<p>No anonymous activity has been recorded yet.</p>{{end}}
+  </section>
 </main>
 {{end}}

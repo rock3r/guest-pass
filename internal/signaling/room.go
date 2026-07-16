@@ -18,6 +18,15 @@ type peerConn struct {
 	joinedAt time.Time
 }
 
+// connectionSample identifies one completed media link for the life of a room. It remains only
+// in actor memory, preventing duplicate browser reports without retaining a peer-level record.
+// The two endpoints are canonicalized so each link is counted once even though both browsers may
+// observe it; channel keeps a concurrent camera and screenshare link distinct.
+type connectionSample struct {
+	first, second PeerID
+	channel       string
+}
+
 // roomCmd is a closure run on the room goroutine with exclusive access to the pure
 // state and the connection table. This is the actor's command channel payload (AD-2):
 // all mutation funnels through here, so neither map needs a lock.
@@ -35,6 +44,7 @@ type Room struct {
 	log         *slog.Logger
 	graceWindow time.Duration // slot-binding grace on a transient guest drop (D-40); <=0 falls back to the default
 	metrics     Metrics
+	samples     map[connectionSample]struct{}
 }
 
 func newRoom(id string, locks LockPersistence, log *slog.Logger, graceWindow time.Duration, metrics ...Metrics) *Room {
@@ -48,7 +58,7 @@ func newRoom(id string, locks LockPersistence, log *slog.Logger, graceWindow tim
 	if len(metrics) > 0 {
 		sink = metrics[0]
 	}
-	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log, graceWindow: graceWindow, metrics: sink}
+	return &Room{id: id, cmds: make(chan roomCmd, 64), done: make(chan struct{}), locks: locks, log: log, graceWindow: graceWindow, metrics: sink, samples: make(map[connectionSample]struct{})}
 }
 
 // levelsTick is the audio-meter coalescing cadence (AD-13): every participant's last-reported
@@ -394,6 +404,33 @@ func (r *Room) ApplyState(id PeerID, cam, mic, screen *bool, level *float64) {
 func (r *Room) ApplyStats(id PeerID, signal, rttMs int, degraded *DegradedView) {
 	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
 		deliver(conns, st.applyStats(id, signal, rttMs, degraded))
+	})
+}
+
+// RecordConnection records one anonymous completed media-link sample. Both named peers must be
+// connected in this room and the link must be a known media channel; a pair/channel is accepted
+// once per room, even if each browser reports its selected ICE pair. The server retains no sample
+// detail beyond room lifetime and writes only global anonymous totals asynchronously.
+func (r *Room) RecordConnection(from, to PeerID, channel string, relay bool) {
+	r.post(func(_ *roomState, conns map[PeerID]*peerConn) {
+		if r.metrics == nil || from == to || conns[from] == nil || conns[to] == nil || (channel != "" && channel != "screen") {
+			return
+		}
+		first, second := from, to
+		if second < first {
+			first, second = second, first
+		}
+		sample := connectionSample{first: first, second: second, channel: channel}
+		if _, reported := r.samples[sample]; reported {
+			return
+		}
+		r.samples[sample] = struct{}{}
+		go func() {
+			_ = r.metrics.AddCounter(context.Background(), counterConnectionsTotal, 1)
+			if relay {
+				_ = r.metrics.AddCounter(context.Background(), counterConnectionsRelayed, 1)
+			}
+		}()
 	})
 }
 

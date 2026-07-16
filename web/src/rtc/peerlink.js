@@ -5,6 +5,8 @@
  * (STUN, and a TURN entry with an ephemeral credential when configured) comes from the
  * Room's join-ack (AD-14/EN-4); the publishing side is in publisher.js.
  */
+import { trackRelayUsage } from "./relaystats.js";
+
 export class PeerLink {
   /**
    * @param {import("./room.js").Room} room
@@ -23,6 +25,7 @@ export class PeerLink {
     /** @type {RTCIceCandidateInit[]} ICE that arrived before the remote description */
     this.pendingIce = [];
     this.pc = new RTCPeerConnection({ iceServers: iceServers || [] });
+    this.stopRelayTracking = trackRelayUsage(room, remoteId, this.channel, this.pc);
     this.pc.onicecandidate = (e) => {
       if (e.candidate && !this.closed) {
         room.send({ t: "signal", to: remoteId, ice: e.candidate.toJSON(), ch: this.channel });
@@ -118,6 +121,7 @@ export class PeerLink {
 
   close() {
     this.closed = true;
+    this.stopRelayTracking();
     this.pc.close();
   }
 }
