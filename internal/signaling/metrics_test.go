@@ -17,10 +17,11 @@ type metricsRecorder struct {
 	adds     []metricCall
 	maxes    []metricCall
 	addEvent chan struct{}
+	maxEvent chan struct{}
 }
 
 func newMetricsRecorder() *metricsRecorder {
-	return &metricsRecorder{addEvent: make(chan struct{}, 16)}
+	return &metricsRecorder{addEvent: make(chan struct{}, 16), maxEvent: make(chan struct{}, 16)}
 }
 
 func (m *metricsRecorder) AddCounter(_ context.Context, key string, value int64) error {
@@ -35,6 +36,7 @@ func (m *metricsRecorder) BumpMax(_ context.Context, key string, value int64) er
 	m.mu.Lock()
 	m.maxes = append(m.maxes, metricCall{key: key, value: value})
 	m.mu.Unlock()
+	m.maxEvent <- struct{}{}
 	return nil
 }
 
@@ -104,6 +106,21 @@ func waitForGuestDuration(t *testing.T, recorder *metricsRecorder, want int) {
 	}
 }
 
+func waitForPeak(t *testing.T, recorder *metricsRecorder, want int64) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		if peak := recorder.peak(); peak == want {
+			return
+		}
+		select {
+		case <-recorder.maxEvent:
+		case <-deadline:
+			t.Fatalf("peak participant count = %d, want %d", recorder.peak(), want)
+		}
+	}
+}
+
 // T-CAP: every actual guest connection contributes its duration exactly once,
 // including terminal teardown paths that bypass a websocket Leave callback.
 func TestRoomMetricsCapturesGuestDurationOnEveryDeparturePath(t *testing.T) {
@@ -158,9 +175,7 @@ func TestRoomMetricsCountsDisplacedConnectionOnceAndTracksParticipantPeak(t *tes
 	if count, seconds := recorder.guestDurationCalls(); count != 2 || seconds < 4 {
 		t.Fatalf("displaced guest metrics = %d calls, %ds; want exactly 2 calls and at least 4s", count, seconds)
 	}
-	if peak := recorder.peak(); peak != 2 {
-		t.Fatalf("peak participant count = %d, want 2 (host + guest)", peak)
-	}
+	waitForPeak(t, recorder, 2) // host + guest; BumpMax is intentionally asynchronous.
 }
 
 func TestRoomMetricsCountsEachMediaLinkOnceAndOnlyWhenBothPeersExist(t *testing.T) {
