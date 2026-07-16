@@ -85,44 +85,55 @@ func TestGreenroom_SecondTabDisplacesFirstWithoutWar(t *testing.T) {
 		)
 	}
 
-	Chrome(t, 90*time.Second, func(tabA context.Context) {
-		if err := open(tabA); err != nil {
-			t.Fatalf("tab A greenroom did not go live: %v", err)
-		}
-		// Tab B is a second browser with the SAME host cookie → it displaces tab A on join.
-		tabB, cancelB := chromedp.NewContext(tabA)
-		defer cancelB()
-		if err := open(tabB); err != nil {
-			t.Fatalf("tab B greenroom did not go live: %v", err)
-		}
+	// Create both tabs from a shared browser root. A child of tab A can inherit its
+	// target lifecycle; creating sibling targets mirrors the real two-tab case and
+	// keeps the second host connection independently alive while the first is evicted.
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), fakeMediaAllocOpts()...)
+	defer cancelAlloc()
+	rootCtx, cancelRoot := chromedp.NewContext(allocCtx)
+	defer cancelRoot()
+	rootCtx, cancelDeadline := context.WithTimeout(rootCtx, 90*time.Second)
+	defer cancelDeadline()
 
-		// Tab A must route to the terminal "displaced" screen and STAY there (no reconnect war).
-		if err := chromedp.Run(tabA,
-			chromedp.WaitVisible(`.greenroom[data-state="displaced"]`, chromedp.ByQuery),
-		); err != nil {
-			t.Fatalf("displaced tab A did not show the 'opened in another tab' screen: %v", err)
-		}
-		var bodyText string
-		if err := chromedp.Run(tabA, chromedp.Text(`.greenroom[data-state="displaced"] .gr-error`, &bodyText, chromedp.ByQuery)); err != nil {
-			t.Fatalf("displaced banner missing: %v", err)
-		}
-		if !strings.Contains(strings.ToLower(bodyText), "another tab") {
-			t.Fatalf("displaced banner = %q, want an 'another tab' message", bodyText)
-		}
-		// It must NOT recover to live (which would mean it warred back and evicted tab B).
-		time.Sleep(2 * time.Second)
-		var stillDisplaced bool
-		if err := chromedp.Run(tabA, chromedp.Evaluate(`!!document.querySelector('.greenroom[data-state="displaced"]')`, &stillDisplaced)); err != nil {
-			t.Fatalf("re-check tab A: %v", err)
-		}
-		if !stillDisplaced {
-			t.Fatal("displaced tab A reconnected — it must not war with the active tab")
-		}
-		// Tab B stays live throughout.
-		if err := chromedp.Run(tabB, chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery)); err != nil {
-			t.Fatalf("the active tab B did not stay live: %v", err)
-		}
-	})
+	tabA, cancelA := chromedp.NewContext(rootCtx)
+	defer cancelA()
+	tabB, cancelB := chromedp.NewContext(rootCtx)
+	defer cancelB()
+
+	if err := open(tabA); err != nil {
+		t.Fatalf("tab A greenroom did not go live: %v", err)
+	}
+	// Tab B is a sibling target in the same browser with the SAME host cookie → it displaces tab A on join.
+	if err := open(tabB); err != nil {
+		t.Fatalf("tab B greenroom did not go live: %v", err)
+	}
+
+	// Tab A must route to the terminal "displaced" screen and STAY there (no reconnect war).
+	if err := chromedp.Run(tabA,
+		chromedp.WaitVisible(`.greenroom[data-state="displaced"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("displaced tab A did not show the 'opened in another tab' screen: %v", err)
+	}
+	var bodyText string
+	if err := chromedp.Run(tabA, chromedp.Text(`.greenroom[data-state="displaced"] .gr-error`, &bodyText, chromedp.ByQuery)); err != nil {
+		t.Fatalf("displaced banner missing: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(bodyText), "another tab") {
+		t.Fatalf("displaced banner = %q, want an 'another tab' message", bodyText)
+	}
+	// It must NOT recover to live (which would mean it warred back and evicted tab B).
+	time.Sleep(2 * time.Second)
+	var stillDisplaced bool
+	if err := chromedp.Run(tabA, chromedp.Evaluate(`!!document.querySelector('.greenroom[data-state="displaced"]')`, &stillDisplaced)); err != nil {
+		t.Fatalf("re-check tab A: %v", err)
+	}
+	if !stillDisplaced {
+		t.Fatal("displaced tab A reconnected — it must not war with the active tab")
+	}
+	// Tab B stays live throughout.
+	if err := chromedp.Run(tabB, chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("the active tab B did not stay live: %v", err)
+	}
 }
 
 // M5.5 / D-27: when an admin force-ends a host's session (the suspend cascade → TerminateHostRoom),
