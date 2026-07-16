@@ -3,6 +3,7 @@ import { render } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { ReconnectingSession } from "../rtc/session.js";
 import { PeerLink } from "../rtc/peerlink.js";
+import { Publisher } from "../rtc/publisher.js";
 import { PersonControls, Tile, FORCE_FRAME } from "./grid-tile.js";
 
 /**
@@ -84,7 +85,7 @@ function HostSetup({ stream, capture, pending, error, onStart, onToggle }) {
         <p class="gr-rail-label">Your setup</p>
         <h2>Camera and microphone</h2>
         <p class="gr-host-setup-copy">
-          Your preview is muted locally to prevent feedback. Use the microphone meter to confirm your setup.
+          Your preview is muted locally to prevent feedback. When set up, it feeds your Host OBS source.
         </p>
       </div>
       {stream ? (
@@ -465,8 +466,12 @@ function Greenroom() {
   const screenLiveRef = useRef("");
   /** @type {{current: Map<string, any>}} */
   const entriesRef = useRef(new Map());
+  /** @type {{current: any[]}} */
+  const peersRef = useRef([]);
   /** @type {{current: MediaStream|null}} */
   const hostStreamRef = useRef(null);
+  /** @type {{current: import("../rtc/publisher.js").Publisher|null}} */
+  const hostPublisherRef = useRef(null);
   const hostCaptureRef = useRef({ mic: true, cam: true });
   // getUserMedia can resolve after the host has navigated away or retried setup. Track both lifecycle
   // and request order so a late stream is stopped instead of reviving the camera behind a dead island.
@@ -478,6 +483,20 @@ function Greenroom() {
   // cross-pass displacement, codex).
   /** @type {{current: {g:number, pass:Object<string,number>, slot:Object<string,number>}}} */
   const bindSeqRef = useRef({ g: 0, pass: {}, slot: {} });
+
+  function closeHostPublisher() {
+    if (hostPublisherRef.current) hostPublisherRef.current.close();
+    hostPublisherRef.current = null;
+  }
+
+  // Host capture takes the same P2P publisher path as a guest, but only answers a source that the
+  // room has authenticated and bound to the dedicated host slot. No guest gets a host-media link.
+  function publishHostMedia(room) {
+    if (!room || !hostStreamRef.current) return;
+    closeHostPublisher();
+    hostPublisherRef.current = new Publisher(room, hostStreamRef.current);
+    room.send({ t: "host-media", active: true });
+  }
 
   useEffect(() => {
     fetchCeiling(); // populate the quality-ceiling control if a session is already live
@@ -589,6 +608,9 @@ function Greenroom() {
     // the host id server-side, so there is no host-handoff path.
     function setup(room) {
       roomRef.current = room;
+      // A capture can outlive a transient signaling reconnect. Recreate its publisher on the fresh
+      // room before the host source is rebound, so the source's next offer always has an answerer.
+      publishHostMedia(room);
 
       // The host-only screenshare roster (D-21): a FULL snapshot of the preview pool + the live sharer.
       // Open a screen link to every sharer (pool ∪ live), drop links for sharers that left, and rebuild
@@ -625,6 +647,7 @@ function Greenroom() {
         setSelfID(me.id || f.self || "");
       }
       setPeers(f.peers || []);
+      peersRef.current = f.peers || [];
       // Release a local (pre-live DB-only) override once the authoritative roster makes it stale:
       //  - the pass left the room, or
       //  - the pass is now itself live-bound (its own boundSlot is set — e.g. Go-live replay), or
@@ -669,12 +692,16 @@ function Greenroom() {
     });
     room.on("peer-joined", (f) => {
       upsert(f.peer);
-      if (f.peer) setPeers((prev) => [...prev.filter((p) => p.id !== f.peer.id), f.peer]);
+      if (f.peer) {
+        peersRef.current = [...peersRef.current.filter((p) => p.id !== f.peer.id), f.peer];
+        setPeers(peersRef.current);
+      }
       syncTiles();
     });
     room.on("peer-left", (f) => {
       dropPeer(f.peerId);
-      setPeers((prev) => prev.filter((p) => p.id !== f.peerId));
+      peersRef.current = peersRef.current.filter((p) => p.id !== f.peerId);
+      setPeers(peersRef.current);
       setLevels((prev) => {
         const next = { ...prev };
         delete next[f.peerId];
@@ -691,7 +718,12 @@ function Greenroom() {
         return;
       }
       const link = linksRef.current.get(f.from);
-      if (link) link.onSignal(f);
+      if (link) {
+        link.onSignal(f);
+        return;
+      }
+      const sender = peersRef.current.find((p) => p.id === f.from);
+      if (sender && sender.role === "obs" && hostPublisherRef.current) hostPublisherRef.current.onSignal(f);
     });
     room.onIce((servers) => {
       for (const link of [...linksRef.current.values(), ...screenLinksRef.current.values()]) {
@@ -708,6 +740,7 @@ function Greenroom() {
     // rebuilds it from the fresh roster. ReconnectingSession runs it before every reconnect and on
     // close/unmount, so no dead pc or stale tile survives a drop.
     function teardown() {
+      closeHostPublisher();
       for (const link of linksRef.current.values()) link.close();
       for (const link of screenLinksRef.current.values()) link.close();
       linksRef.current.clear();
@@ -717,6 +750,7 @@ function Greenroom() {
       screenStreamsRef.current.clear();
       screenPoolRef.current = [];
       screenLiveRef.current = "";
+      peersRef.current = [];
       setTiles([]);
       setScreenTiles([]);
       setScreenLive("");
@@ -753,6 +787,7 @@ function Greenroom() {
     hostSetupRef.current.mounted = false;
     hostSetupRef.current.request += 1;
     hostSetupRef.current.pending = false;
+    closeHostPublisher();
     if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
   }, []);
 
@@ -773,11 +808,16 @@ function Greenroom() {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
+      if (hostStreamRef.current) {
+        closeHostPublisher();
+        if (roomRef.current) roomRef.current.send({ t: "host-media", active: false });
+        hostStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
       hostStreamRef.current = stream;
       setHostStream(stream);
       hostCaptureRef.current = { mic: true, cam: true };
       setHostCapture(hostCaptureRef.current);
+      publishHostMedia(roomRef.current);
     } catch {
       if (hostSetupRef.current.mounted && request === hostSetupRef.current.request) {
         setHostSetupError("GuestPass could not access your camera and microphone. Check browser permissions, then try again.");
@@ -795,6 +835,8 @@ function Greenroom() {
   function releaseHostCapture() {
     hostSetupRef.current.request += 1;
     hostSetupRef.current.pending = false;
+    closeHostPublisher();
+    if (roomRef.current) roomRef.current.send({ t: "host-media", active: false });
     if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
     hostStreamRef.current = null;
     setHostStream(null);

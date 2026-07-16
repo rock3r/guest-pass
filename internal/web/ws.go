@@ -237,6 +237,12 @@ func (h *wsHandler) dispatch(ctx context.Context, room *signaling.Room, id wsIde
 		if f.Relay != nil {
 			room.RecordConnection(id.peer, signaling.PeerID(f.PeerID), f.Ch, *f.Relay)
 		}
+	case "host-media":
+		// The host's local camera/mic publisher is opt-in. Only the cookie-authenticated host may
+		// bind the dedicated host OBS slot; guest/source frames are ignored.
+		if id.role == "host" {
+			room.SetHostMedia(id.peer, f.Active)
+		}
 	case "force-mute", "force-no-cam", "force-no-share":
 		// Suppressive, authority-locked forces (D-13/EN-7). The actor is the credential's peer;
 		// the target is the `peerId` string. Rank authority (strictly-above, demotion-safe) is

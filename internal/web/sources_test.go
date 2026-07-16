@@ -48,7 +48,7 @@ func (a *apiHarness) slotByLabel(t *testing.T, hostID, kind string, idx *int64) 
 }
 
 // AC-4: opening the Sources tab idempotently provisions the host's slot pool (cam 1–8 +
-// screenshare) and always shows each slot's OBS URL (the plaintext token is stored alongside
+// screenshare + host) and always shows each slot's OBS URL (the plaintext token is stored alongside
 // the hash). A second open does not duplicate the pool and shows the same tokens.
 func TestApp_SourcesProvisionsPool(t *testing.T) {
 	a := newAPIHarness(t)
@@ -65,11 +65,11 @@ func TestApp_SourcesProvisionsPool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSlotsByHost: %v", err)
 	}
-	if len(slots) != 9 {
-		t.Fatalf("provisioned %d slots, want 9 (cam 1–8 + screenshare)", len(slots))
+	if len(slots) != 10 {
+		t.Fatalf("provisioned %d slots, want 10 (cam 1–8 + screenshare + host)", len(slots))
 	}
 	// Every slot's URL is shown, and the token resolves to the slot.
-	for _, label := range []string{"cam-1", "cam-8", "screen"} {
+	for _, label := range []string{"cam-1", "cam-8", "screen", "host"} {
 		raw := extractSlotToken(t, body, label)
 		if raw == "" {
 			t.Fatalf("empty token for %s", label)
@@ -79,13 +79,13 @@ func TestApp_SourcesProvisionsPool(t *testing.T) {
 		}
 	}
 
-	// Re-open: still 9 slots (idempotent), same tokens shown.
+	// Re-open: still 10 slots (idempotent), same tokens shown.
 	id2 := a.createStream(t, alice, "Other")
 	rec2 := a.req(t, http.MethodGet, "/app/streams/"+id2+"/sources", "", alice)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("second sources GET = %d", rec2.Code)
 	}
-	if slots2, _ := a.store.ListSlotsByHost(context.Background(), host.ID); len(slots2) != 9 {
+	if slots2, _ := a.store.ListSlotsByHost(context.Background(), host.ID); len(slots2) != 10 {
 		t.Fatalf("re-open changed the pool to %d slots (not idempotent)", len(slots2))
 	}
 	// Same cam-1 token on re-open (pool is not re-provisioned with new tokens).

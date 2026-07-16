@@ -14,8 +14,7 @@ import (
 	"github.com/rock3r/guest-pass/internal/token"
 )
 
-// camSlotCount is the addressable cam-slot pool size (cam 1..8, D-20/D-33). The optional
-// host slot (D-18) is deferred to v1.1 (DEF-1) and never provisioned here.
+// camSlotCount is the addressable cam-slot pool size (cam 1..8, D-20/D-33).
 const camSlotCount = 8
 
 // slotCard is one slot as the read-only Sources tab renders it (EN-26). URL is the slot's
@@ -35,7 +34,7 @@ type slotCard struct {
 }
 
 // sourcesTab renders the read-only Sources tab (AC-4 / EN-26). It idempotently provisions
-// the host's slot pool (cam 1–8 + the shared screenshare slot) and shows each slot's current
+// the host's slot pool (cam 1–8 + the shared screenshare and host slots) and shows each slot's current
 // OBS source URL (the host can always copy it). Cards show slot + current occupant + the
 // on-air pill and link to the greenroom People controls; there are no editable controls.
 func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
@@ -56,9 +55,6 @@ func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
 
 	cards := make([]slotCard, 0, len(pool))
 	for _, sl := range pool {
-		if sl.Kind == store.SlotHost {
-			continue // host slot deferred to v1.1 (DEF-1)
-		}
 		label := slotLabel(sl)
 		c := slotCard{
 			Title: slotTitle(sl), Label: label, SlotID: sl.ID, OnAir: "status-unavailable",
@@ -80,12 +76,12 @@ func (s *appServer) sourcesTab(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ensureSlotPool idempotently provisions the host-global pool (cam 1–8 + screenshare, D-20)
+// ensureSlotPool idempotently provisions the host-global pool (cam 1–8 + screenshare + host, D-20)
 // and returns the full pool. All candidate tokens are minted up front (the store never does
 // crypto, EN-5; persisted hashed + plain), then EnsureSlotPool inserts the missing ones
 // ATOMICALLY in one transaction.
 func (s *appServer) ensureSlotPool(ctx context.Context, hostID string) ([]*store.Slot, error) {
-	specs := make([]store.SlotSpec, 0, camSlotCount+1)
+	specs := make([]store.SlotSpec, 0, camSlotCount+2)
 	add := func(kind string, idx *int64) error {
 		raw, err := token.Mint()
 		if err != nil {
@@ -101,6 +97,9 @@ func (s *appServer) ensureSlotPool(ctx context.Context, hostID string) ([]*store
 		}
 	}
 	if err := add(store.SlotScreenshare, nil); err != nil {
+		return nil, err
+	}
+	if err := add(store.SlotHost, nil); err != nil {
 		return nil, err
 	}
 
@@ -226,9 +225,6 @@ func (s *appServer) regenerateAllSlots(w http.ResponseWriter, r *http.Request) {
 	updatesByID := make(map[string]store.SlotTokenUpdate)
 	labelByID := make(map[string]string)
 	for _, sl := range slots {
-		if sl.Kind == store.SlotHost {
-			continue // host slot is unused this milestone (DEF-1)
-		}
 		raw, err := token.Mint()
 		if err != nil {
 			http.Error(w, "could not regenerate slots", http.StatusInternalServerError)

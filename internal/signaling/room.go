@@ -434,6 +434,14 @@ func (r *Room) RecordConnection(from, to PeerID, channel string, relay bool) {
 	})
 }
 
+// SetHostMedia reflects the host's opt-in local publisher. Only the reducer's authenticated host
+// peer can occupy the dedicated host slot; active binds it and inactive clears its OBS source.
+func (r *Room) SetHostMedia(id PeerID, active bool) {
+	r.post(func(st *roomState, conns map[PeerID]*peerConn) {
+		deliver(conns, st.setHostMedia(id, active))
+	})
+}
+
 // RecoverQuality broadcasts a host "bump quality now" to every participant (AD-21/D-34). Authority
 // is checked at the dispatch layer (host-only); this is a pure broadcast on the room goroutine.
 func (r *Room) RecoverQuality() {

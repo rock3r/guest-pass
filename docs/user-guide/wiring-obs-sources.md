@@ -4,7 +4,7 @@ GuestPass guests show up in your broadcaster as ordinary **Browser sources**. Th
 
 ## The slot model
 
-Every host has a fixed pool of slots: **`cam-1` through `cam-8`** for cameras, plus a **`screen`** slot for screen-shares. Each slot has a permanent URL.
+Every host has a fixed pool of slots: **`cam-1` through `cam-8`** for guest cameras, **`host`** for your own camera and microphone, plus **`screen`** for screen-shares. Each slot has a permanent URL.
 
 The key idea: **URLs are tied to the slot, not the guest.** You wire OBS to `cam-1`, `cam-2`, and so on *once*. Each stream you simply decide which guest sits in which slot — in the [greenroom](the-greenroom) — and the right camera flows to the source you already set up. Build your scene a single time and reuse it forever.
 
