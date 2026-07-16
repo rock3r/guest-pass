@@ -9,7 +9,12 @@
      live over the connection and never written to disk — surfaced here so the host can reassure
      guests it's private. The same guarantee shows in the guest session's chat note. */}}
 <p class="gr-privacy-note muted" data-privacy="chat">Backstage chat is never recorded — it's relayed live and leaves no trace, so everyone backstage can talk freely off the air.</p>
-<div id="greenroom"></div>
+<div
+  id="greenroom"
+  data-empty-action-url="{{if .CurrentStream}}/app/streams/{{.CurrentStream.ID}}{{else}}/app/calendar{{end}}"
+  data-empty-action-label="{{if .CurrentStream}}Manage invitations{{else}}View your streams{{end}}"
+  data-empty-description="{{if .CurrentStream}}Guests will appear here when they open their invite link. Check who's expected or send the next invitation.{{else}}Open a stream to invite guests and see who is expected here.{{end}}"
+></div>
 </section>
 <script type="module" src="{{assetURL "app.js"}}"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}"{{end}}></script>
 {{end}}

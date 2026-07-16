@@ -55,6 +55,9 @@ func TestGreenroom_ModerationControls(t *testing.T) {
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(`.gr-tile[data-role="guest"] .gr-video`, chromedp.ByQuery),
+		openPeopleRail(),
+		chromedp.WaitVisible(`.gr-person[data-guest]`, chromedp.ByQuery),
+		chromedp.Click(`.gr-person[data-guest]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("host grid did not render the guest tile: %v", err)
 	}

@@ -128,6 +128,7 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(tileA, chromedp.ByQuery),
+		openPeopleRail(),
 		chromedp.WaitVisible(personA, chromedp.ByQuery),
 		chromedp.Click(personA, chromedp.ByQuery),
 	); err != nil {

@@ -8,11 +8,13 @@ Every guest who has opened their pass and allowed their camera shows up as a til
 
 Use **Set up camera and microphone** to open your own local preview and publish to the **Host** OBS source. It is an explicit action: merely opening the greenroom never asks for device permission. The preview is muted on your own machine to prevent feedback; use the microphone activity meter on each tile to confirm who is currently producing sound. A quiet meter means quiet, not a broken connection. Closing the capture clears the Host source again.
 
-**Awaiting OBS state** means the browser source has not yet reported whether it is active in OBS. It is not a claim that the guest is off air; check the source or the linked stream until OBS reports a state.
+**OBS state unknown** means the browser source has not yet reported whether it is active in OBS. It is not a claim that the guest is off air; check the source or the linked stream until OBS reports a state.
 
 ## Backstage chat
 
 The greenroom has a text chat for quick coordination — "you're muted," "go to you next," that sort of thing. Two things to be clear about, so you can set expectations with guests:
+
+The sidebar opens on **Chat**. Switch to **People** whenever you need participant controls, OBS slot assignment, or stream-quality controls.
 
 - **It's ephemeral.** Chat is never written to disk or logged — there's no transcript, and it's gone when the room closes. Everyone can talk freely off the air.
 - **It's relayed, not peer-to-peer.** Your guests' camera and mic travel **directly between browsers** and never touch our server. Chat is different: it passes **through the server** to fan out to everyone, so while it's encrypted in transit it is **not end-to-end encrypted**. Treat it as off-the-record coordination, not a secure channel for secrets.

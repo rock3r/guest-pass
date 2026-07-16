@@ -25,7 +25,7 @@ const isGuestRole = (role) => role === "guest" || role === "cohost";
 function onAirLabel(onAir) {
   if (onAir === "on-air") return "On air";
   if (onAir === "not-on-air") return "Not on air";
-  return "Awaiting OBS state";
+  return "OBS state unknown";
 }
 
 /** A local-only meter gives the host a soundcheck signal without retaining or transmitting samples. */
@@ -228,7 +228,7 @@ function ScreenTile({ tile, live, onSelect }) {
  * @returns {import("preact").VNode}
  */
 function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole, live, onForce, onRelease, onRole, onDismissHand, onBindSlot, onSetName, onSetCanScreen, chat, quality }) {
-  const [tab, setTab] = useState("people");
+  const [tab, setTab] = useState("chat");
   const switchTab = (next) => {
     setTab(next);
     requestAnimationFrame(() => document.getElementById(`gr-${next}-tab`)?.focus());
@@ -300,6 +300,11 @@ function PeopleRail({ tiles, selectedEntry, selectedPeerID, onSelect, viewerRole
           ) : (
             <p class="gr-people-empty">Guests will appear here when they connect.</p>
           )}
+          {selectedEntry && selectedEntry.onAir !== "on-air" && selectedEntry.onAir !== "not-on-air" ? (
+            <p class="gr-obs-state-help" role="status">
+              OBS has not reported this source yet. Check the source in OBS or the linked live status.
+            </p>
+          ) : null}
           {selectedEntry ? (
             <PersonControls
               entry={selectedEntry}
@@ -448,6 +453,10 @@ function Greenroom() {
   const [peers, setPeers] = useState(/** @type {any[]} */ ([]));
   const [selfID, setSelfID] = useState("");
   const [levels, setLevels] = useState(/** @type {Record<string,number>} */ ({}));
+  const greenroomRoot = document.getElementById("greenroom");
+  const emptyActionURL = greenroomRoot?.dataset.emptyActionUrl || "/app/calendar";
+  const emptyActionLabel = greenroomRoot?.dataset.emptyActionLabel || "View your streams";
+  const emptyDescription = greenroomRoot?.dataset.emptyDescription || "Open a stream to invite guests and see who is expected here.";
   /** @type {{current: import("../rtc/room.js").Room|null}} */
   const roomRef = useRef(null);
   /** @type {{current: Map<string, import("../rtc/peerlink.js").PeerLink>}} */
@@ -1186,9 +1195,12 @@ function Greenroom() {
           // "waiting for guests" hint would contradict it, so suppress it in those states (the grid
           // rebuilds from the fresh roster once a reconnect recovers).
           state === "ended" || state === "error" || state === "reconnecting" || state === "displaced" ? null : (
-            <p class="gr-empty" data-state={state}>
-              No guests are connected yet. They&rsquo;ll appear here when they open their invite link; manage invitations from the stream dashboard.
-            </p>
+            <section class="gr-empty" data-state={state} aria-labelledby="gr-empty-title">
+              <p class="gr-rail-label">Room ready</p>
+              <h2 id="gr-empty-title">Waiting for guests</h2>
+              <p class="gr-empty-copy">{emptyDescription}</p>
+              <a class="gr-empty-action" href={emptyActionURL}>{emptyActionLabel}</a>
+            </section>
           )
         ) : (
           tiles.map((t) => (

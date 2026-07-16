@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,9 @@ type gridSeed struct {
 	base       string
 	hostCookie string
 	rawTokens  []string
+	store      *store.Store
+	streamID   string
+	hostID     string
 }
 
 // seedGrid creates n guest passes under one host and returns their raw tokens + a host cookie.
@@ -89,7 +93,7 @@ func seedGrid(t *testing.T, n int) *gridSeed {
 	if err != nil {
 		t.Fatalf("issue host session: %v", err)
 	}
-	return &gridSeed{base: Serve(t, handler).URL, hostCookie: sess, rawTokens: raws}
+	return &gridSeed{base: Serve(t, handler).URL, hostCookie: sess, rawTokens: raws, store: st, streamID: stream.ID, hostID: host.ID}
 }
 
 // publishGuestOwnBrowser opens a FRESH fake-media browser, runs the device check, and enters →
@@ -220,9 +224,6 @@ func TestGreenroom_HostSetupChatAndAudioActivity(t *testing.T) {
 		// participant and quality operations together, while backstage chat gets
 		// its own full-height view rather than being squeezed underneath them.
 		chromedp.WaitVisible(`[role="tablist"][aria-label="Control room sidebar"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`#gr-people-tab[aria-selected="true"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`#gr-people-panel`, chromedp.ByQuery),
-		chromedp.Click(`#gr-chat-tab`, chromedp.ByQuery),
 		chromedp.WaitVisible(`#gr-chat-tab[aria-selected="true"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.gr-chat-form`, chromedp.ByQuery),
 		chromedp.SendKeys(`#gr-chat-draft`, "host-chat-roundtrip-8Nf2", chromedp.ByQuery),
@@ -239,4 +240,102 @@ func TestGreenroom_HostSetupChatAndAudioActivity(t *testing.T) {
 	); err != nil {
 		t.Fatalf("host control-room setup affordances: %v", err)
 	}
+}
+
+// A host who opens a room before any guest joins needs a direct, useful next action instead of a
+// stranded sentence in an otherwise empty monitoring area. The control-room rail starts on Chat,
+// while People remains an explicit host operation rather than the accidental first view.
+func TestGreenroom_EmptyRoomStartsWithChatAndInvitesAction(t *testing.T) {
+	s := seedGrid(t, 0)
+	if _, err := s.store.StartSession(context.Background(), s.streamID, s.hostID); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	Chrome(t, 90*time.Second, func(hostCtx context.Context) {
+		setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+		})
+		var inviteHref string
+		if err := chromedp.Run(hostCtx,
+			network.Enable(),
+			setHostCookie,
+			chromedp.Navigate(s.base+"/greenroom"),
+			chromedp.WaitVisible(`.greenroom[data-state="live"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`#gr-chat-tab[aria-selected="true"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.gr-chat-form`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.gr-empty .gr-empty-action`, chromedp.ByQuery),
+			chromedp.AttributeValue(`.gr-empty .gr-empty-action`, "href", &inviteHref, nil, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("empty control-room recovery UI: %v", err)
+		}
+		if inviteHref == "" || inviteHref == "/app" {
+			t.Fatalf("empty-room invite action href = %q, want the current stream's invitations", inviteHref)
+		}
+	})
+}
+
+// A host may open the greenroom without starting a stream. There is no invitation set to manage
+// in that state, so its recovery action must take the host to streams rather than masquerading as
+// an invitation action that lands on the dashboard.
+func TestGreenroom_EmptyRoomWithoutLiveStreamLinksToStreams(t *testing.T) {
+	s := seedGrid(t, 0)
+
+	Chrome(t, 90*time.Second, func(hostCtx context.Context) {
+		setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+		})
+		var actionHref, actionText, explanation string
+		if err := chromedp.Run(hostCtx,
+			network.Enable(),
+			setHostCookie,
+			chromedp.Navigate(s.base+"/greenroom"),
+			chromedp.WaitVisible(`.gr-empty .gr-empty-action`, chromedp.ByQuery),
+			chromedp.AttributeValue(`.gr-empty .gr-empty-action`, "href", &actionHref, nil, chromedp.ByQuery),
+			chromedp.Text(`.gr-empty .gr-empty-action`, &actionText, chromedp.ByQuery),
+			chromedp.Text(`.gr-empty .gr-empty-copy`, &explanation, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("non-live empty control-room recovery UI: %v", err)
+		}
+		if actionHref != "/app/calendar" || actionText != "View your streams" {
+			t.Fatalf("non-live empty-room recovery = (%q, %q), want streams action", actionHref, actionText)
+		}
+		if !strings.Contains(strings.ToLower(explanation), "open a stream") {
+			t.Fatalf("non-live empty-room explanation = %q, want stream-specific next step", explanation)
+		}
+	})
+}
+
+// An unavailable OBS report is a limitation of the source integration, not evidence that the
+// guest is off-air. The selected People detail must explain that truth and give the host a safe
+// recovery direction rather than leaving “unknown” as an opaque status label.
+func TestGreenroom_UnknownOBSStateExplainsRecovery(t *testing.T) {
+	s := seedGrid(t, 1)
+	publishGuestOwnBrowser(t, s.base, s.rawTokens[0], "guest")
+
+	Chrome(t, 90*time.Second, func(hostCtx context.Context) {
+		setHostCookie := chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
+		})
+		var status, help string
+		if err := chromedp.Run(hostCtx,
+			network.Enable(),
+			setHostCookie,
+			chromedp.Navigate(s.base+"/greenroom"),
+			chromedp.WaitVisible(`#gr-chat-tab[aria-selected="true"]`, chromedp.ByQuery),
+			chromedp.Click(`#gr-people-tab`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.gr-person[data-guest]`, chromedp.ByQuery),
+			chromedp.Click(`.gr-person[data-guest]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`.gr-obs-state-help`, chromedp.ByQuery),
+			chromedp.Text(`.gr-person-status`, &status, chromedp.ByQuery),
+			chromedp.Text(`.gr-obs-state-help`, &help, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("unknown OBS state explanation: %v", err)
+		}
+		if status != "OBS state unknown" {
+			t.Fatalf("OBS status label = %q, want clear unknown-state wording", status)
+		}
+		if !strings.Contains(strings.ToLower(help), "has not reported") || !strings.Contains(strings.ToLower(help), "obs") {
+			t.Fatalf("OBS state help = %q, want source limitation and recovery context", help)
+		}
+	})
 }

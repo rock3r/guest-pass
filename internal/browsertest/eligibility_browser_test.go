@@ -47,6 +47,7 @@ func TestEligibility_HostGrantsAndRevokesLive(t *testing.T) {
 	if err := chromedp.Run(hCtx,
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
+		openPeopleRail(),
 		chromedp.WaitVisible(personA, chromedp.ByQuery),
 		chromedp.Click(personA, chromedp.ByQuery),
 		chromedp.WaitVisible(toggle, chromedp.ByQuery),

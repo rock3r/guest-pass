@@ -314,6 +314,7 @@ func TestDegradationTransparency_HostBadgeAndRecoverNow(t *testing.T) {
 		network.Enable(), setHostCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.WaitVisible(tileA, chromedp.ByQuery),
+		openPeopleRail(),
 	); err != nil {
 		t.Fatalf("host greenroom did not render guest A's tile: %v", err)
 	}

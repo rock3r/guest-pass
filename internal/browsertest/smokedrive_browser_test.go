@@ -128,6 +128,7 @@ func TestSmokeDrive_MultiGuest(t *testing.T) {
 		network.Enable(), setCookie,
 		chromedp.Navigate(s.base+"/greenroom"),
 		chromedp.Poll(allTiles, nil, chromedp.WithPollingTimeout(90*time.Second)),
+		openPeopleRail(),
 	); err != nil {
 		t.Fatalf("host greenroom did not render %d guest tiles: %v", n, err)
 	}
