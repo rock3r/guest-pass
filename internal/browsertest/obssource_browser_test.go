@@ -187,8 +187,13 @@ func TestOBSSource_RendersHostCapture(t *testing.T) {
 	defer cancelHostT()
 	obsCtx, cancelOBS := chromedp.NewContext(hostCtx)
 	defer cancelOBS()
+	injectRecorder := chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := page.AddScriptToEvaluateOnNewDocument(wsRecorderJS).Do(ctx)
+		return err
+	})
 
 	if err := chromedp.Run(hostCtx,
+		injectRecorder,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return network.SetCookie(auth.SessionCookie, s.hostCookie).WithURL(s.base).WithHTTPOnly(true).Do(ctx)
 		}),
@@ -220,5 +225,24 @@ func TestOBSSource_RendersHostCapture(t *testing.T) {
 	}
 	if !hostAudioOK {
 		t.Fatal("Host OBS source must carry the host's live, unmuted microphone track")
+	}
+
+	// A host capture must survive a transient Greenroom signaling drop. The local stream stays
+	// open, the old publisher is torn down, and the reconnect must re-announce host-media only
+	// after its fresh socket opens so the Host source receives a new P2P connection.
+	if err := chromedp.Run(hostCtx,
+		chromedp.Evaluate(`window.__gpCloseLastWS()`, nil),
+		chromedp.Poll(`document.querySelector('.gr-host-preview').srcObject.getTracks().every(t => t.readyState === 'live')`, nil,
+			chromedp.WithPollingTimeout(15*time.Second)),
+		chromedp.Poll(`document.querySelector('.greenroom[data-state="live"]')`, nil,
+			chromedp.WithPollingTimeout(30*time.Second)),
+	); err != nil {
+		t.Fatalf("host Greenroom did not reconnect while retaining its capture: %v", err)
+	}
+	if err := chromedp.Run(obsCtx,
+		chromedp.Poll(`document.querySelector('#obs-video').videoWidth > 0`, nil,
+			chromedp.WithPollingTimeout(60*time.Second)),
+	); err != nil {
+		t.Fatalf("Host OBS source did not re-render after the host Greenroom reconnected: %v", err)
 	}
 }

@@ -489,13 +489,30 @@ function Greenroom() {
     hostPublisherRef.current = null;
   }
 
+  // Host-media state is meaningful only on a live socket. setup() runs before Room.ready on a
+  // reconnect, so wait for that promise and make the send best-effort: a mid-close must never
+  // interfere with local camera/mic cleanup.
+  function signalHostMedia(room, active) {
+    if (!room) return;
+    room.ready
+      .then(() => {
+        if (roomRef.current !== room) return;
+        try {
+          room.send({ t: "host-media", active });
+        } catch (_) {
+          /* a socket that closed between ready and send is handled by reconnect/teardown */
+        }
+      })
+      .catch(() => {});
+  }
+
   // Host capture takes the same P2P publisher path as a guest, but only answers a source that the
   // room has authenticated and bound to the dedicated host slot. No guest gets a host-media link.
   function publishHostMedia(room) {
     if (!room || !hostStreamRef.current) return;
     closeHostPublisher();
     hostPublisherRef.current = new Publisher(room, hostStreamRef.current);
-    room.send({ t: "host-media", active: true });
+    signalHostMedia(room, true);
   }
 
   useEffect(() => {
@@ -726,6 +743,7 @@ function Greenroom() {
       if (sender && sender.role === "obs" && hostPublisherRef.current) hostPublisherRef.current.onSignal(f);
     });
     room.onIce((servers) => {
+      if (hostPublisherRef.current) hostPublisherRef.current.applyIceServers(servers);
       for (const link of [...linksRef.current.values(), ...screenLinksRef.current.values()]) {
         try {
           link.pc.setConfiguration({ iceServers: servers });
@@ -810,7 +828,7 @@ function Greenroom() {
       }
       if (hostStreamRef.current) {
         closeHostPublisher();
-        if (roomRef.current) roomRef.current.send({ t: "host-media", active: false });
+        signalHostMedia(roomRef.current, false);
         hostStreamRef.current.getTracks().forEach((track) => track.stop());
       }
       hostStreamRef.current = stream;
@@ -836,7 +854,7 @@ function Greenroom() {
     hostSetupRef.current.request += 1;
     hostSetupRef.current.pending = false;
     closeHostPublisher();
-    if (roomRef.current) roomRef.current.send({ t: "host-media", active: false });
+    signalHostMedia(roomRef.current, false);
     if (hostStreamRef.current) hostStreamRef.current.getTracks().forEach((track) => track.stop());
     hostStreamRef.current = null;
     setHostStream(null);
