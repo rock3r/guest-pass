@@ -62,6 +62,18 @@ func (m *metricsRecorder) peak() int64 {
 	return peak
 }
 
+func (m *metricsRecorder) counterTotal(key string) int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total int64
+	for _, call := range m.adds {
+		if call.key == key {
+			total += call.value
+		}
+	}
+	return total
+}
+
 func agePeer(t *testing.T, r *Room, id PeerID, age time.Duration) {
 	t.Helper()
 	done := make(chan struct{})
@@ -148,5 +160,30 @@ func TestRoomMetricsCountsDisplacedConnectionOnceAndTracksParticipantPeak(t *tes
 	}
 	if peak := recorder.peak(); peak != 2 {
 		t.Fatalf("peak participant count = %d, want 2 (host + guest)", peak)
+	}
+}
+
+func TestRoomMetricsCountsEachMediaLinkOnceAndOnlyWhenBothPeersExist(t *testing.T) {
+	recorder := newMetricsRecorder()
+	r := newRoom("metrics", nil, nil, 0, recorder)
+	go r.run()
+	defer r.Close()
+
+	r.Join("host", "host", "", "", make(chan Frame, 8))
+	r.Join("guest", "guest", "", "", make(chan Frame, 8))
+	r.RecordConnection("host", "guest", "", false)
+	r.RecordConnection("guest", "host", "", true) // duplicate peer pair; first sample wins
+	r.RecordConnection("host", "missing", "screen", true)
+
+	deadline := time.After(time.Second)
+	for recorder.counterTotal(counterConnectionsTotal) != 1 {
+		select {
+		case <-recorder.addEvent:
+		case <-deadline:
+			t.Fatalf("connection samples = %d, want 1", recorder.counterTotal(counterConnectionsTotal))
+		}
+	}
+	if got := recorder.counterTotal(counterConnectionsRelayed); got != 0 {
+		t.Fatalf("relayed samples = %d, want 0", got)
 	}
 }

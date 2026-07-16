@@ -86,15 +86,18 @@ func (s *Store) ListActiveSessions(ctx context.Context) ([]ActiveSessionInfo, er
 	return out, nil
 }
 
-// TurnRelayStats returns the anonymous TURN-relay aggregate for the admin console (AC-9 / D-37):
-// total recorded peer connections and how many fell back to a TURN relay (peers.used_turn, written
-// once at disconnect, EN-11). Counts only — never per-person-trackable. total is 0 until
-// peer-connection recording is wired (a later milestone), in which case the caller renders the
-// percentage as unavailable rather than dividing by zero.
+// TurnRelayStats returns anonymous browser-link samples and the number whose selected ICE candidate
+// pair used TURN. The aggregate counters carry no connection, peer, session, or host identifier;
+// total is zero until a browser has reported a completed media link, in which case the caller renders
+// the percentage as unavailable rather than dividing by zero.
 func (s *Store) TurnRelayStats(ctx context.Context) (total, relayed int64, err error) {
-	row := s.reader.QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM(used_turn), 0) FROM peers")
-	if err := row.Scan(&total, &relayed); err != nil {
-		return 0, 0, fmt.Errorf("reading turn-relay stats: %w", err)
+	total, err = s.Counter(ctx, CounterConnectionsTotal)
+	if err != nil {
+		return 0, 0, fmt.Errorf("reading total connection samples: %w", err)
+	}
+	relayed, err = s.Counter(ctx, CounterConnectionsRelayed)
+	if err != nil {
+		return 0, 0, fmt.Errorf("reading relayed connection samples: %w", err)
 	}
 	return total, relayed, nil
 }

@@ -1060,6 +1060,24 @@ func TestAdminRepo_TurnRelayStats_EmptyIsZero(t *testing.T) {
 	}
 }
 
+func TestAdminRepo_TurnRelayStatsReadsAnonymousConnectionCounters(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	if err := st.AddCounter(ctx, CounterConnectionsTotal, 8); err != nil {
+		t.Fatalf("AddCounter(total): %v", err)
+	}
+	if err := st.AddCounter(ctx, CounterConnectionsRelayed, 3); err != nil {
+		t.Fatalf("AddCounter(relayed): %v", err)
+	}
+	total, relayed, err := st.TurnRelayStats(ctx)
+	if err != nil {
+		t.Fatalf("TurnRelayStats: %v", err)
+	}
+	if total != 8 || relayed != 3 {
+		t.Fatalf("TurnRelayStats = (%d,%d), want (8,3)", total, relayed)
+	}
+}
+
 // CreateReport + ListReports: an individual report joins to its host (name) and stream (title), with
 // the reporter identity preserved (admin-only) (D-42).
 func TestReportRepo_CreateAndList(t *testing.T) {

@@ -578,7 +578,7 @@ JSON signaling frames and projecting room state — it does **no media processin
 | Language | **Go 1.26+** (AD-15) | Toolchain floor (a minimum, not a pinned version), tracking current deps (raised to 1.25 for `modernc.org/sqlite`, then 1.26 for `chromedp`); single static binary. Module path `github.com/rock3r/guest-pass`. |
 | Router | `go-chi/chi` | Idiomatic, tiny, stdlib-shaped middleware. |
 | WebSockets | **`coder/websocket`** (AD-16), wrapped behind `internal/signaling/conn` as an in-process **test seam** | Actively maintained, context-first, ergonomic. Its self-serialization is *redundant* with our single-writer `writeLoop` (EN-12), not extra safety (RF-19). |
-| DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame stats** — `peers.used_turn` written once at disconnect. |
+| DB | **SQLite via `modernc.org/sqlite`** (pure Go, no CGO) | Embeds cleanly. Concurrency contract (EN-11): `journal_mode=WAL`, `busy_timeout>=5000`, `foreign_keys=ON` applied **via a connection hook** (every pooled conn); a **writer pool `SetMaxOpenConns(1)` + a separate reader pool** (WAL concurrent readers) — decided, not a hedge (RF-11). **Never persist per-frame or per-peer transport stats** — selected candidate-pair reports update only no-FK anonymous aggregate counters. |
 | Auth | `golang.org/x/oauth2` (Google) + JWT cookie | See JWT contract below (EN-6). Google-only sign-in. |
 | Email | **Resend HTTP API** (D-2) or **generic SMTP relay** (STARTTLS port 587 / implicit TLS port 465) + `MAIL_MODE=log` | Backend auto-detected: `SMTP_HOST` set → SMTP (no new deps, stdlib `net/smtp`), else Resend; `log` mode prints links to stdout for dev. Consumes Resend delivery webhooks for real mail-health signal (EN-22). |
 | NAT traversal | **STUN-only by default** + optional BYO-TURN (D-38) | Operator/host may supply a TURN URL+secret fed to ICE; ephemeral HMAC creds, 60–120s TTL so kicks revoke (EN-4). |
@@ -740,7 +740,7 @@ sessions  id, stream_id, host_id, started_at, ended_at, status(active|ended)  --
 peers     id, session_id, pass_id?,                          -- stable pass_id keys reconnect (D-40, EN-3)
           role(host|guest|cohost|obs|obs_screen),
           connected_at, disconnected_at,
-          used_turn                                           -- NO on_stage (D-11); written once at disconnect
+          used_turn                                           -- reserved legacy field; aggregate relay telemetry is counters-only
 
 counters  key, value                                           -- anonymous lifetime aggregate, NO foreign keys
 counters_daily key, day, value                                 -- anonymous UTC trend bucket, NO foreign keys
@@ -1020,7 +1020,10 @@ with a `t` discriminator; **media never rides the WS** — only signaling and co
                                                           // locally; the server just folds it into the
                                                           // roster (D-23/EN-11). degraded omitted = healthy;
                                                           // dir ∈ lowering|recovering, reason ∈ cpu|bandwidth.
-                                                          // (admin TURN-% telemetry is a later, separate add)
+{"t":"connection-stats","peerId":"<id>","relay":false}   // once a media link connects: selected ICE pair
+                                                          // used TURN or not; the room verifies both
+                                                          // peers and deduplicates pair+channel in memory,
+                                                          // then stores only global anonymous counters
 {"t":"ice-refresh"}                                       // request a fresh TURN cred before TTL expiry (AD-14)
 
 // from OBS source pages only (auth = slot src token; EN-15: opaque slot id only)
@@ -1373,7 +1376,9 @@ Shared by the app entry; a trimmed subset by the OBS entry.
   force-lock state) holding canonical island state (AD-18).
 - **`getStats()` health sampling** — the principled signal feeding the degradation
   ladder (D-33) and per-guest health UI: `qualityLimitationReason`, framerate,
-  bitrate, loss, RTT, `used_turn`. There is **no pre-flight speed test** (D-12).
+  bitrate, loss, RTT, and selected candidate type. A completed media link contributes
+  one anonymous direct/relay sample; no per-peer transport record is retained. There
+  is **no pre-flight speed test** (D-12).
 - a **`ConnectivityWatch`** — the D-38 network-blocked watchdog. It watches the
   guest's own publish + mesh connections; if none ever reaches `connected` within
   the window (and one was being attempted), it flags *network-blocked* so the island
@@ -1466,8 +1471,8 @@ plus three JSON endpoints (`GET /api/admin/stats|sessions|hosts`), all mounted b
 cross-host live sessions (owning host + stream title + start time + the in-memory
 participant count from the signaling hub), anonymous global counters (streams,
 guest-minutes, hosts, invitations, reports, peak participants), live active-host and
-current-process-uptime gauges, the anonymous TURN-relay aggregate (`peers.used_turn`;
-rendered `n/a` until client candidate reporting lands), and the hosts list (identity +
+current-process-uptime gauges, the anonymous TURN-relay aggregate (deduplicated
+browser candidate-pair samples; rendered `n/a` before the first sample), and the hosts list (identity +
 status + role — never `google_sub`). The handlers read only
 host/session/stream rows — never `passes` (guest PII) and never a room's media/chat — so
 the privacy boundary above holds by construction; a `web` test seeds a foreign live

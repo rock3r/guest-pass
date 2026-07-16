@@ -5,6 +5,8 @@
  * host (no camera in M3) and OBS sources are NOT part of this mesh — they consume the guest over the
  * one-way Publisher path instead. The server only relays the opaque SDP/ICE (D-23).
  */
+import { trackRelayUsage } from "./relaystats.js";
+
 
 /**
  * isMeshRole reports whether a roster peer is a backstage mesh participant (a guest or co-host).
@@ -42,6 +44,7 @@ export class MeshPeer {
     /** @type {((stream: MediaStream) => void)|null} */
     this.ontrack = null;
     this.pc = new RTCPeerConnection({ iceServers: iceServers || [] });
+	this.stopRelayTracking = trackRelayUsage(room, remoteId, "", this.pc);
     this.pc.onicecandidate = (e) => {
       if (e.candidate && !this.closed) {
         this.room.send({ t: "signal", to: this.remoteId, ice: e.candidate.toJSON() });
@@ -167,6 +170,7 @@ export class MeshPeer {
 
   close() {
     this.closed = true;
+    this.stopRelayTracking();
     this.pc.close();
   }
 }

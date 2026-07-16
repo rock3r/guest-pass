@@ -7,6 +7,8 @@
  *
  * The server only relays the opaque SDP/ICE (D-23); no media touches it.
  */
+import { trackRelayUsage } from "./relaystats.js";
+
 export class Publisher {
   /**
    * @param {import("./room.js").Room} room
@@ -27,6 +29,8 @@ export class Publisher {
     this.onUntrack = onUntrack || (() => {});
     /** @type {Record<string, RTCPeerConnection>} */
     this.pcs = {};
+    /** @type {Record<string, () => void>} */
+    this._relayTracking = {};
     // ICE seen for an id with no pc yet: either a new consumer's candidate that raced ahead of its
     // offer, or stale trickle from a consumer that just departed. Buffered by sender and replayed when
     // an offer opens the pc; cleared on drop/close. Holding it here (not in a pc) means a departed
@@ -92,6 +96,7 @@ export class Publisher {
       pc._pendingIce = this._earlyIce[f.from] || []; // replay ICE that raced ahead of this offer
       delete this._earlyIce[f.from];
       this.pcs[f.from] = pc;
+      this._relayTracking[f.from] = trackRelayUsage(this.room, f.from, this.channel, pc);
       pc.onicecandidate = (e) => {
         if (e.candidate) this.room.send({ t: "signal", to: f.from, ice: e.candidate.toJSON(), ch: this.channel });
       };
@@ -146,6 +151,8 @@ export class Publisher {
     delete this._earlyIce[id]; // discard any buffered pre-offer ICE for the departed consumer
     const pc = this.pcs[id];
     if (!pc) return;
+    this._relayTracking[id]?.();
+    delete this._relayTracking[id];
     pc.close();
     delete this.pcs[id];
     this.onUntrack(id);
@@ -155,10 +162,12 @@ export class Publisher {
   close() {
     this.closed = true;
     for (const id of Object.keys(this.pcs)) {
+      this._relayTracking[id]?.();
       this.pcs[id].close();
       this.onUntrack(id);
     }
     this.pcs = {};
+    this._relayTracking = {};
     this._earlyIce = {};
   }
 }

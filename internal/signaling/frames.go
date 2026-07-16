@@ -74,9 +74,13 @@ type Frame struct {
 	Signal   int           `json:"signal,omitempty"`
 	RttMs    int           `json:"rttMs,omitempty"`
 	Degraded *DegradedView `json:"degraded,omitempty"`
-	Peers    []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
-	Peer     *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
-	PeerID   string        `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
+	// Relay is the browser's coarse report for a completed media link: true when either selected
+	// ICE candidate was TURN relay, false when neither was. It is a pointer so a malformed or
+	// unrelated frame cannot be mistaken for a direct-link sample.
+	Relay  *bool         `json:"relay,omitempty"`
+	Peers  []RosterEntry `json:"peers,omitempty"`  // roster projection (EN-8)
+	Peer   *RosterEntry  `json:"peer,omitempty"`   // the newcomer in a peer-joined frame
+	PeerID string        `json:"peerId,omitempty"` // a string peer id: the departed peer (peer-left, out) or the moderation target of an inbound force/release (D-13) — distinct from the `peer` OBJECT in peer-joined
 	// Screenshare preview-switcher (D-21/AC-11). Previews + Live ride the HOST-ONLY {t:"screen-roster"}
 	// broadcast: Previews is the pool of peer ids actively sharing (the backstage rail), Live is the
 	// one the host selected on-air ("" = none, no auto-advance). {t:"screen-select"} carries the

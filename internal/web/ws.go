@@ -230,6 +230,13 @@ func (h *wsHandler) dispatch(ctx context.Context, room *signaling.Room, id wsIde
 		if !id.isSource() {
 			room.ApplyStats(id.peer, f.Signal, f.RttMs, f.Degraded)
 		}
+	case "connection-stats":
+		// A browser reports its selected ICE candidate pair once a media link connects. The room
+		// validates both endpoints and deduplicates the peer pair/channel in memory, then records
+		// only global anonymous totals; no peer/session data is persisted.
+		if f.Relay != nil {
+			room.RecordConnection(id.peer, signaling.PeerID(f.PeerID), f.Ch, *f.Relay)
+		}
 	case "force-mute", "force-no-cam", "force-no-share":
 		// Suppressive, authority-locked forces (D-13/EN-7). The actor is the credential's peer;
 		// the target is the `peerId` string. Rank authority (strictly-above, demotion-safe) is
