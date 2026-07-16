@@ -1,5 +1,5 @@
 /**
- * Room is the signaling-WS orchestrator: it opens /ws with the page's credential, applies
+ * Room is the signaling-WS orchestrator: it opens the supplied signaling path with the page's credential, applies
  * the ICE config from the join-ack, dispatches inbound frames to per-type handlers, and
  * refreshes the TURN credential before it expires. Authentication is by credential, never
  * a query-param identity (the server derives role/peer/session, EN-7): a guest passes
@@ -7,8 +7,11 @@
  * automatically).
  */
 export class Room {
-  /** @param {string} query the /ws query string, e.g. "pass=<token>" or "" for the host cookie */
-  constructor(query) {
+  /**
+   * @param {string} query the signaling query string, e.g. "pass=<token>" or "" for the host cookie
+   * @param {string} path signaling endpoint; OBS sources use their /s/{slot}/ws path so an edge bypass need not expose the host route
+   */
+  constructor(query, path = "/ws") {
     /** @type {Record<string, (f:any)=>void>} */
     this.handlers = {};
     /** @type {RTCIceServer[]} ICE config from the {t:"ice"} join-ack (AD-14); empty until it arrives */
@@ -25,7 +28,7 @@ export class Room {
     // https:// page as mixed active content).
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
     const qs = query ? `?${query}` : "";
-    this.ws = new WebSocket(`${scheme}//${location.host}/ws${qs}`);
+    this.ws = new WebSocket(`${scheme}//${location.host}${path}${qs}`);
     this.ws.onmessage = (e) => {
       const f = JSON.parse(e.data);
       if (f.t === "ice") {

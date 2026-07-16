@@ -131,6 +131,41 @@ func TestRouter_ServesBuiltAssetsUnderNeutralPath(t *testing.T) {
 	}
 }
 
+// OBS Browser Source assets are exposed underneath /s/{slot}/_gp as well as the general
+// /_gp path. Deployments can safely bypass edge access for /s/* (the source token gates the
+// media WebSocket) without accidentally redirecting the required JS/CSS to an Access login.
+func TestRouter_ServesOBSAssetsUnderSourcePath(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "obs.css"), []byte("body { background: transparent; }"), 0o600); err != nil {
+		t.Fatalf("write CSS asset: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "obs.js"), []byte("console.log('obs');"), 0o600); err != nil {
+		t.Fatalf("write JS asset: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "chunk-obs.js"), []byte("export {};"), 0o600); err != nil {
+		t.Fatalf("write OBS chunk: %v", err)
+	}
+
+	h, err := NewRouter(RouterConfig{SourceURL: testSourceURL, StaticDir: dist})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	for path, want := range map[string]string{
+		"/s/cam-1/_gp/obs.css":      "body { background: transparent; }",
+		"/s/cam-1/_gp/obs.js":       "console.log('obs');",
+		"/s/cam-1/_gp/chunk-obs.js": "export {};",
+	} {
+		rec := do(h, http.MethodGet, path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, rec.Code)
+			continue
+		}
+		if got := rec.Body.String(); got != want {
+			t.Errorf("GET %s body = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestRouter_GoogleLoginRedirects(t *testing.T) {
 	h := testRouter(t, NewRateLimiter(1000, 1000))
 	rec := do(h, http.MethodGet, "/auth/google")

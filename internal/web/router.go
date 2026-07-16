@@ -101,6 +101,22 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	if cfg.Store != nil {
 		r.Get("/stats", rd.statsPage(cfg.Store))
 	}
+	if cfg.StaticDir != "" {
+		// Keep the OBS runtime and its emitted module chunks beneath /s/{slot}. In a deployment
+		// that protects the host app with edge access while allowing token-gated browser sources
+		// through /s/*, this prevents CSS, JS, or an imported JS chunk from being redirected to an
+		// interactive login page that OBS cannot complete.
+		sourceAssets := http.FileServer(http.Dir(cfg.StaticDir))
+		r.Handle("/s/{slot}/_gp/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The wildcard is a file path beneath the already-configured static directory. Give the
+			// normal file server that relative request path so it retains its existing clean-path and
+			// content-type behavior without exposing the rest of the host-app route tree.
+			assetRequest := r.Clone(r.Context())
+			assetRequest.URL.Path = "/" + chi.URLParam(r, "*")
+			assetRequest.URL.RawPath = ""
+			sourceAssets.ServeHTTP(w, assetRequest)
+		}))
+	}
 	// Public user guide (no auth): /guide redirects to the first page; each page lives at
 	// /guide/{slug}. Compiled from docs/user-guide Markdown at build time.
 	r.Get("/guide", rd.guideIndex)
@@ -131,6 +147,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 				wr.Use(cfg.WSRateLimiter.Middleware(ClientIP))
 			}
 			wr.Get("/ws", wsh.serve)
+			// OBS Browser Sources use a source-scoped signaling route, so staging edge access can
+			// bypass only /s/* for token-authenticated sources instead of opening the host/guest /ws.
+			// The slot segment remains cosmetic; wsh.serve derives identity solely from ?src=.
+			wr.Get("/s/{slot}/ws", wsh.serveSource)
 		})
 	}
 	if cfg.StaticDir != "" {

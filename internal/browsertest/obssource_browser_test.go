@@ -118,6 +118,17 @@ func TestOBSSource_RendersBoundOccupant(t *testing.T) {
 	); err != nil {
 		t.Fatalf("obs source page did not load: %v", err)
 	}
+	// The source's signaling WebSocket must stay beneath /s/{slot} along with the source
+	// document and runtime assets. That path is the narrowly bypassed edge-access surface for
+	// OBS-CEF; the existing src token remains the server-side credential at the handshake.
+	var sourceSignalPath string
+	if err := chromedp.Run(obsCtx, chromedp.Evaluate(`document.documentElement.dataset.obsSignalPath`, &sourceSignalPath)); err != nil {
+		t.Fatalf("read source signaling path: %v", err)
+	}
+	wantSourceSignalPath := "/s/" + s.slotLabel + "/ws"
+	if sourceSignalPath != wantSourceSignalPath {
+		t.Fatalf("source signaling path = %q, want %q", sourceSignalPath, wantSourceSignalPath)
+	}
 
 	// Host rebinds cam-1 to the guest (occupant = the guest's pass id). The source — already
 	// subscribed to cam-1 — gets a slot-rebind and connects to the guest over P2P.

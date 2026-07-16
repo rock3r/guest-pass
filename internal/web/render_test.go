@@ -82,6 +82,39 @@ func TestRenderer_VersionsAssetURLWithIntegrity(t *testing.T) {
 	}
 }
 
+// OBS Browser Sources are commonly exempted from an operator's edge-access policy by the
+// /s/* path. Their runtime assets must therefore stay beneath that same path: pointing the
+// source HTML at the general /_gp asset route lets an Access login redirect replace obs.js or
+// obs.css, leaving OBS with a black frame. The source token remains only in its URL query and
+// is never rendered into the document.
+func TestRenderer_SourcePageScopesAssetsUnderSourcePath(t *testing.T) {
+	rd, err := newRenderer(testSourceURL, map[string]string{
+		"obs.css": "sha384-a+b/c=",
+		"obs.js":  "sha384-d+e/f=",
+	}, false)
+	if err != nil {
+		t.Fatalf("newRenderer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	rd.sourcePage(rec, httptest.NewRequest(http.MethodGet, "/s/cam-1?token=source-token", nil), "cam-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("source page = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`href="/s/cam-1/_gp/obs.css?v=sha384-a%2Bb%2Fc%3D"`,
+		`src="/s/cam-1/_gp/obs.js?v=sha384-d%2Be%2Ff%3D"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("source page missing scoped asset %q in %q", want, body)
+		}
+	}
+	if strings.Contains(body, "source-token") {
+		t.Fatal("source token must not be rendered into the source document")
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))

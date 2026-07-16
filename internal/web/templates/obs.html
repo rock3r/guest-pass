@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>GuestPass source</title>
-<link rel="stylesheet" href="{{assetURL "obs.css"}}"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}"{{end}}>{{/* chromeless, font-free (EN-13); integrity added when the build manifest is present */}}
+<link rel="stylesheet" href="{{sourceAssetURL .Slot "obs.css"}}"{{if .StyleIntegrity}} integrity="{{.StyleIntegrity}}"{{end}}>{{/* chromeless, font-free (EN-13); integrity added when the build manifest is present */}}
 </head>
 <body>
 {{/* The slot label is an opaque cosmetic attribute (EN-15); the source token is read from the URL by obs.js and never rendered into the DOM. NOT muted: the guest's mic rides the cam source into OBS (D-41), so the page must play the remote audio for OBS to capture it. */}}
@@ -13,6 +13,6 @@
      ships empty so the DOM never carries a name server-side. #obs-nameplate is a DOCUMENTED selector
      hosts target with OBS Custom CSS to position/style it. */}}
 <div id="obs-nameplate" hidden></div>
-<script type="module" src="{{assetURL "obs.js"}}"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}"{{end}}></script>
+<script type="module" src="{{sourceAssetURL .Slot "obs.js"}}"{{if .ScriptIntegrity}} integrity="{{.ScriptIntegrity}}"{{end}}></script>
 </body>
 </html>

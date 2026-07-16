@@ -24,6 +24,12 @@ const RECONNECT_MAX_MS = 10_000;
 function start() {
   /** @type {HTMLVideoElement|null} */
   const video = /** @type {any} */ (document.getElementById("obs-video"));
+  // Keep the source WebSocket below /s/{slot} together with this page and its runtime assets.
+  // A staging edge-access policy can therefore bypass only token-gated Browser Sources instead
+  // of exposing the host/guest signaling endpoint. The slot label is cosmetic; the src token
+  // remains the sole server-side source credential.
+  const signalPath = "/s/" + encodeURIComponent((video && video.dataset.slot) || "") + "/ws";
+  document.documentElement.dataset.obsSignalPath = signalPath; // no secret: useful OBS/browser-test diagnostic seam
   // The signaling channel for this source (D-21): the screenshare slot ("screen") consumes the
   // occupant's SCREEN publisher (ch="screen"), every cam/host slot its camera (ch=""). It is bound to
   // the AUTHENTICATED slot the server reports on the {t:slot-rebind} frame (resolved from the source
@@ -138,7 +144,7 @@ function start() {
 
   function connect() {
     if (terminated) return; // a terminal terminate (e.g. token-rotated) stops the loop for good
-    room = new Room("src=" + encodeURIComponent(token));
+    room = new Room("src=" + encodeURIComponent(token), signalPath);
     // Capture a {t:terminate} reason BEFORE the socket closes, so onClose can tell a terminal
     // end (stop) from a transient drop (reconnect). Per-connection: a fresh Room each retry.
     let lastReason = null;

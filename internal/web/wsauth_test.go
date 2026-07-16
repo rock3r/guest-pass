@@ -104,6 +104,23 @@ func TestWSDispatch_ICERefreshUsesConnectionContext(t *testing.T) {
 	}
 }
 
+func TestWSSourceRouteRejectsNonSourceCredentials(t *testing.T) {
+	h := &wsHandler{}
+	for _, target := range []string{
+		"/s/cam-1/ws",
+		"/s/cam-1/ws?pass=guest-token",
+		"/s/cam-1/ws?src=source-token&pass=guest-token",
+	} {
+		t.Run(target, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.serveSource(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
 func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ws.db")
