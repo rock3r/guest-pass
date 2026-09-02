@@ -47,14 +47,15 @@ type wsHandler struct {
 	ice      ICEConfigurer   // per-peer ICE join-ack (AD-14); nil = no ICE servers offered
 	binds    *bindingLocks   // serialize the join-replay with the host's binding PUTs (D-20)
 	log      *slog.Logger
+	baseURL  string // public origin; authorizes browser Origin when a proxy rewrites Host
 }
 
 // newWSHandler builds the handler, defaulting the logger so the hot path never nil-panics.
-func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, binds *bindingLocks, logger *slog.Logger) *wsHandler {
+func newWSHandler(hub *signaling.Hub, resolver *wsResolver, inflight *sync.WaitGroup, ice ICEConfigurer, binds *bindingLocks, logger *slog.Logger, baseURL string) *wsHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, binds: binds, log: logger}
+	return &wsHandler{hub: hub, resolver: resolver, inflight: inflight, ice: ice, binds: binds, log: logger, baseURL: baseURL}
 }
 
 func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +86,7 @@ func (h *wsHandler) serve(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Origin")
 	}
 
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+	c, err := websocket.Accept(w, r, WSOrigin{}.AcceptOptions(h.baseURL))
 	if err != nil {
 		// Accept already wrote the response (e.g. 403 on a disallowed Origin).
 		return
