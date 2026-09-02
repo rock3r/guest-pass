@@ -141,7 +141,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	if wsReady {
 		resolver := &wsResolver{auth: cfg.Auth, hasher: cfg.Hasher, store: cfg.Store}
-		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, binds, cfg.Logger)
+		wsh := newWSHandler(cfg.Hub, resolver, cfg.WSInflight, cfg.ICE, binds, cfg.Logger, cfg.BaseURL)
 		r.Group(func(wr chi.Router) {
 			if cfg.WSRateLimiter != nil { // per-IP reconnect throttle (D-36)
 				wr.Use(cfg.WSRateLimiter.Middleware(ClientIP))
