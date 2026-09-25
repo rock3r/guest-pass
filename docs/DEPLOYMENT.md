@@ -278,6 +278,9 @@ room/session state is in-memory only and rebuilt on reconnect (AD-3); chat is
   log line, including `/ws` and source-page handshakes.
 - **`/ws` Origin handling tolerates the null Origin** an OBS CEF browser source
   sends (EN-16), without weakening Origin checks for host/guest connections.
+  Host/guest Origins must match the request Host **or** the public `BASE_URL`
+  host, so a tunnel that rewrites Host to the compose service name still admits
+  the greenroom socket.
   One-connection-per-identity eviction + reconnect rate-limit bound scanning and
   connection-storm abuse.
 - **Admin console metrics** combine live gauges (active sessions + peers, active
@@ -563,6 +566,16 @@ Repeat these steps for each environment (staging first, then prod when ready).
      the source HTML, its two runtime assets, and its source-scoped signaling
      WebSocket (`/s/{slot}/ws?src=…`) deliberately stay beneath `/s/*` so they
      all use this bypass.
+   - Add a second, equally-narrow **Bypass** application for
+     `staging.guest-pass.link/ws` (the host/guest signaling socket). Browsers
+     cannot attach Access JWT headers on `WebSocket()`, and an Access login
+     redirect cannot complete a WS upgrade. GuestPass still authenticates `/ws`
+     with the host session cookie or `?pass=`. Do **not** fold host signaling
+     under `/s/*` — that would widen the source bypass. If the tunnel service
+     URL is `guestpass:8137`, either set the origin `httpHostHeader` to the
+     public hostname or rely on the binary: it authorizes `Origin` against
+     `BASE_URL` so a rewritten `Host` does not 403 a same-origin host/guest
+     handshake.
 
 4. **Add redirect URIs to your Google OAuth client** — Authorised redirect URIs:
    - `https://staging.guest-pass.link/auth/google/callback`
@@ -682,5 +695,7 @@ with a graceful drain (SIGTERM → 25s → exit, RF-21).
   streams). For staging, both are required for the host app. The narrow `/s/*`
   bypass is intentional: an OBS source authenticates its source-scoped
   WebSocket with its per-slot source token, and OBS cannot use the interactive
-  Access flow. For prod, Access is omitted so anyone can reach the public
-  sign-in page.
+  Access flow. `/ws` needs its **own** Bypass application (not under `/s/*`):
+  the host greenroom and guest pages open that path with a cookie or pass
+  token, and Access cannot complete a WebSocket login redirect. For prod,
+  Access is omitted so anyone can reach the public sign-in page.

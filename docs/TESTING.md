@@ -97,7 +97,9 @@ What this layer must cover:
 - **Origin handling incl. the null OBS-CEF origin** (EN-16): host/guest
   connections get strict Origin validation; OBS browser-source connections send
   `Origin: null` and must be accepted **for source-token connections only**,
-  without weakening Origin checks for host/guest.
+  without weakening Origin checks for host/guest. A host/guest Origin that
+  matches the configured `BASE_URL` host is also admitted, so a reverse proxy
+  that rewrites `Host` to an internal service name does not 403 the handshake.
 - **One-connection-per-identity eviction** (EN-16): a second connection for the
   same identity evicts the prior one; reconnect is rate-limited.
 - **Reconnect** keyed by stable `pass_id` (D-40 / EN-3): a dropped peer rejoins

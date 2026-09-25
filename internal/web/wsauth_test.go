@@ -761,6 +761,31 @@ func TestWS_CrossOriginRejectedForCookie(t *testing.T) {
 	}
 }
 
+// A Cloudflare tunnel whose service URL is guestpass:8137 may present that as Host
+// while the browser Origin stays the public BASE_URL. The host cookie handshake must
+// still be admitted — OBS sources already succeed because their null Origin is stripped.
+func TestWS_PublicOriginAllowedWhenProxyRewritesHost(t *testing.T) {
+	inner := newWSHarness(t, wsHarnessOpts{})
+	_, cookie := inner.seedHost(t, "host1", store.HostActive)
+
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = "guestpass:8137"
+		inner.srv.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+
+	url := "ws" + strings.TrimPrefix(proxy.URL, "http") + "/ws"
+	hdr := cookieHeader(cookie)
+	hdr.Set("Origin", "https://gp.example")
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
+	defer cancel()
+	c, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatalf("public-origin host handshake behind rewritten Host: %v (status %v)", err, resp)
+	}
+	c.CloseNow()
+}
+
 // --- Token redaction (EN-16) ---
 
 func TestWS_TokenRedactedInLogs(t *testing.T) {
