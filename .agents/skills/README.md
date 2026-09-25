@@ -4,7 +4,7 @@ This folder holds lightweight, agent-facing playbooks for workflows that should
 be consistent across Codex, Claude, and other coding agents.
 
 The set is intentionally small. It borrows useful generic pieces from
-`fineco-helper`, `earworm`, and `compose-pi`, while leaving behind their
+`fineco-helper`, `earworm`, and a private project, while leaving behind their
 project-specific harnesses, deployment assumptions, UI frameworks, and CI gates.
 
 ## Skills
