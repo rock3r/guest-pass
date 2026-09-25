@@ -35,8 +35,10 @@ messages, non-interactive commands, and file-based multiline text for `gh`.
 ### `babysit-pr`
 
 Polls an open PR for CI status, mergeability, bot reviews, and human comments.
-It includes the reusable watcher script from `fineco-helper`, with repo-specific
-validation instructions kept in the skill text instead of baked into the script.
+It is vendored from `rock3r/babysit-pr-skill` at the tag in its `VERSION` file
+(currently v1.0.1). Update it with that repository's `sync.py`; do not edit the
+vendored files here. The project settings, such as the local gate, live in
+`babysit-pr/config.json`.
 
 ### `review-workflow-guidance`
 
