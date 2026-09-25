@@ -28,6 +28,21 @@ python3 .agents/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --retry-faile
 Use `--repo OWNER/REPO` when the current checkout does not let `gh` infer the
 repository.
 
+## Output
+
+The script prints JSON lines. Where the `actions` list is depends on the mode:
+
+| Mode | Read the actions from |
+| --- | --- |
+| `--once`, `--snapshot` | top-level `actions` |
+| `--retry-failed-now` | `snapshot.actions`. The top level reports the rerun: `rerun_attempted`, `rerun_count`, `reason`. |
+| `--watch` | `payload.snapshot.actions` on `snapshot` events, `payload.actions` on `stop` events |
+
+`blocking_review_items` lists inline review comments whose threads are still
+unresolved, including the authenticated account's own threads. If the
+unresolved-thread lookup fails, every actionable inline comment blocks. While
+the list is not empty, the watcher does not emit `stop_ready_to_merge`.
+
 ## Loop
 
 1. Run `--once` so the script waits until something needs attention.
@@ -51,6 +66,14 @@ The watcher emits action names such as:
 - `diagnose_merge_conflict` — resolve conflicts.
 - `diagnose_branch_behind` — update branch from base.
 - `wait_codex` — Codex is still reviewing.
+
+## Conflicts
+
+When the PR is `CONFLICTING` or `DIRTY`, merge `origin/main` into the PR branch.
+A merge keeps the branch history. Resolve the conflicts, add any outstanding
+review fixes, run validation, and push once. Rebase only when the owner asks
+for it: a rebase rewrites history and needs a force push. Pushing follows the
+approval rules in `AGENTS.md`.
 
 ## Validation
 
