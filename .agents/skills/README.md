@@ -36,7 +36,7 @@ messages, non-interactive commands, and file-based multiline text for `gh`.
 
 Polls an open PR for CI status, mergeability, bot reviews, and human comments.
 It is vendored from `rock3r/babysit-pr-skill` at the tag in its `VERSION` file
-(currently v1.0.1). Update it with that repository's `sync.py`; do not edit the
+(currently v2.1.0). Update it with that repository's `sync.py`; do not edit the
 vendored files here. The project settings, such as the local gate, live in
 `babysit-pr/config.json`.
 
