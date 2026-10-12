@@ -969,10 +969,14 @@ created ──email──▶ sent ──link opened──▶ opened ──device
 ## 7. Signaling protocol contract (`internal/signaling`)
 
 One WS endpoint (`GET /ws`), auth via JWT cookie (host/co-host) or `?pass=` /
-`?src=` token (guest / OBS source page). **Role is inferred from auth, never trusted
-from the frame.** The server relays SDP/ICE between peers and is the **sole
-authority** for room state, moderation, and roles. All frames are small JSON objects
-with a `t` discriminator; **media never rides the WS** — only signaling and control.
+`?src=` token (guest / OBS source page). OBS sources also use a source-scoped
+`GET /s/{slot}/ws` so an edge Access bypass need not expose the host route.
+**Role is inferred from auth, never trusted from the frame.** Host/guest
+`Origin` must match the request Host or the public `BASE_URL` host (a tunnel
+that rewrites Host to `guestpass:8137` must not reject the greenroom). The
+server relays SDP/ICE between peers and is the **sole authority** for room
+state, moderation, and roles. All frames are small JSON objects with a `t`
+discriminator; **media never rides the WS** — only signaling and control.
 
 ### Server-enforced invariants
 
