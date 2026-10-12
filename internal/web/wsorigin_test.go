@@ -14,6 +14,9 @@ func TestWSOrigin_Patterns(t *testing.T) {
 		{name: "not a url", baseURL: "not a url", want: nil},
 		{name: "public https", baseURL: "https://staging.guest-pass.link", want: []string{"staging.guest-pass.link"}},
 		{name: "public with port", baseURL: "https://gp.example:8443", want: []string{"gp.example:8443"}},
+		{name: "https default port", baseURL: "https://gp.example:443", want: []string{"gp.example"}},
+		{name: "http default port", baseURL: "http://gp.example:80", want: []string{"gp.example"}},
+		{name: "http non-default port", baseURL: "http://gp.example:8080", want: []string{"gp.example:8080"}},
 		{name: "trimmed", baseURL: "  https://gp.example  ", want: []string{"gp.example"}},
 	}
 	for _, tc := range cases {

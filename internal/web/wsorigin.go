@@ -16,12 +16,19 @@ type WSOrigin struct{}
 // Patterns returns the request-origin hosts Accept should authorize, derived
 // solely from BASE_URL. Empty or unparseable values yield no extra hosts, so
 // the library's default (Origin host == request Host) remains in force.
+// Default ports (:443 for https, :80 for http) are stripped so the pattern
+// matches the Origin browsers serialize (no default port).
 func (WSOrigin) Patterns(baseURL string) []string {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || u.Host == "" {
 		return nil
 	}
-	return []string{u.Host}
+	host := u.Host
+	port := u.Port()
+	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+		host = u.Hostname()
+	}
+	return []string{host}
 }
 
 // AcceptOptions builds the handshake options for a /ws upgrade. The request

@@ -74,6 +74,7 @@ func (b *syncBuffer) String() string {
 type wsHarnessOpts struct {
 	ice     ICEConfigurer
 	limiter *RateLimiter
+	baseURL string // empty → https://gp.example
 }
 
 type contextRecordingICE struct {
@@ -142,6 +143,11 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 
+	baseURL := o.baseURL
+	if baseURL == "" {
+		baseURL = "https://gp.example"
+	}
+
 	// Route the room logger into the same captured buffer, so a chat-purity test (EN-20) can
 	// assert the message text never appears in ANY log line — handler or room.
 	hub := signaling.NewHub(nil, logger)
@@ -153,7 +159,7 @@ func newWSHarness(t *testing.T, o wsHarnessOpts) *wsHarness {
 		Store:         st,
 		Hasher:        hasher,
 		Mailer:        mail.NewLogMailer(&bytes.Buffer{}),
-		BaseURL:       "https://gp.example",
+		BaseURL:       baseURL,
 		ICE:           o.ice,
 		WSInflight:    &inflight,
 		WSRateLimiter: o.limiter,
@@ -782,6 +788,30 @@ func TestWS_PublicOriginAllowedWhenProxyRewritesHost(t *testing.T) {
 	c, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr})
 	if err != nil {
 		t.Fatalf("public-origin host handshake behind rewritten Host: %v (status %v)", err, resp)
+	}
+	c.CloseNow()
+}
+
+// BASE_URL with an explicit default port (https://host:443) must still match the
+// Origin browsers send (https://host, no port) when a proxy rewrites Host.
+func TestWS_PublicOriginDefaultPortWhenProxyRewritesHost(t *testing.T) {
+	inner := newWSHarness(t, wsHarnessOpts{baseURL: "https://gp.example:443"})
+	_, cookie := inner.seedHost(t, "host1", store.HostActive)
+
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = "guestpass:8137"
+		inner.srv.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+
+	url := "ws" + strings.TrimPrefix(proxy.URL, "http") + "/ws"
+	hdr := cookieHeader(cookie)
+	hdr.Set("Origin", "https://gp.example")
+	ctx, cancel := context.WithTimeout(context.Background(), wsTestTimeout)
+	defer cancel()
+	c, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr})
+	if err != nil {
+		t.Fatalf("default-port BASE_URL host handshake behind rewritten Host: %v (status %v)", err, resp)
 	}
 	c.CloseNow()
 }
