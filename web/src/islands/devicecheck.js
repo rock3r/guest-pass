@@ -1298,7 +1298,7 @@ function DeviceCheck() {
         </p>
         <p class="dc-netblocked-note">
           Restrictive corporate or campus networks, VPNs, and firewalls can block media.
-          Ask the host about a TURN relay if another network is unavailable.
+          Try connecting your computer to a phone hotspot, or ask the host about a TURN relay.
         </p>
         <button type="button" class="dc-netblocked-retry" onClick={retryNetwork}>
           Retry

@@ -31,7 +31,7 @@ The page has a **transparent background** so you can layer or crop it in OBS. It
 
 ## Getting your URLs
 
-Open a stream's **OBS & sources** tab. GuestPass reveals each URL once when it creates or regenerates the token. Save it in OBS. If you lose a URL or it leaks, use **Regenerate** on that slot or **Regenerate all**. The old URL stops working immediately, including any connected source. Update OBS with the new URL.
+Open a stream's **OBS & sources** tab to copy the slot URLs. They remain available when you reopen the tab. If a URL leaks, use **Regenerate** on that slot or **Regenerate all**. The old URL stops working immediately, including any connected source. Update OBS with the new URL.
 
 > Keep slot URLs secret. Anyone with a valid slot URL can receive the media assigned to that slot. Do not post them in public chat or commit them to a repository.
 
