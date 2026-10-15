@@ -131,7 +131,7 @@ func errorContent(reason auth.DenialReason, host *store.Host) (title string, pag
 			Heading: "Please sign in",
 			Body: []string{
 				"You need to be signed in to view this page.",
-				"Your session may have expired — sign in again to pick up where you left off.",
+				"Your session may have expired. Sign in again to continue.",
 			},
 			Action: &errorAction{Href: "/signin", Label: "Go to sign-in"},
 		}
@@ -141,7 +141,7 @@ func errorContent(reason auth.DenialReason, host *store.Host) (title string, pag
 				Heading: "Your host account is awaiting approval",
 				Body: []string{
 					"An administrator needs to approve your account before you can create or run streams.",
-					"Check back later, or reach out to the administrator of this GuestPass instance.",
+					"Check again later, or contact the administrator of this GuestPass instance.",
 				},
 				Action: &errorAction{Href: "/", Label: "Back to home"},
 			}
@@ -160,7 +160,7 @@ func errorContent(reason auth.DenialReason, host *store.Host) (title string, pag
 			Heading: "You don't have access to this page",
 			Body: []string{
 				"The admin console is limited to administrators of this GuestPass instance.",
-				"If you reached this by mistake, head back to your dashboard.",
+				"Return to your dashboard if you opened this page by mistake.",
 			},
 			Action: &errorAction{Href: "/app", Label: "Back to your dashboard"},
 		}

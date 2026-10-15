@@ -1,23 +1,23 @@
 # The greenroom
 
-The greenroom is your private, invite-only control room — the place you and your guests meet *before* and *during* the broadcast. Guests see each other's cameras here; your audience does not. Nothing in the greenroom goes to air until you put it there.
+The greenroom lets you and your invited guests prepare before and during a broadcast. Participants receive each other's media. You control which sources appear in the broadcast through OBS.
 
 ## What you see
 
 Every guest who has opened their pass and allowed their camera shows up as a tile. Each tile carries their name, a connection-health signal, and an on-air indicator, plus moderation controls scaled to your role.
 
-Use **Set up camera and microphone** to open your own local preview and publish to the **Host** OBS source. It is an explicit action: merely opening the greenroom never asks for device permission. The preview is muted on your own machine to prevent feedback; use the microphone activity meter on each tile to confirm who is currently producing sound. A quiet meter means quiet, not a broken connection. Closing the capture clears the Host source again.
+Use **Set up camera and microphone** to open your local preview and publish to the **Host** OBS source. Opening the greenroom alone does not request device permission. Your local preview is muted to prevent feedback. Each tile has a microphone activity meter. A zero meter can mean silence, unavailable audio analysis, or no audio track. Closing capture clears the Host source.
 
 **OBS state unknown** means the browser source has not yet reported whether it is active in OBS. It is not a claim that the guest is off air; check the source or the linked stream until OBS reports a state.
 
 ## Backstage chat
 
-The greenroom has a text chat for quick coordination — "you're muted," "go to you next," that sort of thing. Two things to be clear about, so you can set expectations with guests:
+Use text chat to coordinate with guests.
 
 The sidebar opens on **Chat**. Switch to **People** whenever you need participant controls, OBS slot assignment, or stream-quality controls.
 
-- **It's ephemeral.** Chat is never written to disk or logged — there's no transcript, and it's gone when the room closes. Everyone can talk freely off the air.
-- **It's relayed, not peer-to-peer.** Your guests' camera and mic travel **directly between browsers** and never touch our server. Chat is different: it passes **through the server** to fan out to everyone, so while it's encrypted in transit it is **not end-to-end encrypted**. Treat it as off-the-record coordination, not a secure channel for secrets.
+- GuestPass does not save chat to disk or logs. Participants can still copy or record messages.
+- The server relays chat over encrypted connections. Chat has no end-to-end encryption. Do not send secrets in chat.
 
 ## Assigning guests to slots
 
@@ -37,7 +37,7 @@ From any tile you can, within your rank:
 
 While a session is live, the greenroom exposes the **program quality ceiling** — the maximum resolution, frame rate, and bitrate any guest source will send. Lower it if a guest's connection is struggling and dragging down the broadcast.
 
-GuestPass also adapts on its own: when a guest's connection or CPU is under strain, it quietly steps their video quality down and eases it back up slowly so it doesn't flap. If you'd rather not wait for that gradual recovery, **Bump quality now** asks every guest's browser to jump straight back to full quality. It's available only while you're live, and only does something when a guest is actually degraded — at full quality there's nothing to bump.
+GuestPass lowers video quality when a guest's connection or CPU cannot keep up. It restores quality gradually when conditions improve. **Bump quality now** requests immediate recovery up to the stream's configured quality limits. GuestPass lowers quality again if the problem continues. The control is available during a live session when at least one guest has reduced quality.
 
 ## Reconnects
 

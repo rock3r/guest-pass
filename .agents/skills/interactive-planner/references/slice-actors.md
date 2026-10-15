@@ -89,13 +89,13 @@ journey but whose evidence bar is not the gating one. Common patterns:
 - Primary end user, secondary stakeholder — a UI change that will be demoed to PM, but whose
   ship-gate is the UI test.
 
-When in doubt, pick the actor whose evidence bar is *higher*. That keeps the slice honest.
+When two actors apply, choose the actor with the stricter evidence requirements.
 
 ## How the validator uses this list
 
 - Reject any milestone whose primary actor is not in the closed list.
 - Reject any milestone whose evidence bar is mismatched against the declared actor.
-- Reject milestones that try to launder plumbing as end-user or stakeholder work by attaching the
-  wrong actor label.
+- Reject infrastructure milestones labelled as end-user or stakeholder work when they lack
+  evidence that those actors can observe the outcome.
 - Reject "next-slice implementer" or equivalent escape-hatch framings — see
   [slice-gotchas.md](slice-gotchas.md).

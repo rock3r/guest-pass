@@ -2,11 +2,11 @@
 <section class="report">
 {{if .Data.Sent}}
 <h1>Thanks — your report was sent</h1>
-<p>The GuestPass team will review it. You can close this page now.</p>
+<p>The instance administrators will review it. You can close this page now.</p>
 {{else}}
 <h1>Report this invite</h1>
-<p>Didn't expect this invite, or does something seem wrong? Tell us. Your report goes to the GuestPass
-team — the person who invited you will never see that you reported them, or what you said.</p>
+<p>Report unwanted invites, spam, or abuse to this instance's administrators. GuestPass does not show your report to the host.
+The form requires a reason and a message. Admins can see your email and message during the review period, which defaults to 30 days.</p>
 {{if .Data.Error}}<p class="report-error" role="alert">Please choose a reason and add a short message — both are required.</p>{{end}}
 <form method="post" action="/p/{{.Data.Token}}/report" class="report-form">
 <label class="field"><span class="label">Reason</span>

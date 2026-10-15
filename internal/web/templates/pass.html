@@ -3,8 +3,9 @@
 <h1>You're invited{{if .GuestName}}, {{.GuestName}}{{end}}</h1>
 <p>You've been invited to join the live stream <strong>{{.StreamTitle}}</strong> as a guest.
 No account or install needed — run a quick camera check, then enter the greenroom.</p>
-<p class="privacy">Your name and email are used only for this stream and are deleted within
-24 hours of it ending.</p>
+<p class="privacy">Under the default retention settings, your invitation name and email are deleted within
+24 hours of the stream ending. Session records and abuse reports have separate retention rules.
+Check this instance's privacy policy for details.</p>
 {{if .WatchURL}}<p class="watch-live-note">Want to watch the broadcast? <a class="watch-live" href="{{.WatchURL}}" target="_blank" rel="noopener noreferrer">Watch live ↗</a></p>{{end}}
 <div id="device-check"></div>
 {{if .ReportToken}}<p class="report-link"><a href="/p/{{.ReportToken}}/report">Didn't expect this invite? Report it.</a></p>{{end}}

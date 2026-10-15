@@ -3,7 +3,7 @@
 <div class="page-head">
 <div>
 <h1>Settings</h1>
-<p class="page-head-sub">Your account, defaults, and the knobs applied to every new stream.</p>
+<p class="page-head-sub">Manage your account and the default settings for new streams.</p>
 </div>
 </div>
 
@@ -75,7 +75,7 @@
 <label class="field"><span class="label">Maximum frame rate</span><input class="input" name="max_fps" type="number" min="1" max="60" step="1" value="{{.Data.Preferences.MaxFPS}}"><span class="hint">Frames per second.</span></label>
 <label class="field"><span class="label">Maximum bitrate</span><input class="input" name="max_bitrate_kbps" type="number" min="100" max="20000" step="1" value="{{.Data.Preferences.MaxBitrateKbps}}"><span class="hint">Kilobits per second.</span></label>
 </div>
-<p class="hint">GuestPass automatically negotiates H.264 with VP8 fallback for compatibility; codec selection is not exposed as a misleading preference.</p>
+<p class="hint">GuestPass automatically negotiates H.264 where available, with VP8 fallback.</p>
 </div>
 
 <div class="settings-section-card">
@@ -99,7 +99,7 @@
 {{/* GDPR host self-service (AC-3..5/D-37): functional export / amend (above) / delete. */}}
 <div class="settings-section-card" data-gdpr="self-service">
 <h2>Your data</h2>
-<p class="muted">GuestPass keeps the absolute minimum — your Google sign-in identity and the invites you create. No media is ever stored, and backstage chat is never recorded. A guest's name and email are deleted within 24&nbsp;hours of a stream ending. These tools cover your own account data.</p>
+<p class="muted">GuestPass stores your Google identity, streams, invitations, and session records. Abuse reports have separate retention rules. GuestPass does not record media or save chat. Participants can still record or copy what they receive. Under the default retention settings, invitation names and emails are deleted within 24&nbsp;hours of a stream ending. These tools cover your account data.</p>
 <div class="row gap-2 wrap settings-data-actions">
 <a class="btn btn-outline btn-sm" href="/api/me/export" download="guestpass-export.json" data-gdpr="export"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg> Export my data</a>
 </div>

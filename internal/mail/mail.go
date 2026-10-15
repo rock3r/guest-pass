@@ -249,4 +249,4 @@ func inviteHTML(inv Invite) string {
 // (D-37 §8 / AC-6): the guest is told, before sharing anything, that their PII is short-lived. It
 // matches the wording on the guest pass page (pass.html) so the message is consistent across the
 // invite surfaces. Static copy — no interpolation, so it is injection-safe.
-const invitePrivacyNotice = `<p>Your name and email are used only for this stream and are deleted within 24 hours of it ending.</p>`
+const invitePrivacyNotice = `<p>Under the default retention settings, your invitation name and email are deleted within 24 hours of the stream ending. Session records and abuse reports have separate retention rules. Check this instance's privacy policy for details.</p>`

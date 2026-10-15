@@ -1254,7 +1254,8 @@ function DeviceCheck() {
         </button>
         {/* GDPR purge notice (D-37 §8 / AC-6), the same reassurance the terminal screens carry. */}
         <p class="dc-left-privacy" data-privacy="purge">
-          Your name and email will be deleted within 24 hours of the stream ending.
+          Your invitation name and email will be deleted within 24 hours of the stream ending under
+          the default retention settings. Session records and abuse reports have separate retention rules.
         </p>
       </div>
     );
@@ -1276,7 +1277,8 @@ function DeviceCheck() {
             keys off stream end), and the counterpart to the "before" notice on the invite email +
             pass page. */}
         <p class="gs-terminal-privacy" data-privacy="purge">
-          Your name and email will be deleted within 24 hours of the stream ending.
+          Your invitation name and email will be deleted within 24 hours of the stream ending under
+          the default retention settings. Session records and abuse reports have separate retention rules.
         </p>
       </div>
     );
@@ -1295,8 +1297,8 @@ function DeviceCheck() {
           different Wi-Fi network, or switch to your phone's hotspot, then rejoin.
         </p>
         <p class="dc-netblocked-note">
-          Common on locked corporate or campus networks, VPNs, or strict firewalls. A phone hotspot
-          almost always works.
+          Restrictive corporate or campus networks, VPNs, and firewalls can block media.
+          Ask the host about a TURN relay if another network is unavailable.
         </p>
         <button type="button" class="dc-netblocked-retry" onClick={retryNetwork}>
           Retry
@@ -1348,7 +1350,7 @@ function DeviceCheck() {
             Joining needs camera, microphone, and peer-to-peer video support. Your browser doesn't
             offer it — this often happens in an app's built-in browser.
           </p>
-          <p>Open this link in the latest Chrome, Edge, Firefox, or Safari and try again.</p>
+          <p>Open this link in desktop Chrome, the supported guest browser for v1, and try again.</p>
         </div>
       );
     }
@@ -1460,8 +1462,8 @@ function DeviceCheck() {
         ) : null}
         <p>
           {audioOnly
-            ? "Only you can hear your microphone until you enter."
-            : "This is your camera preview. Only you can see it until you enter."}
+            ? "Your microphone is capturing locally. Entering the greenroom sends audio to other participants."
+            : "Your camera and microphone are capturing locally. Entering the greenroom sends media to other participants."}
         </p>
         <button type="button" class="dc-enter" disabled={phase === "entering" || switching} onClick={enter}>
           {switching ? "Switching device…" : phase === "entering" ? "Entering…" : "Enter the greenroom"}

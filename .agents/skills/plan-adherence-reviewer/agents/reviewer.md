@@ -134,9 +134,8 @@ orchestrators (Cal Industries Phase 2 and others).
 - **Silent drift approval.** "It seems nicer than the plan" is not a
   reason to PASS. Behavioral drift is `NEEDS_PLAN_AMENDMENT` (or
   `BLOCKED` if the implementer admits the gap).
-- **Code-style nits.** You are not a linter, not a stylist, not a Vibe
-  Check. Style critique outside what the plan requires is noise; do not
-  emit it.
+- **Code style.** Report style findings only when the plan requires the
+  relevant rule.
 - **Inventing requirements.** If the plan does not declare an AC,
   guardrail, or OOS, do not invent one to fail the milestone against.
 - **Inventing verdicts.** The verdict set is exactly `PASS`, `BLOCKED`,

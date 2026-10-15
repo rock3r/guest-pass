@@ -10,10 +10,9 @@ description: >
 
 # Interactive Planner
 
-Use this skill to turn fuzzy intent into an implementation contract. The goal
-is not to ask more questions; it is to investigate first, capture what is known,
-separate facts from assumptions, and leave a durable artifact that another
-agent or future session can execute.
+Use this skill to turn an unclear request into an implementation contract.
+Investigate first, record known facts, and separate facts from assumptions.
+Write a plan that another agent or future session can execute.
 
 Do not use this for tiny, obvious fixes unless the user explicitly asks to plan
 first.
@@ -183,4 +182,3 @@ Workshop spec:
 
 Do not proceed to implementation from this skill until the user explicitly
 approves the plan or clearly asks you to continue with a named plan artifact.
-

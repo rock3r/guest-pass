@@ -1,28 +1,29 @@
 # Your privacy & data
 
-You were invited onto a stream — you didn't sign up for anything. So GuestPass keeps as little about you as it possibly can, and gets rid of it quickly.
+You can join GuestPass with an invitation. You do not need a guest account, password, or profile.
 
 ## What's kept
 
-Just enough to make the invite work:
+- GuestPass stores your **invitation name and email** so the host can invite you.
+- GuestPass stores **session and peer records**, such as connection times. The invitation-data purge does not delete those records.
+- If you report an invite, GuestPass stores your email and report message for the instance admins to review. It clears those fields after the configured review period, which defaults to 30 days. It keeps the host, category, and time as an anonymous report record.
 
-- **Your name and email**, so the host could send you a pass.
-- Some **ephemeral session info** while you're actually in a room (who's connected, slot assignments). It exists only for the live session.
-
-That's it. There's **no account** for you, no password, no profile.
+Check your instance's privacy policy for its retention settings and how to contact its operator about retained records.
 
 ## What's never kept
 
-- **Your camera, microphone, and screen are never stored or recorded.** They travel **directly to the other participants**, encrypted — the GuestPass server never receives your video or audio at all.
-- **Backstage chat isn't recorded.** It's relayed live and leaves no trace once the room closes. (It does pass through the server to reach everyone, so it isn't a secure end-to-end channel — treat it as off-the-record coordination, not somewhere for secrets.)
-- **No third-party trackers or ads.** GuestPass doesn't follow you around.
+- **GuestPass does not record your camera, microphone, or screen.** Browsers exchange encrypted media. A configured TURN relay can forward encrypted packets. The GuestPass application server does not receive media.
+- **GuestPass does not save backstage chat.** The server relays messages over encrypted connections without saving them to disk or logs. Chat has no end-to-end encryption. Do not send secrets.
+- **GuestPass has no third-party trackers or ads.**
 
-## It deletes itself
+Participants can record media or copy chat on their own devices. A host can record or broadcast media through OBS.
 
-Your name and email are **automatically deleted within 24 hours** of the stream ending. You don't have to ask, and there's nothing to manage — because there's no account, your details simply age out on their own.
+## Invitation data deletion
 
-(Hosts, who *do* have accounts, get self-service export and delete controls. As a guest you don't need them — there's nothing lingering to clean up.)
+Under the default retention settings, GuestPass deletes your invitation name and email **within 24 hours** of the stream ending. Session records and abuse reports have separate retention rules. Self-hosted instances can change retention settings; check the instance's privacy policy.
+
+Hosts have account export and deletion controls. Guests have no account or self-service deletion page.
 
 ## If something feels off
 
-If you got an invite you didn't expect or don't want, you can flag it — see [Reporting an invite](reporting-an-invite). And if you'd rather not appear at all, you simply don't open the link; nothing happens until you do.
+If you received an unwanted invite, see [Reporting an invite](reporting-an-invite). Opening the invite page alone does not start capture. The device check starts local capture after you allow camera or microphone access. Entering the greenroom sends media to other participants before your source appears in the broadcast.

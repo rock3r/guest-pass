@@ -1,6 +1,6 @@
 # Connections & networking
 
-You don't need to be a network engineer to run a show — most guests "just connect." But when someone *can't*, it's almost always their network, and knowing the shape of how GuestPass connects helps you fix it fast. Here's the high-level picture.
+GuestPass uses separate connections for room coordination and media. A guest can reach the room while a firewall blocks their media connection.
 
 ## Two separate channels
 
@@ -25,28 +25,24 @@ Some networks won't allow a direct peer-to-peer link at all — most often:
 - **Locked-down guest Wi-Fi** (hotels, conferences) that isolates clients from each other.
 - Aggressive VPNs.
 
-When this happens the affected guest gets a **clear heads-up** rather than a silent hang, so you know it's a network issue and not a bug.
+If no attempted media connection succeeds, GuestPass shows a network warning. Try another network or ask the host about a relay.
 
 ## TURN: the relay fallback
 
 For those cases there's **TURN** — a relay server that sits in the middle and forwards the media when a direct path is impossible. Two things to know:
 
-- It still **can't read your media** — it forwards the same encrypted packets, it just can't decrypt them. Privacy holds; you only lose the "direct" part.
-- It costs an extra hop (a little more latency) and bandwidth on the relay, which is why it's a fallback, not the default.
+- The relay forwards encrypted packets without decrypting them.
+- Relaying uses server bandwidth and can increase latency. GuestPass tries direct connections first.
 
 **GuestPass is STUN-only out of the box** — no relay, nothing extra to run, which keeps the cost near zero. What to do when a guest actually needs a relay depends on your situation:
 
-- **On the public `guest-pass.link` instance.** There's no shared TURN relay, and the instance won't add one — relaying everyone's media is exactly the cost the public instance avoids to stay free. A host can attach their own coturn-compatible relay under **Settings → Connection**, using a standard `turn:host:port` or `turns:host:port` URL, so *you* cover *your* guests without the instance relaying for everybody. Until that is configured, a blocked guest's practical fix is their **network**: a phone hotspot or any less-restricted connection almost always connects.
+- **On the public `guest-pass.link` instance.** There is no shared TURN relay. A host can configure a coturn-compatible relay under **Settings → Connection** with a `turn:host:port` or `turns:host:port` URL. Without a relay, ask a blocked guest to connect their computer to a less restricted network, such as a phone hotspot.
 - **On a team or company instance someone else runs.** Ask whoever runs it — they can enable a relay server-side for everyone on that instance.
-- **If you self-host.** You're in control: point GuestPass at the bundled relay or a bring-your-own / third-party one, ideally over **TLS on port 443** so it sails through corporate firewalls. The settings are in your copy of `docs/DEPLOYMENT.md`.
+- **If you self-host.** Configure the bundled relay or a third-party relay. **TLS on port 443** can help on restrictive networks, but some firewalls still block it. See `docs/DEPLOYMENT.md`.
 
 ## Supported browsers
 
-GuestPass is built on standard WebRTC, so it *should* run on any current major browser with no extension and no app. Being honest about what we actually test:
-
-- **Chrome on desktop is what we actively test.** For an important show, that's the safe choice — for you and your guests alike.
-- **Other modern desktop browsers** — Edge and other Chromium browsers, Firefox, Safari — run on the same standards and should work fine, but we don't verify every release. If something misbehaves, switching to Chrome is the first thing to try.
-- **Mobile works, but isn't optimised yet.** We haven't done any mobile-specific tuning — layouts and camera handling are built for desktop — so **your mileage may vary** on a phone or tablet. It's fine for a guest in a pinch; we wouldn't run the host side from one.
+GuestPass v1 supports **desktop Chrome** for guests and OBS browser sources for broadcast output. Mobile devices and other guest browsers are untested and unsupported in v1. They may work, but use desktop Chrome for a supported setup.
 
 One thing to actively avoid: **in-app browsers** (opening the link inside another app's built-in webview, like some chat apps), which often can't get camera or mic access. "Open this in Chrome" fixes a surprising number of problems.
 
@@ -54,7 +50,7 @@ One thing to actively avoid: **in-app browsers** (opening the link inside anothe
 
 A quick checklist to hand a struggling guest:
 
-1. **Open the link in a real browser** (not an in-app webview), recent Chrome/Edge/Firefox/Safari.
+1. **Open the link in desktop Chrome**, outside any app's built-in browser.
 2. **Allow camera and mic** when prompted — check the address-bar permission icon if you dismissed it.
-3. **Try a different network** — a phone hotspot famously dodges restrictive office/campus firewalls.
+3. **Try a different network**, such as connecting your computer to a phone hotspot. The new network may allow the connection.
 4. If it's a recurring problem on a managed network, the lasting fix is their **IT allowing WebRTC/UDP**, or a **TURN relay** — see the section above for who can switch that on for your instance.

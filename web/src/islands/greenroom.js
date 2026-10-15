@@ -124,7 +124,7 @@ function ChatRail({ messages, peers, selfID, live, onSend }) {
     <section class="gr-chat-rail" aria-label="Backstage chat">
       <p class="gr-rail-label">Backstage</p>
       <h2>Chat</h2>
-      <p class="gr-chat-privacy">Relayed live, never recorded.</p>
+      <p class="gr-chat-privacy">GuestPass does not save chat. The server relays messages without end-to-end encryption. Participants can copy them.</p>
       <ol class="gr-chat-messages" aria-live="polite">
         {messages.length ? messages.map((m, i) => <li key={`${m.from}-${i}`}><strong>{nameFor(m.from)}</strong><span>{m.text}</span></li>) : <li class="gr-chat-empty">Say hello to everyone backstage.</li>}
       </ol>
@@ -347,8 +347,8 @@ function QualityControls({ state, anyDegraded, recoverGroupRef, infoOpen, onInfo
               disabled={!anyDegraded}
               title={
                 anyDegraded
-                  ? "Restore full quality for every guest now"
-                  : "Quality is already at the maximum — nothing to bump"
+                  ? "Request recovery up to the stream's quality limits"
+                  : "No guest has reduced quality"
               }
               onClick={onRecover}
             >
@@ -365,10 +365,10 @@ function QualityControls({ state, anyDegraded, recoverGroupRef, infoOpen, onInfo
             </button>
             {infoOpen ? (
               <div class="gr-recover-pop" role="tooltip">
-                When a guest&rsquo;s connection or CPU is under strain, GuestPass automatically lowers their video quality,
-                then eases it back up slowly so it doesn&rsquo;t flap. &ldquo;Bump quality now&rdquo; skips that wait and asks every
-                guest&rsquo;s browser to jump straight back to full quality. If the strain is still there, it eases back down on
-                its own. It only does something while a guest is degraded.
+                GuestPass lowers video quality when a guest&rsquo;s connection or CPU cannot keep up.
+                It restores quality gradually when conditions improve. &ldquo;Bump quality now&rdquo; requests
+                immediate recovery up to the stream&rsquo;s configured limits. Quality drops again if the
+                problem continues. This control is available when a guest has reduced quality.
               </div>
             ) : null}
           </div>

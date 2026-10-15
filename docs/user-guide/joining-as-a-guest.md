@@ -1,6 +1,6 @@
 # Joining from your pass
 
-Someone invited you onto their live stream with GuestPass. Here's the whole process — there isn't much to it.
+Use your personal invite link to join a live stream with GuestPass.
 
 ## No account, no install
 
@@ -9,18 +9,20 @@ You don't sign up for anything and you don't download an app. Your invite is a *
 ## What happens when you open the link
 
 1. You'll see who invited you and which show you're joining.
-2. When you're ready, you choose to enter — and your browser asks to use your **camera and microphone**. Allow it. (Nothing is captured until you do, and nothing is sent anywhere until the host puts you on screen.)
-3. You land in the **greenroom** — a private waiting room where you and the host can see and hear each other and sort out soundcheck before going live.
+2. Start the device check and allow your browser to use your **camera and microphone**. Capture starts for your local preview at this point.
+3. Choose **Enter the greenroom** to send your media to the host and other greenroom participants. They can see and hear you before your source appears in the broadcast.
 
-Use a **laptop or desktop** if you can — **Chrome is the most tested** browser, with Edge, Firefox, and Safari close behind. A phone works, but it's not optimised yet, so a computer is the safer bet for a smooth join.
+Use **desktop Chrome**, the supported guest browser for v1. Mobile devices and other browsers are untested and unsupported in v1.
 
 ## Are you on air?
 
-Being in the greenroom does **not** mean you're being broadcast. The host decides when your camera goes to their stream. Your tile shows an on-air indicator so you can tell the difference between "backstage" and "live."
+The host controls the broadcast in OBS. Your tile reflects the state reported by your OBS source. If it says **Awaiting OBS state**, check with the host or watch the broadcast. An unknown state does not mean you are off air.
 
 ## Your privacy
 
-Your camera and microphone travel **directly to the other participants**, encrypted — the GuestPass server never sees your video or audio. Backstage chat isn't recorded. The only things kept are your name and email (so the host could send the invite), and those are **deleted within 24 hours** of the stream ending.
+Your camera and microphone travel encrypted between browsers. A configured TURN relay can forward the encrypted packets. The GuestPass server does not receive or record your media. GuestPass relays chat without saving it, but participants can record or copy what they receive.
+
+GuestPass deletes your invitation name and email **within 24 hours** of the stream ending under the default retention settings. Session records and abuse reports have separate retention rules. See [Your privacy](your-privacy) and your instance's privacy policy.
 
 ## Trouble?
 

@@ -614,10 +614,11 @@ func TestGreenroom_RequiresHostAuth(t *testing.T) {
 			t.Errorf("greenroom control room is missing %q:\n%s", want, body)
 		}
 	}
-	// EN-20/AC-7: the host greenroom surfaces the chat-privacy guarantee (the same one the guest
-	// session's chat note carries), so the host can reassure guests backstage chat isn't recorded.
-	if !strings.Contains(strings.ToLower(body), "backstage chat is never recorded") {
-		t.Errorf("greenroom page missing the EN-20 chat-privacy trust copy:\n%s", body)
+	// EN-20/AC-7: the host sees chat retention, encryption, and participant-copying limits.
+	for _, want := range []string{"does not save backstage chat", "without end-to-end encryption", "participants can copy or record"} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Errorf("greenroom page missing chat notice %q:\n%s", want, body)
+		}
 	}
 }
 

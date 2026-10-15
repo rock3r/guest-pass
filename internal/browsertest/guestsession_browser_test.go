@@ -43,8 +43,8 @@ func enterGuestSession(t *testing.T, base, rawToken, label string) context.Conte
 }
 
 // T-11 / AC-12: the guest's in-session island. After entering, the guest sees a self-view, the
-// three-state on-air SELF pill (D-24), a backstage chat with the "not recorded — off the record"
-// microcopy (EN-20), a raise-hand control, and a separate "muted/hidden by host" force-lock notice
+// three-state on-air SELF pill (D-24), a backstage chat with a retention and encryption notice
+// (EN-20), a raise-hand control, and a separate "muted/hidden by host" force-lock notice
 // (D-13). This proves: the self-view renders live frames + the on-air pill renders; a backstage
 // message ROUND-TRIPS the server relay to a SECOND guest (the panels render only relayed {t:chat}
 // frames — never an optimistic echo — so the message reaching the OTHER guest proves the relay;
@@ -59,7 +59,7 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 	bCtx := enterGuestSession(t, s.base, s.rawTokenB, "B")
 
 	// Guest A's surface: self-view shows live frames, the on-air SELF pill renders, and the chat
-	// carries the EN-20 "off the record" microcopy.
+	// explains chat retention, server relay, and the risk of participants copying messages.
 	if err := chromedp.Run(aCtx,
 		chromedp.Poll(`document.querySelector('.gs-selfview').videoWidth > 0`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		chromedp.WaitVisible(`.dc-onair[data-onair]`, chromedp.ByQuery),
@@ -71,8 +71,10 @@ func TestGuestSession_ChatHandOnAirLock(t *testing.T) {
 	if err := chromedp.Run(aCtx, chromedp.Text(`.gs-chat-note`, &note, chromedp.ByQuery)); err != nil {
 		t.Fatalf("chat privacy microcopy missing: %v", err)
 	}
-	if n := strings.ToLower(note); !strings.Contains(n, "not recorded") || !strings.Contains(n, "off the record") {
-		t.Fatalf("chat microcopy = %q, want it to mention 'not recorded' and 'off the record' (EN-20)", note)
+	for _, want := range []string{"does not save chat", "server relays", "without end-to-end encryption", "participants can copy"} {
+		if !strings.Contains(strings.ToLower(note), want) {
+			t.Fatalf("chat microcopy = %q, missing %q (EN-20)", note, want)
+		}
 	}
 
 	// Backstage chat round-trips: A sends a message and it reaches GUEST B over the relay (and shows

@@ -1,6 +1,6 @@
 # Troubleshooting
 
-You've opened your pass and something's not right. Here are the quick fixes — most take a few seconds.
+Use these checks if you cannot join, see video, or hear other participants.
 
 ## My camera or microphone won't turn on
 
@@ -10,18 +10,18 @@ You've opened your pass and something's not right. Here are the quick fixes — 
 
 ## "Open this in a real browser"
 
-If you tapped the link inside another app (a chat app, email preview, etc.), it may open in that app's built-in mini-browser, which often can't reach your camera. Open the link in a **full browser** instead — **Chrome on a computer is the most reliable**, and Edge, Firefox, or Safari are fine too.
+Links inside chat apps or email previews may open in a built-in browser without camera access. Open your link in **desktop Chrome**. Other browsers and mobile devices are untested and unsupported in v1.
 
 ## I'm stuck on "connecting"
 
 This is usually the network you're on. Strict office, school, or hotel Wi-Fi sometimes blocks the direct connection GuestPass needs.
 
-- Try a **different network** — a phone hotspot is the classic fix.
+- Try a **different network**, such as connecting your computer to a phone hotspot.
 - If you must stay on a managed network, ask whoever runs it to allow video calls / WebRTC, or let your host know so their instance operator can route you through a relay.
 
 ## My video is frozen or laggy
 
-That's your connection or computer working hard. GuestPass lowers and restores your quality automatically, so it often clears on its own. To help: **close other apps and tabs** (especially other video calls and downloads), and if you can, plug into **ethernet** instead of Wi-Fi.
+Your connection or computer may lack capacity. GuestPass lowers quality and restores it when conditions improve, up to the stream's configured limits. Close other calls and downloads. Use **Ethernet** if available.
 
 ## I can't hear anyone / they can't hear me
 
@@ -31,7 +31,7 @@ That's your connection or computer working hard. GuestPass lowers and restores y
 
 ## There's an echo
 
-Use **headphones**. Echo happens when your speakers feed back into your mic; headphones end it instantly.
+Use **headphones** to prevent your microphone from capturing sound from your speakers. If echo continues, ask other participants to use headphones too.
 
 ## My self-view is black
 
@@ -39,8 +39,8 @@ Something else is probably using the camera, or a physical privacy shutter/cover
 
 ## My link expired or says "turned off"
 
-Passes can expire, and a host can switch one off. Just ask your host to **re-issue** your invite — it takes them one click and you'll get a fresh link.
+Passes can expire, and a host can turn one off. Ask your host to **re-issue** your invite and send you the new link.
 
 ## Am I on air right now?
 
-Being in the greenroom is **not** the same as being broadcast — the host decides when you go live. Your tile shows an on-air indicator. See [In the greenroom](in-the-greenroom).
+Other greenroom participants receive your media once you enter. The host controls the broadcast in OBS. Your tile reflects OBS status. If that status is unknown, ask the host or check the broadcast. See [In the greenroom](in-the-greenroom).

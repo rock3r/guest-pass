@@ -308,11 +308,10 @@ room/session state is in-memory only and rebuilt on reconnect (AD-3); chat is
   terminate taxonomy so clients reconnect cleanly rather than seeing a hard
   socket drop), **finishes in-flight DB writes**, then exits. Without this, every
   deploy / restart is an ungraceful mass-drop of live rooms.
-- **Rate-limiter / progressive-trust-quota state is in-memory and per-instance
-  (AA-1).** It is **not** persisted, so it **resets on restart** — a deploy
-  clears accumulated rate-limit and quota counters. Acceptable for the
-  single-instance v1; **known limitation**, revisited if/when the abuse state
-  needs to survive restarts or span multiple instances.
+- **Rate limiters keep per-instance state in memory (AA-1).** The per-IP and
+  per-host send-rate token buckets reset on restart. Progressive-trust quotas
+  use database row counts and account age, so their state survives a restart.
+  Multiple instances would need shared rate-limiter state.
 
 ### Mail health (EN-22)
 
