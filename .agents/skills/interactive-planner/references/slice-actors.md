@@ -51,9 +51,9 @@ watching eval verdicts, exercising a protocol under test. "Observable" means a r
 contributor sees on this commit: a new test runs and asserts, a previously silent CI signal
 lights up, a fake/impl behind a seam responds when driven.
 
-Critically, this is *not* "a hypothetical implementer in a later milestone". A developer milestone
-whose only beneficiary is the agent or contributor doing M-(N+1) is the **next-slice implementer
-anti-pattern** in disguise and is rejected — see [slice-gotchas.md](slice-gotchas.md).
+The developer must be able to use or test the deliverable in this milestone.
+Reject a milestone that benefits only the implementer of M-(N+1). See the
+**next-slice implementer anti-pattern** in [slice-gotchas.md](slice-gotchas.md).
 
 - Evidence bar: a test or dev-loop interaction that drives a real interaction across the seam
   being introduced **on this slice**. The test must exercise the seam in both directions — not

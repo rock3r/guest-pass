@@ -16,7 +16,7 @@ GuestPass stores your Google identity, streams, guest invitations, and operation
 
 - **Export** — download everything we hold about you (account, streams, invites) as a single JSON file.
 - **Delete account** — permanently removes your account and all its data. Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
-- **Guest data is auto-purged.** A guest's name and email are deleted **within 24 hours** of a stream ending — automatically, with no action from you.
+- **Invitation data is auto-purged.** Under the default retention settings, GuestPass deletes invitation names and emails **within 24 hours** of stream end. Session records and abuse reports have separate retention rules.
 
 ## Stream defaults
 

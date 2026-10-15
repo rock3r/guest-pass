@@ -926,9 +926,9 @@ rule.)
 - **Backstage chat is never persisted** — relayed through the WS only, no DB/file
   writer in the chat path; `chat.text` is never logged (D-26, EN-20).
 - **Guest PII purged 24h post-stream (D-37).** `passes.name` / `passes.email` are
-  deleted within 24h of stream end by the periodic purge job; no guest self-service
-  deletion (auto-purge makes it moot). `sessions`/`peers` rows are transient, then
-  purged or reduced to anonymous aggregates.
+  deleted within 24h of stream end under the default retention settings. The
+  periodic purge job does not delete `sessions`/`peers` rows. Guests have no
+  self-service deletion page. See `DEPLOYMENT.md` for the separate retention rules.
 - **Suppression locks persist (AD-22).** `pass_locks` rows survive a server restart so
   a force-muted/hidden guest stays suppressed across a deploy/crash; they are loaded +
   re-applied on room (re)spawn and deleted on release/expiry. Not per-frame, so EN-11 holds.
@@ -1517,7 +1517,8 @@ detail (reporter, category, message, stream, time) and offers **Dismiss all**
 identity is admin-only** — it renders only on `/admin` (RequireAdmin); no host surface shows a
 report or its complaint text, so a host can never learn which invitee reported them (retaliation
 guard, EN-24). After the review window (`REPORT_RETENTION`, default 30d) the retention sweep nulls
-`reporter_email` + `message`, keeping only the anonymous `host_id`/`category`/`time` signal (D-37).
+`reporter_email` + `message`. The report ID, host and stream associations, category,
+and time remain. Admins can still see the associated stream title (D-37).
 
 **Progressive-trust quotas (M5 PR-10, D-36 / §7.9 / §9.4).** Two per-host caps, tightest for new
 accounts and looser once the account ages past `RATE_TRUST_AFTER`: an **invite (= email) cap** per
@@ -1539,10 +1540,9 @@ invite, slow refill to bound sustained re-send spam.
 
 ### 24h purge (D-37)
 
-Guest PII (`passes.name` / `passes.email`) is **deleted within 24h of stream end** by
-an in-binary hourly purge ticker (`internal/jobs`); no guest self-service deletion
-(auto-purge makes it moot — guests are told before/after via copy). Session/peer rows
-are transient, then purged or reduced to anonymous, never-per-person-trackable
-aggregates (streams run, guest-minutes, TURN-relay %, uptime). Host PII is the only
-non-anonymous surface and drives host self-service export/amend/delete. Operational
-purge-job behavior and GDPR self-service routes are detailed in `DEPLOYMENT.md`.
+Under the default retention settings, the hourly purge ticker (`internal/jobs`)
+deletes guest invitation names and emails **within 24h of stream end**. It does not
+delete session or peer rows. Abuse reports use a separate review window and retain
+their host and stream associations after the sweep clears the reporter email and
+message. Guests have no self-service deletion page. Hosts can export, amend, or
+delete their account data. See `DEPLOYMENT.md` for retention settings and notices.

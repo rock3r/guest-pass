@@ -175,10 +175,10 @@ The driver already proves this headless; this confirms it on the **real OBS-CEF 
 > output** and **real peer browsers**.
 
 ### 4. Backstage chat privacy (EN-20)
-- [ ] Backstage chat relays between participants and the guest session shows the "not recorded —
-      off the record" note; the host **greenroom** shows the matching "Backstage chat is never
-      recorded" trust line. (It is never written to disk — that's the server-tested invariant;
-      nothing to inspect.)
+- [ ] Backstage chat relays between participants.
+- [ ] The guest session and host greenroom explain that GuestPass does not save chat,
+      the server relays messages without end-to-end encryption, and participants can copy them.
+      Server tests check that the relay does not write chat to disk or logs.
 
 ### 5. Real-network / NAT — STUN-only (RF-7 / D-38)
 - [ ] A guest on a **second machine on a different network** connects and renders — STUN gives the
