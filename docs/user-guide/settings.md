@@ -14,8 +14,8 @@ GuestPass follows your operating system's light/dark preference by default. The 
 
 GuestPass stores your Google identity, streams, guest invitations, and operational session records. It also stores abuse reports under separate retention rules. GuestPass does not record media or save backstage chat. Participants can still record or copy what they receive.
 
-- **Export** — download everything we hold about you (account, streams, invites) as a single JSON file.
-- **Delete account** — permanently removes your account and all its data. Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
+- **Export** — download your host account data (account profile, preferences, streams, and guest invitations) as a single JSON file. Operational session records and abuse reports are not included in this export.
+- **Delete account** — permanently removes your account, streams, and guest invitations. Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
 - **Invitation data is auto-purged.** Under the default retention settings, GuestPass deletes invitation names and emails **within 24 hours** of stream end. Session records and abuse reports have separate retention rules.
 
 ## Stream defaults
