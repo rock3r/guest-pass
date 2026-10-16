@@ -76,6 +76,5 @@ If cleanup fails (e.g., file in use, permission error), the reviewer must:
 - prefer the verdict `BLOCKED` until the artifacts are removed, because
   leaving reviewer scratch behind is a regression in its own right.
 
-Cleanup is a hard requirement, not a politeness. The whole reviewer is
-worthless if it leaves a trail of half-written probes that other agents
-later mistake for real artifacts.
+The reviewer must remove its temporary artifacts so other agents do not
+mistake them for project files.

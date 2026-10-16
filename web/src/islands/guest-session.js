@@ -252,24 +252,24 @@ export function GuestSession({
         <div class="gs-status">
           {pubState === "live" ? (
             hostArrived ? (
-              <p>You're in — your camera is live in the greenroom.</p>
+              <p>You have joined the greenroom. Other participants can receive your media.</p>
             ) : (
               // Live, but no host has arrived yet (D-40) → host-waiting. The guest is already
               // connected; the host will see them the moment they open the greenroom.
               <p class="gs-host-waiting" data-state="host-waiting" role="status">
-                You're in — waiting for the host to start. They'll see you as soon as they arrive.
+                You have joined the greenroom and are waiting for the host. Other participants can receive your media.
               </p>
             )
           ) : pubState === "reconnecting" ? (
             <p class="gs-reconnecting">Connection dropped — reconnecting to the greenroom…</p>
           ) : (
-            <p>You're in — connecting your camera to the greenroom…</p>
+            <p>Connecting your media to the greenroom…</p>
           )}
           {selfDegraded ? (
             <p class="gs-degraded" data-degraded={`${selfDegraded.dir}:${selfDegraded.reason}`}>
               {selfDegraded.dir === "recovering"
                 ? "Recovering your video quality…"
-                : "Trimming your video to protect your stream."}
+                : "Lowering video quality because your connection or CPU cannot keep up."}
             </p>
           ) : null}
           <p class="dc-onair" data-onair={onAir}>
@@ -320,7 +320,7 @@ export function GuestSession({
               {micLocked
                 ? "Your microphone is muted by the host. Ask them to release it before turning it on."
                 : camLocked
-                  ? "Your camera is off by the host. Ask them to release it before turning it on."
+                  ? "The host turned your camera off. Ask them to release it before turning it on."
                   : "These controls affect your live greenroom feed."}
             </p>
           </div>
@@ -376,7 +376,7 @@ export function GuestSession({
       </div>
 
       <section class="gs-chat" aria-label="Backstage chat">
-        <p class="gs-chat-note">Backstage chat is not recorded — it's off the record.</p>
+        <p class="gs-chat-note">GuestPass does not save chat. The server relays messages without end-to-end encryption. Participants can copy them.</p>
         <ul class="gs-chat-log">
           {(messages || []).map((m, i) => (
             <li key={i} class="gs-chat-msg">

@@ -1,6 +1,10 @@
 # guest-pass
 
-The best way to do livestreams. Free, open source. Stop paying stupid money for basic shit.
+GuestPass is a free, self-hosted WebRTC guest greenroom and browser-source system.
+Hosts bring remote guests into OBS without plugins or guest accounts. Guests open
+an invite link in desktop Chrome, check their devices, and join the greenroom.
+Hosts assign guests to reusable OBS browser sources and control the broadcast in OBS.
+GuestPass is source-available under the UEL v1.0.
 
 ## Documentation
 

@@ -307,7 +307,7 @@ export function Tile({ entry, stream, level, viewerRole, live = true, showContro
         </span>
         <span class="gr-signal" data-signal={entry.signal || 0} title="Connection health" />
         {hasLevel ? (
-          <span class="gr-audio-activity" data-peer={entry.id} data-level={meterLevel} role="meter" aria-label="Microphone activity" aria-valuemin="0" aria-valuemax="5" aria-valuenow={meterLevel} title={meterLevel > 0 ? "Microphone activity" : "No microphone activity"}>
+          <span class="gr-audio-activity" data-peer={entry.id} data-level={meterLevel} role="meter" aria-label="Microphone activity" aria-valuemin="0" aria-valuemax="5" aria-valuenow={meterLevel} title={meterLevel > 0 ? "Microphone activity" : "No activity reported. Audio may be silent, unavailable for analysis, or missing."}>
             {[1, 2, 3, 4, 5].map((bar) => <i key={bar} data-active={bar <= meterLevel ? "1" : "0"} />)}
           </span>
         ) : null}

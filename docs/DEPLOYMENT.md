@@ -113,7 +113,7 @@ still equals a shipped placeholder — no silent boot on default secrets.
 | `MAX_REQUEST_BODY_BYTES` | optional | — | Global cap on the request body of every non-streaming HTTP route — an oversized body is rejected with `413` before any handler reads it (D-M5.5-4). An integer number of bytes; **defaults to `1048576` (1 MiB)**, generous for the app's small JSON/form bodies. Must be **positive** — a zero/negative value refuses to boot (it would disable the DoS guard). `/ws` is exempt (the streaming signaling socket). |
 | `PURGE_INTERVAL` | optional | — | How often the in-binary guest-PII purge sweeps (§8, D-37). A Go duration (e.g. `1h`, `30m`); **defaults to `1h`**. Must be **positive** — a zero/negative value refuses to boot (it would disable the retention guarantee). |
 | `PURGE_RETENTION` | optional | — | How long guest PII (pass `name` + `email`) is kept **after stream end** before the purge clears it (§8, D-37). A Go duration; **defaults to `24h`**. Must be **positive** — a zero/negative value refuses to boot. Lowering it tightens the window; raising it past 24h weakens the D-37 promise, so the public instance keeps the default. |
-| `REPORT_RETENTION` | optional | — | How long an abuse report's identifying content (reporter email + message) is kept before the retention sweep anonymizes it to NULL — the D-42 review window (§8, D-37). A Go duration; **defaults to `720h` (30d)**. Must be **positive** — a zero/negative value refuses to boot. The anonymous `host_id`/`category`/`time` signal is kept. |
+| `REPORT_RETENTION` | optional | — | How long the retention sweep keeps an abuse report's reporter email and message before setting them to NULL (§8, D-37). A Go duration; **defaults to `720h` (30d)**. Must be **positive**. The report ID, host and stream associations, category, and time remain. Admins can still see the associated stream title. |
 | `REAP_INTERVAL` | optional | — | How often the in-binary idle-session reaper polls active sessions (§8, D-40). A Go duration; **defaults to `1m`**. Must be **positive** — a zero/negative value refuses to boot. |
 | `REAP_IDLE_AFTER` | optional | — | How long a live session may have **zero connected participants** before the reaper auto-ends it (§8, D-40), freeing the one-live-session-per-host slot and making its guest PII purge-eligible. A Go duration; **defaults to `15m`** — generous so a host's transient drop/reconnect is never reaped. Must be **positive**. |
 | `SLOT_GRACE_WINDOW` | optional | — | How long a guest's OBS **cam-slot binding** is kept across a **transient WS drop** before the slot vacates (D-40/D-M5.5-3). Within it, a rejoin replays the binding and the OBS source resumes with no placeholder flash and no host action; after it, the slot falls to the placeholder (today's behavior). A Go duration; **defaults to `45s`** — long enough for a network blip / page reconnect, far below `REAP_IDLE_AFTER` so the idle reaper still ends a truly-dead session. Must be **positive**. Terminal events (kick / revoke / session-end) and the screenshare slot vacate immediately regardless. |
@@ -308,11 +308,10 @@ room/session state is in-memory only and rebuilt on reconnect (AD-3); chat is
   terminate taxonomy so clients reconnect cleanly rather than seeing a hard
   socket drop), **finishes in-flight DB writes**, then exits. Without this, every
   deploy / restart is an ungraceful mass-drop of live rooms.
-- **Rate-limiter / progressive-trust-quota state is in-memory and per-instance
-  (AA-1).** It is **not** persisted, so it **resets on restart** — a deploy
-  clears accumulated rate-limit and quota counters. Acceptable for the
-  single-instance v1; **known limitation**, revisited if/when the abuse state
-  needs to survive restarts or span multiple instances.
+- **Rate limiters keep per-instance state in memory (AA-1).** The per-IP and
+  per-host send-rate token buckets reset on restart. Progressive-trust quotas
+  use database row counts and account age, so their state survives a restart.
+  Multiple instances would need shared rate-limiter state.
 
 ### Mail health (EN-22)
 
@@ -404,11 +403,12 @@ just minimal *PII*.
 
 | Data | Classification | Lifetime |
 |---|---|---|
-| Guest pass name + email | PII | **Deleted ≤24h after stream end** (D-37) — no retention reason |
-| Invited-guest emails (on a host's streams) | PII | Same 24h post-stream purge |
+| Guest pass name + email | PII | **Deleted ≤24h after stream end** under the default retention settings (D-37); see §8 for scheduling and draft-stream rules |
+| Invited-guest emails (on a host's streams) | PII | Same invitation-data purge |
 | Host Google id / email / name | PII | Lifetime of the host account (host-deletable) |
 | Host's planned/scheduled streams | PII-linked | Lifetime of the host account |
-| Session / peer operational rows | transient | Live + a brief window, then purged or reduced to anonymous aggregates |
+| Session / peer operational rows | operational metadata | Stored separately; the invitation-data purge does not delete these rows. The operator must describe their retention in the instance privacy policy. |
+| Abuse reports | report content and metadata | The retention sweep clears reporter email and message after `REPORT_RETENTION` (default 30d). Report ID, host and stream associations, category, and time remain. Admins can still see the associated stream title. |
 | Backstage chat | **never stored** | Relayed over WS only; never in DB or logs (EN-20) |
 | Media | **never stored** | P2P; never transits or is processed server-side (D-23) |
 | Per-frame / per-link stats | not persisted | `used_turn` written once at disconnect (EN-11) |
@@ -416,20 +416,22 @@ just minimal *PII*.
 
 ### Guest PII — 24h auto-purge, no self-service deletion
 
-There is **no guest self-service deletion**: auto-purge makes a guest erasure
-endpoint moot (the data is gone in a day, and there is no guest account to
-authenticate against). The obligation is met by **transparency** — a **copy/UX
-requirement** (not optional), telling guests before and after:
+Guests have no account or self-service deletion page. The invitation-data purge
+clears pass names and emails under the configured retention rules. Session records
+and abuse reports have separate retention rules. The instance privacy policy must
+describe retained data and give guests a way to contact the operator.
+
+The app must show these notice semantics before and after participation:
 
 | When | Surface | Notice |
 |---|---|---|
-| Before | Invite email + device-check screen | "Your name and email are only used for this stream and are deleted within 24 hours of it ending." |
-| After | Leave screen + session-ended screen | "This stream's over. Your name and email will be deleted within 24 hours." |
+| Before | Invite email + pass/device-check page | Under the default retention settings, invitation names and emails are deleted within 24 hours of stream end. Session records and abuse reports have separate retention rules, with details linked at `/guide/your-privacy`. |
+| After | Leave screen + terminal session screens | The same invitation-data retention notice and `/guide/your-privacy` link. Keep the deadline tied to stream end; leaving the room alone does not start the purge clock. |
 
 ### Host self-service rights (host-facing in v1)
 
-The host is the only meaningfully non-anonymous data subject, and the surface is
-tiny — so full GDPR self-service is offered in v1:
+Hosts can export their account data, amend their display name, and delete their
+account through these self-service controls:
 
 | Right | Mechanism | Scope |
 |---|---|---|

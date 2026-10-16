@@ -1,10 +1,10 @@
 # Troubleshooting
 
-The fixes for the problems hosts actually hit. Most of them are a wrong OBS setting or a guest's network — rarely anything deeper.
+Check OBS settings, device permissions, and network connections when a guest's media is missing or unstable.
 
-## My guest's camera isn't audible in the stream
+## My guest's audio is missing from the broadcast
 
-The single most common one. In the OBS Browser source properties, enable **"Control audio via OBS"** — without it the guest's mic plays on your machine but never reaches the broadcast. Then check the source's channel in the **Audio Mixer** isn't muted or pulled to zero, and that you haven't muted the guest in the [greenroom](the-greenroom). See [Wiring OBS sources](wiring-obs-sources).
+In the OBS Browser source properties, enable **"Control audio via OBS"**. Check the source's level, mute state, and output routing in the **Audio Mixer**. Check that the guest is unmuted in the [greenroom](the-greenroom). See [Wiring OBS sources](wiring-obs-sources).
 
 ## My OBS source is blank or shows a placeholder
 
@@ -20,11 +20,11 @@ Regenerating **rotates the token** — the old URL stops working immediately. Co
 
 ## A guest can't connect at all
 
-Almost always their network. Have them open the link in a **real browser** (not an in-app webview), allow camera/mic, and if a corporate or campus firewall is in the way, try a **phone hotspot** — that fixes most cases on the spot. The lasting fix is their IT allowing WebRTC, or a **TURN relay** (which you can enable if you run the instance, or request if someone else does). See [Connections & networking](connections-and-networking).
+Ask the guest to open the link in **desktop Chrome** and allow camera and microphone access. If their network blocks media, ask them to connect their computer to another network. You can also configure a **TURN relay** in Settings or ask your instance operator for one. See [Connections & networking](connections-and-networking).
 
 ## A guest's video is frozen, pixelated, or stuttering
 
-That's their connection or CPU under strain. GuestPass already steps their quality down and back up automatically. You can help by **lowering the program quality ceiling** in the greenroom, hitting **Bump quality now** once the strain passes, or asking the guest to go wired and close other apps. See [Performance & bandwidth](performance-and-bandwidth).
+The guest's connection or CPU may lack capacity. GuestPass lowers quality automatically and restores it when conditions improve. Lower the quality ceiling, or use **Bump quality now** to request recovery up to the configured limits. Ask the guest to use Ethernet and close other calls or downloads. See [Performance & bandwidth](performance-and-bandwidth).
 
 ## I can't go live — it says I'm already live
 

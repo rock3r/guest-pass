@@ -241,12 +241,17 @@ func inviteHTML(inv Invite) string {
 	// "Didn't expect this? report it" link (D-42): the abuse-report form for this invite, derived
 	// from the magic link (BASE_URL/p/{token}/report). The host never learns who reported them.
 	reportLink := html.EscapeString(inv.MagicLink + "/report")
+	privacyNotice := invitePrivacyNotice
+	if idx := strings.Index(inv.MagicLink, "/p/"); idx >= 0 {
+		privacyLink := html.EscapeString(inv.MagicLink[:idx] + "/guide/your-privacy")
+		privacyNotice = fmt.Sprintf(`<p>Under the default retention settings, your invitation name and email are deleted within 24 hours of the stream ending. Session records and abuse reports have separate retention rules. See <a href="%s">Your privacy &amp; data</a> for details.</p>`, privacyLink)
+	}
 	return fmt.Sprintf("<p>Hi %s,</p><p>You're invited to join the live stream %q. Open this link when the stream is about to start:</p><p><a href=\"%s\">%s</a></p>%s<p>Didn't expect this invite? <a href=\"%s\">Report it</a>.</p>",
-		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink), invitePrivacyNotice, reportLink)
+		html.EscapeString(name), html.EscapeString(inv.StreamTitle), html.EscapeString(inv.MagicLink), html.EscapeString(inv.MagicLink), privacyNotice, reportLink)
 }
 
 // invitePrivacyNotice is the GDPR "before" transparency notice carried on every invite email
 // (D-37 §8 / AC-6): the guest is told, before sharing anything, that their PII is short-lived. It
 // matches the wording on the guest pass page (pass.html) so the message is consistent across the
-// invite surfaces. Static copy — no interpolation, so it is injection-safe.
-const invitePrivacyNotice = `<p>Your name and email are used only for this stream and are deleted within 24 hours of it ending.</p>`
+// invite surfaces. Static fallback when MagicLink does not carry a /p/ prefix.
+const invitePrivacyNotice = `<p>Under the default retention settings, your invitation name and email are deleted within 24 hours of the stream ending. Session records and abuse reports have separate retention rules.</p>`

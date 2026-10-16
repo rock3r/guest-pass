@@ -12,11 +12,11 @@ GuestPass follows your operating system's light/dark preference by default. The 
 
 ## Your data
 
-GuestPass keeps the bare minimum: your Google identity, the streams you create, and the name + email of each guest you invite. No media is ever stored, and backstage chat is never recorded.
+GuestPass stores your Google identity, streams, guest invitations, and operational session records. It also stores abuse reports under separate retention rules. GuestPass does not record media or save backstage chat. Participants can still record or copy what they receive.
 
-- **Export** — download everything we hold about you (account, streams, invites) as a single JSON file.
-- **Delete account** — permanently removes your account and all its data. Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
-- **Guest data is auto-purged.** A guest's name and email are deleted **within 24 hours** of a stream ending — automatically, with no action from you.
+- **Export** — download your host account data (account profile, preferences, streams, and guest invitations) as a single JSON file. Operational session records and abuse reports are not included in this export.
+- **Delete account** — permanently removes your account and all host-scoped records, including streams, guest invitations, session and peer records, and abuse reports (leaving only anonymous aggregate counters). Two safeguards apply: you can't delete while a stream is **live** (end it first), and if you're the **only admin** on the instance you'll need to promote someone else first, so the instance isn't left without one.
+- **Invitation data is auto-purged.** Under the default retention settings, GuestPass deletes invitation names and emails **within 24 hours** of stream end. Session records and abuse reports have separate retention rules.
 
 ## Stream defaults
 
@@ -24,7 +24,7 @@ Set an IANA **timezone** once and GuestPass interprets new stream times in that 
 
 Add your YouTube and Twitch channel names and choose one as the default live-check link for new streams. GuestPass never posts to either service. A specific stream can still use a different channel or none.
 
-Choose a default program-quality ceiling (resolution, frame rate, and bitrate). It is copied to new streams; the host can still adjust an individual live stream in the [greenroom](the-greenroom). GuestPass keeps codec negotiation automatic — H.264 where available, with VP8 fallback — rather than exposing an unreliable forced-codec switch.
+Choose default limits for resolution, frame rate, and bitrate. GuestPass copies them to new streams. The host can adjust a live stream's limits in the [greenroom](the-greenroom). GuestPass negotiates H.264 where available, with VP8 fallback.
 
 ## Bring your own TURN
 

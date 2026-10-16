@@ -1,12 +1,12 @@
 # In the greenroom
 
-After you open your pass and allow your camera, you land in the **greenroom** — a private space where you and the host get ready before (and during) the show. It's just you, the host, and the other invited guests. **Your audience is not here.**
+After the device preview, choose **Enter the greenroom** to join the host and other invited participants. You can prepare together before and during the show.
 
-## Backstage, not on air
+## Broadcast status
 
-This is the most important thing to know: **being in the greenroom does not mean you're being broadcast.** The host decides when your camera goes to their stream. Until then you're backstage — free to fix your hair, sort out your lighting, and chat.
+Greenroom participants receive your camera and microphone once you enter. The host controls when your OBS source appears in the broadcast.
 
-Your tile shows an **on-air indicator** so you always know which you are. When in doubt, assume you might be live and behave accordingly — but the indicator is there to tell you.
+Your tile shows the state reported by OBS. **Awaiting OBS state** means GuestPass cannot confirm whether your source is on air. Check with the host or watch the broadcast.
 
 ## Soundcheck
 
@@ -14,22 +14,23 @@ Use the greenroom to get set before you're live:
 
 - Check you can see yourself and that your camera looks right.
 - Confirm the host (and other guests) can hear you, and you can hear them.
-- If your video looks soft or stutters, see [Troubleshooting](troubleshooting-guests) — usually it's Wi-Fi or another app hogging the connection.
+- If your video looks blurred or stutters, see [Troubleshooting](troubleshooting-guests). Other apps or an unstable network can reduce quality.
+- A zero microphone meter can mean silence, unavailable audio analysis, or no audio track. Ask another participant to confirm they can hear you.
 
 ## Backstage chat
 
-There's a text chat for quick coordination — "can you hear me?", "I'll go after Sam." A couple of things worth knowing:
+Use text chat to coordinate with the host and other participants.
 
-- **It's off the record.** Chat is never recorded — nothing is written to disk or kept as a transcript. When the room closes, it's gone.
-- **It's not a secure channel.** Unlike your camera and microphone — which travel **directly between browsers** and never pass through the GuestPass server — chat is **relayed through the server** so it can reach everyone. It's encrypted on the wire, but it is **not end-to-end encrypted**. Treat it as handy off-the-record coordination, not a place for secrets.
+- GuestPass does not save chat to disk or logs. Participants can still copy or record messages.
+- The server relays chat over encrypted connections. Chat has no end-to-end encryption. Do not send secrets in chat.
 
 ## Raise your hand
 
 If you want to jump in without talking over someone, use **raise hand** — it signals the host without interrupting the audio.
 
-## If your connection wobbles
+## If your connection drops
 
-GuestPass adjusts automatically: if your network or computer is struggling, your video quality steps down and recovers on its own once things settle. If you drop entirely, it tries to reconnect. You don't need to do anything — though closing other video calls and big downloads helps.
+GuestPass lowers video quality when your network or computer cannot keep up. It restores quality gradually when conditions improve, up to the stream's configured limits. The host can use **Bump quality now** to request immediate recovery within those limits. If you disconnect, GuestPass tries to reconnect. Close other video calls and large downloads to reduce load.
 
 ## Leaving
 
