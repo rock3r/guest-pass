@@ -83,10 +83,11 @@ What an admin should know about what the instance keeps:
 - **No media, no chat logs** — ever. Backstage chat is relayed live and never
   written down.
 - **Guest PII** (name + email on a pass) is **purged within 24 hours** of a
-  stream ending, automatically.
+  stream ending under the default retention settings, automatically.
 - Hosts can export or delete their own account data themselves (the GDPR
   controls in their Settings); an admin does not need to do this for them.
 
 Everything else the instance stores is operational metadata (accounts, streams,
-slot tokens, ephemeral session state). Keep this guide and `DEPLOYMENT.md` in
+slot tokens, session and peer rows, and abuse reports; session and peer rows are not
+deleted by the invitation-data purge). Keep this guide and `DEPLOYMENT.md` in
 sync with the code if these behaviors change.

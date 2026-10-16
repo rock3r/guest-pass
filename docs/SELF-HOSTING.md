@@ -65,6 +65,7 @@ worked compose example.
 ## Data retention
 
 Guest PII (a pass's name + email) is **purged within 24 hours** of a stream
-ending, automatically. No media is ever stored and backstage chat is never
-recorded. Everything else is operational metadata. The full retention contract is
-in [DEPLOYMENT.md](DEPLOYMENT.md).
+ending under the default retention settings (`PURGE_RETENTION`), automatically. No
+media is ever stored and backstage chat is never recorded. Everything else is
+operational metadata (session records and abuse reports have separate retention
+rules). The full retention contract is in [DEPLOYMENT.md](DEPLOYMENT.md).

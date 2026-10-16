@@ -29,4 +29,4 @@ A pass decides *who* a guest is; a [slot](wiring-obs-sources) decides *where the
 
 ## A note on limits
 
-To keep the free public instance healthy, brand-new accounts start with a modest cap on invites and concurrent streams that **grows as your account ages**. If you hit a limit, it'll lift on its own over time — or, on a self-hosted instance, the operator can tune it. See [Settings & your data](settings) for what we keep about your guests (short version: their name and email, deleted within 24 hours of a stream ending).
+To keep the free public instance healthy, brand-new accounts start with a modest cap on invites and concurrent streams that **grows as your account ages**. If you hit a limit, it'll lift on its own over time — or, on a self-hosted instance, the operator can tune it. See [Settings & your data](settings) for what we keep about your guests (under the default retention settings, invitation names and emails are deleted within 24 hours of a stream ending).

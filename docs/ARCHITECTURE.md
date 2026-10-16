@@ -1,9 +1,9 @@
 # GuestPass — Architecture
 
-> Free, open-source guest management for live streams. Guests click a magic link
+> Free, source-available guest management for live streams. Guests click a magic link
 > and appear in OBS as individual browser sources — no signup, no install. All
 > media is end-to-end WebRTC (P2P mesh) the server never sees; a deliberately thin
-> Go backend stores only identities, invites, and ephemeral session metadata.
+> Go backend stores only identities, invites, operational session records, and abuse reports.
 
 This is the committed, standalone architecture reference for the v1 build. It
 distills the approved system design and the implementation-architecture decisions
@@ -25,8 +25,8 @@ is LOCKED.
 ### Goals
 
 - **Guests do almost nothing.** Open emailed magic link → allow camera → join the
-  greenroom. Zero accounts, zero installs. Their PII is auto-deleted within 24h of
-  stream end (D-37).
+  greenroom. Zero accounts, zero installs. Their invitation PII is auto-deleted
+  within 24h of stream end under the default retention settings (D-37).
 - **Hosts get real OBS sources, wired once.** A stable browser-source URL per
   **slot** (cam slots 1–8, one host slot, one shared screenshare slot).
   The host pastes these into OBS one time and composites there every stream;
@@ -37,14 +37,14 @@ is LOCKED.
   *reflects* who OBS has on-program and whether the broadcast is live —
   read-only, never authoritative (D-24).
 - **Thin backend, media-blind by architecture.** Stores host Google identities,
-  streams, passes, and ephemeral session metadata; relays small JSON signaling
-  frames. It **never touches media** — no media server, ever (D-23).
+  streams, passes, operational session records, and abuse reports; relays small
+  JSON signaling frames. It **never touches media** — no media server, ever (D-23).
 - **Runs as a free public instance *and* self-hosts.** The official multi-tenant
   instance lives at **guest-pass.link** (free, no ads); the same binary self-hosts
   via docker-compose (D-35). License is **UEL v1.0** (D-31).
 - **Absolute-minimum data.** Host Google identity + guest name/email for invites +
-  transient session metadata. Never media, never chat, no third-party trackers.
-  Minimal *data*, not just minimal PII, is the backstop ethos (D-37).
+  operational session and report records. Never media, never chat, no third-party
+  trackers. Minimal *data*, not just minimal PII, is the backstop ethos (D-37).
 
 ### Non-goals (v1)
 
