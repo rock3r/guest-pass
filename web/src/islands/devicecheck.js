@@ -1255,7 +1255,8 @@ function DeviceCheck() {
         {/* GDPR purge notice (D-37 §8 / AC-6), the same reassurance the terminal screens carry. */}
         <p class="dc-left-privacy" data-privacy="purge">
           Your invitation name and email will be deleted within 24 hours of the stream ending under
-          the default retention settings. Session records and abuse reports have separate retention rules.
+          the default retention settings. Session records and abuse reports have separate retention
+          rules. See <a href="/guide/your-privacy">Your privacy &amp; data</a> for details.
         </p>
       </div>
     );
@@ -1278,7 +1279,8 @@ function DeviceCheck() {
             pass page. */}
         <p class="gs-terminal-privacy" data-privacy="purge">
           Your invitation name and email will be deleted within 24 hours of the stream ending under
-          the default retention settings. Session records and abuse reports have separate retention rules.
+          the default retention settings. Session records and abuse reports have separate retention
+          rules. See <a href="/guide/your-privacy">Your privacy &amp; data</a> for details.
         </p>
       </div>
     );

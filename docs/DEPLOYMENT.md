@@ -425,8 +425,8 @@ The app must show these notice semantics before and after participation:
 
 | When | Surface | Notice |
 |---|---|---|
-| Before | Invite email + pass/device-check page | Under the default retention settings, invitation names and emails are deleted within 24 hours of stream end. Session records and abuse reports have separate retention rules. Refer guests to the instance privacy policy. |
-| After | Leave screen + terminal session screens | The same invitation-data retention notice. Keep the deadline tied to stream end; leaving the room alone does not start the purge clock. |
+| Before | Invite email + pass/device-check page | Under the default retention settings, invitation names and emails are deleted within 24 hours of stream end. Session records and abuse reports have separate retention rules, with details linked at `/guide/your-privacy`. |
+| After | Leave screen + terminal session screens | The same invitation-data retention notice and `/guide/your-privacy` link. Keep the deadline tied to stream end; leaving the room alone does not start the purge clock. |
 
 ### Host self-service rights (host-facing in v1)
 

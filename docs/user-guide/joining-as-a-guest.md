@@ -22,7 +22,7 @@ The host controls the broadcast in OBS. Your tile reflects the state reported by
 
 Your camera and microphone travel encrypted between browsers. A configured TURN relay can forward the encrypted packets. The GuestPass server does not receive or record your media. GuestPass relays chat without saving it, but participants can record or copy what they receive.
 
-GuestPass deletes your invitation name and email **within 24 hours** of the stream ending under the default retention settings. Session records and abuse reports have separate retention rules. See [Your privacy](your-privacy) and your instance's privacy policy.
+GuestPass deletes your invitation name and email **within 24 hours** of the stream ending under the default retention settings. Session records and abuse reports have separate retention rules. See [Your privacy](your-privacy) for details.
 
 ## Trouble?
 

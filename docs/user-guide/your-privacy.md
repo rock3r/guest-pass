@@ -8,7 +8,7 @@ You can join GuestPass with an invitation. You do not need a guest account, pass
 - GuestPass stores **session and peer records**, such as connection times. The invitation-data purge does not delete those records.
 - If you report an invite, GuestPass stores your email and report message for the instance admins to review. It clears those fields after the configured review period, which defaults to 30 days. The report record keeps its host and stream associations, category, and time. Admins can still see the associated stream title.
 
-Check your instance's privacy policy for its retention settings and how to contact its operator about retained records.
+Contact the operator of this GuestPass instance if you have questions about its retention settings or retained records.
 
 ## What's never kept
 
@@ -20,7 +20,7 @@ Participants can record media or copy chat on their own devices. A host can reco
 
 ## Invitation data deletion
 
-Under the default retention settings, GuestPass deletes your invitation name and email **within 24 hours** of the stream ending. Session records and abuse reports have separate retention rules. Self-hosted instances can change retention settings; check the instance's privacy policy.
+Under the default retention settings, GuestPass deletes your invitation name and email **within 24 hours** of the stream ending. Session records and abuse reports have separate retention rules. Self-hosted instances can configure different retention windows.
 
 Hosts have account export and deletion controls. Guests have no account or self-service deletion page.
 

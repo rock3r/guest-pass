@@ -6,7 +6,7 @@
 {{else}}
 <h1>Report this invite</h1>
 <p>Report unwanted invites, spam, or abuse to this instance's administrators. GuestPass does not show your report to the host.
-The form requires a reason and a message. Admins can see your email and message during the review period, which defaults to 30 days.</p>
+The form requires a reason and a message. Admins can see your email and message during the review period (30 days by default), after which those fields are cleared while the report category, timestamp, and host and stream association remain visible to admins. See <a href="/guide/your-privacy">Your privacy &amp; data</a> for details.</p>
 {{if .Data.Error}}<p class="report-error" role="alert">Please choose a reason and add a short message — both are required.</p>{{end}}
 <form method="post" action="/p/{{.Data.Token}}/report" class="report-form">
 <label class="field"><span class="label">Reason</span>

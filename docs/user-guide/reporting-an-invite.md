@@ -22,4 +22,4 @@ You don't need an account to report, and you don't have to enter the room to do 
 - GuestPass does not show your report or identity to the host. Instance admins can see your email and message. The retention job clears those fields after the configured review period, which defaults to 30 days. The report record keeps its host and stream associations, category, and time. Admins can still see the associated stream title.
 - Admins look at the pattern of reports against a host and can **suspend** an abusive host, cutting off their ability to send more invites.
 
-See your instance's privacy policy for its report retention settings.
+See [Your privacy](your-privacy) for the full retention rules.
